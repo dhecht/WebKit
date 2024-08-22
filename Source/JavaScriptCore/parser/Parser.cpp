@@ -28,6 +28,7 @@
 #include "DebuggerParseData.h"
 #include "JSCJSValueInlines.h"
 #include "VM.h"
+#include "wtf/DataLog.h"
 #include <utility>
 #include <wtf/Scope.h>
 #include <wtf/SetForScope.h>
@@ -3223,12 +3224,17 @@ parseMethod:
             if (consume(EQUAL)) {
                 size_t usedVariablesSize = currentScope()->currentUsedVariablesSize();
                 currentScope()->pushUsedVariableSet();
+                dataLogF("XXX ParseClass settings class field init %u\n", m_token.m_location.line);
+                dataLogLn("XXX classname: ", *info.className, " ", parentClass);
+                dataLogLn("XXX ident: ", *ident);
                 SetForScope overrideParsingClassFieldInitializer(m_parserState.isParsingClassFieldInitializer, true);
                 classScope->setExpectedSuperBinding(SuperBinding::Needed);
                 initializer = parseAssignmentExpression(context);
                 classScope->setExpectedSuperBinding(SuperBinding::NotNeeded);
                 failIfFalse(initializer, "Cannot parse initializer for class field");
                 classScope->markLastUsedVariablesSetAsCaptured(usedVariablesSize);
+                dataLogF("XXX ParseClass unsettings class field init %u\n", m_token.m_location.line);
+
             }
             failIfFalse(autoSemiColon(), "Expected a ';' following a class field");
             auto inferName = initializer ? InferName::Allowed : InferName::Disallowed;
@@ -5092,6 +5098,14 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parsePrimaryExpre
         return context.createThisExpr(location);
     }
     case AWAIT:
+    if (m_parserState.isParsingClassFieldInitializer) {
+        dataLog("XXX parsePrimaryExpression AWAIT ", m_token.m_location.line);
+        if (m_parserState.lastFunctionName)
+            dataLog(" lastFunc=[", *m_parserState.lastFunctionName, "]");
+        if (m_parserState.lastIdentifier)
+            dataLog(" lastIdent=[", *m_parserState.lastIdentifier, "]");
+        dataLog("\n");
+    }
         semanticFailIfTrue(currentScope()->isStaticBlock(), "The 'await' keyword is disallowed in the IdentifierReference position within static block");
         if (m_parserState.functionParsePhase == FunctionParsePhase::Parameters)
             semanticFailIfFalse(m_parserState.allowAwait, "Cannot use 'await' within a parameter default expression");
@@ -5592,9 +5606,19 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseUnaryExpress
     bool hasPrefixUpdateOp = false;
     unsigned lastOperator = 0;
 
-    if (UNLIKELY(match(AWAIT) && !m_parserState.isParsingClassFieldInitializer && (currentFunctionScope()->isAsyncFunctionBoundary() || isModuleParseMode(sourceParseMode())))) {
-        semanticFailIfTrue(currentScope()->isStaticBlock(), "Cannot use 'await' within static block");
-        return parseAwaitExpression(context);
+    if (UNLIKELY(match(AWAIT))) {
+        if (m_parserState.isParsingClassFieldInitializer) {
+            dataLog("XXX parseUnaryExpression AWAIT token ", m_token.m_location.line);
+            if (m_parserState.lastFunctionName)
+                dataLog(" lastFunc=[", *m_parserState.lastFunctionName, "]");
+            if (m_parserState.lastIdentifier)
+                dataLog(" lastIdent=[", *m_parserState.lastIdentifier, "]");
+            dataLog("\n");
+        }
+        if (!m_parserState.isParsingClassFieldInitializer && (currentFunctionScope()->isAsyncFunctionBoundary() || isModuleParseMode(sourceParseMode()))) {
+            semanticFailIfTrue(currentScope()->isStaticBlock(), "Cannot use 'await' within static block");
+            return parseAwaitExpression(context);
+        }
     }
 
     JSTokenLocation location(tokenLocation());
