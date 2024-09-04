@@ -267,6 +267,9 @@ static void* scavenger_thread_main(void* arg)
         if (did_overflow)
             max_epoch = PAS_EPOCH_MIN;
 
+#if 1
+        max_epoch = 0;
+#endif
         if (verbose)
             pas_log("epoch = %llu, delta = %llu, max_epoch = %llu\n", (unsigned long long)epoch, (unsigned long long)delta, (unsigned long long)max_epoch);
 
