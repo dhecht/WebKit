@@ -69,7 +69,11 @@ uint64_t pas_scavenger_max_epoch_delta = 10ll * 1000ll * 1000ll;
 #if PAS_OS(DARWIN) && PAS_X86_64
 double pas_scavenger_period_in_milliseconds = 125.;
 #else
+#if 0
 double pas_scavenger_period_in_milliseconds = 100.;
+#else
+double pas_scavenger_period_in_milliseconds = 1.;
+#endif
 #endif
 #if 0
 uint64_t pas_scavenger_max_epoch_delta = 300ll * 1000ll * 1000ll;
