@@ -49,7 +49,11 @@
 #include <unistd.h>
 
 static const bool verbose = false;
+#if 0
 static bool is_shut_down_enabled = true;
+#else
+static bool is_shut_down_enabled = false;
+#endif
 
 bool pas_scavenger_is_enabled = true;
 bool pas_scavenger_eligibility_notification_has_been_deferred = false;
