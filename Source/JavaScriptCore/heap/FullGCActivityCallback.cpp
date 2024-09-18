@@ -29,6 +29,8 @@
 
 #include "VM.h"
 
+#define SKIP_PAGED_OUT_CHECK 0
+
 namespace JSC {
 
 FullGCActivityCallback::FullGCActivityCallback(JSC::Heap& heap, Synchronousness synchronousness)
@@ -43,6 +45,7 @@ void FullGCActivityCallback::doCollection(VM& vm)
     JSC::Heap& heap = vm.heap;
     setDidGCRecently(false);
 
+#if !SKIP_PAGED_OUT_CHECK
 #if !PLATFORM(IOS_FAMILY) || PLATFORM(MACCATALYST)
     MonotonicTime startTime = MonotonicTime::now();
     if (MemoryPressureHandler::singleton().isUnderMemoryPressure() && heap.isPagedOut()) {
@@ -50,6 +53,7 @@ void FullGCActivityCallback::doCollection(VM& vm)
         heap.increaseLastFullGCLength(MonotonicTime::now() - startTime);
         return;
     }
+#endif
 #endif
 
     heap.collect(m_synchronousness, CollectionScope::Full);

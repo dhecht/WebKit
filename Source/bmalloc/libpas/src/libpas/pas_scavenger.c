@@ -48,8 +48,21 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#define DEFERRED_RECLAIM_SCAVENGE_EAGERLY 0
+#define DEFERRED_RECLAIM_SCAVENGE_EAGERLY_AFTER_CHECK 0
+#define DEFERRED_RECLAIM_STOP_TLC_EVERY_TICK 0
+#define DEFERRED_RECLAIM_MAX_EPOCH_0 0
+#define DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP 0
+#define DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP_NORMAL_DECOMMIT 0
+#define DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP_NORMAL_STOP 0
+#define DEFERRED_RECLAIM_SCAVENGER_ALWAYS_TICKS 0
+
 static const bool verbose = false;
+#if DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP
+static bool is_shut_down_enabled = false;
+#else
 static bool is_shut_down_enabled = true;
+#endif
 
 bool pas_scavenger_is_enabled = true;
 bool pas_scavenger_eligibility_notification_has_been_deferred = false;
@@ -72,7 +85,11 @@ uint64_t pas_scavenger_max_epoch_delta = 300ll * 1000ll * 1000ll;
 
 static uint32_t pas_scavenger_tick_count = 0;
 /* Run thread-local-cache decommit once a N. It should be power of two. */
+#if DEFERRED_RECLAIM_STOP_TLC_EVERY_TICK
+#define PAS_THREAD_LOCAL_CACHE_DECOMMIT_PERIOD_COUNT 1
+#else
 #define PAS_THREAD_LOCAL_CACHE_DECOMMIT_PERIOD_COUNT 128 /* Roughly speaking, it runs once per 13 seconds. */
+#endif
 
 #if PAS_OS(DARWIN)
 static _Atomic qos_class_t pas_scavenger_requested_qos_class = QOS_CLASS_USER_INITIATED;
@@ -157,6 +174,50 @@ static bool handle_expendable_memory(pas_expendable_memory_scavenge_kind kind)
     return should_go_again;
 }
 
+#if DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP_NORMAL_DECOMMIT
+#if !DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP
+#error "DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP_NORMAL_DECOMMIT requires DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP"
+#endif
+static inline bool should_do_decommit(uint64_t epoch)
+{
+    static uint64_t decommit_deadline;
+
+    if (epoch >= decommit_deadline) {
+        decommit_deadline = epoch + 100ll * 1000ll * 1000ll;
+        return true;
+    }
+    return false;
+}
+#else
+static inline bool should_do_decommit(uint64_t epoch)
+{
+    PAS_UNUSED_PARAM(epoch);
+    return true;
+}
+#endif
+
+#if DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP_NORMAL_STOP
+#if !DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP
+#error "DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP_NORMAL_DECOMMIT requires DEFERRED_RECLAIM_SCAVENGER_NEVER_SLEEP"
+#endif
+static inline bool should_do_stop(uint64_t epoch)
+{
+    static uint64_t stop_deadline;
+
+    if (epoch >= stop_deadline) {
+        stop_deadline = epoch + 100ll * 1000ll * 1000ll;
+        return true;
+    }
+    return false;
+}
+#else
+static inline bool should_do_stop(uint64_t epoch)
+{
+    PAS_UNUSED_PARAM(epoch);
+    return true;
+}
+#endif
+
 static void* scavenger_thread_main(void* arg)
 {
     pas_scavenger_data* data;
@@ -199,6 +260,7 @@ static void* scavenger_thread_main(void* arg)
         pas_scavenger_activity_callback completion_callback;
         pas_thread_local_cache_decommit_action thread_local_cache_decommit_action;
         bool should_go_again;
+        bool do_decommit, do_stop;
         uint64_t epoch;
         uint64_t delta;
         uint64_t max_epoch;
@@ -214,7 +276,20 @@ static void* scavenger_thread_main(void* arg)
             pthread_set_qos_class_self_np(configured_qos_class, 0);
         }
 #endif
-        ++pas_scavenger_tick_count;
+        epoch = pas_get_epoch();
+        do_decommit = should_do_decommit(epoch);
+        do_stop = should_do_stop(epoch);
+
+        if (do_decommit)
+            ++pas_scavenger_tick_count;
+
+        thread_local_cache_decommit_action = pas_thread_local_cache_decommit_no_action;
+        if ((pas_scavenger_tick_count % PAS_THREAD_LOCAL_CACHE_DECOMMIT_PERIOD_COUNT) == 0) {
+            if (verbose)
+                printf("Attempt to decommit unused TLC\n");
+            // Decommit in this case, otherwise no decommit.
+            thread_local_cache_decommit_action = pas_thread_local_cache_decommit_if_possible_action;
+        }
 
         should_go_again = false;
         
@@ -229,25 +304,25 @@ static void* scavenger_thread_main(void* arg)
         pas_local_allocator_refill_efficiency_lock_unlock();
 #endif /* PAS_LOCAL_ALLOCATOR_MEASURE_REFILL_EFFICIENCY */
         
+        if (do_stop) {
         should_go_again |=
             pas_baseline_allocator_table_for_all(pas_allocator_scavenge_request_stop_action);
-
+        }
+        if (do_stop) {
         should_go_again |=
             pas_utility_heap_for_all_allocators(pas_allocator_scavenge_request_stop_action,
                                                 pas_lock_is_not_held);
-        
-        thread_local_cache_decommit_action = pas_thread_local_cache_decommit_no_action;
-        if ((pas_scavenger_tick_count % PAS_THREAD_LOCAL_CACHE_DECOMMIT_PERIOD_COUNT) == 0) {
-            if (verbose)
-                printf("Attempt to decommit unused TLC\n");
-            thread_local_cache_decommit_action = pas_thread_local_cache_decommit_if_possible_action;
         }
+        if (do_stop) {
         should_go_again |=
             pas_thread_local_cache_for_all(pas_allocator_scavenge_request_stop_action,
                                            pas_deallocator_scavenge_flush_log_if_clean_action,
                                            thread_local_cache_decommit_action);
-
+        }
+        // Decommits but probably gets recommitted.
+        if (do_decommit) {
         should_go_again |= handle_expendable_memory(pas_expendable_memory_scavenge_periodic);
+        }
 
         /* For the purposes of performance tuning, as well as some of the scavenger tests, the epoch
            is time in nanoseconds.
@@ -256,17 +331,24 @@ static void* scavenger_thread_main(void* arg)
            
            This code is engineered to kind of limp along when the epoch is a counter, but it doesn't
            actually achieve its full purpose unless the epoch really is time. */
-        epoch = pas_get_epoch();
         delta = pas_scavenger_max_epoch_delta;
 
         did_overflow = __builtin_sub_overflow(epoch, (uint64_t)delta, &max_epoch);
         if (did_overflow)
             max_epoch = PAS_EPOCH_MIN;
 
+#if DEFERRED_RECLAIM_MAX_EPOCH_0
+        max_epoch = 0;
+#endif
         if (verbose)
             pas_log("epoch = %llu, delta = %llu, max_epoch = %llu\n", (unsigned long long)epoch, (unsigned long long)delta, (unsigned long long)max_epoch);
 
-        scavenge_result = pas_physical_page_sharing_pool_scavenge(max_epoch);
+        if (do_decommit)
+            scavenge_result = pas_physical_page_sharing_pool_scavenge(max_epoch);
+        else {
+            scavenge_result.take_result = pas_page_sharing_pool_take_none_available;
+            scavenge_result.total_bytes = 0;
+        }
 
         switch (scavenge_result.take_result) {
         case pas_page_sharing_pool_take_none_available:
@@ -327,15 +409,17 @@ static void* scavenger_thread_main(void* arg)
             if (pas_scavenger_current_state == pas_scavenger_state_polling) {
                 if (verbose)
                     printf("Will consider deep sleep.\n");
-                
+#if !DEFERRED_RECLAIM_SCAVENGER_ALWAYS_TICKS                
                 /* do one more round of polling but this time indicating that it's the last
                    chance. */
                 pas_scavenger_current_state = pas_scavenger_state_deep_sleep;
+#endif                
             } else {
                 if (verbose)
                     printf("Considering deep sleep.\n");
                 
                 PAS_ASSERT(pas_scavenger_current_state == pas_scavenger_state_deep_sleep);
+                PAS_ASSERT(!DEFERRED_RECLAIM_SCAVENGER_ALWAYS_TICKS);
                 
                 absolute_timeout_in_milliseconds_for_deep_pre_sleep =
                     time_in_milliseconds + pas_scavenger_deep_sleep_timeout_in_milliseconds;
@@ -372,6 +456,7 @@ static void* scavenger_thread_main(void* arg)
         
         if (should_shut_down) {
             pas_scavenger_activity_callback shut_down_callback;
+            PAS_ASSERT(!DEFERRED_RECLAIM_SCAVENGER_ALWAYS_TICKS);
 
             shut_down_callback = pas_scavenger_will_shut_down_callback;
             if (shut_down_callback)
@@ -389,9 +474,10 @@ static void* scavenger_thread_main(void* arg)
 
 bool pas_scavenger_did_create_eligible(void)
 {
+#if !DEFERRED_RECLAIM_SCAVENGE_EAGERLY_AFTER_CHECK
     if (pas_scavenger_current_state == pas_scavenger_state_polling)
         return false;
-    
+#endif    
     if (!pas_scavenger_is_enabled)
         return false;
     
@@ -407,21 +493,28 @@ bool pas_scavenger_did_create_eligible(void)
 void pas_scavenger_notify_eligibility_if_needed(void)
 {
     pas_scavenger_data* data;
-    
+
+#if DEFERRED_RECLAIM_SCAVENGE_EAGERLY
+    pas_scavenger_decommit_free_memory();
+#endif    
     if (!pas_scavenger_is_enabled)
         return;
     
     if (!pas_scavenger_eligibility_notification_has_been_deferred)
         return;
-    
+   
     if (pas_scavenger_should_suspend_count)
         return;
 
     if (!pas_dyld_is_libsystem_initialized())
         return;
-    
+
+#if DEFERRED_RECLAIM_SCAVENGE_EAGERLY_AFTER_CHECK
+    pas_scavenger_decommit_free_memory();
+#endif
+ 
     pas_fence();
-    
+
     pas_scavenger_eligibility_notification_has_been_deferred = false;
     
     pas_fence();
@@ -532,6 +625,7 @@ void pas_scavenger_fake_decommit_expendable_memory(void)
     handle_expendable_memory(pas_expendable_memory_scavenge_forced_fake);
 }
 
+// XXX
 size_t pas_scavenger_decommit_free_memory(void)
 {
     pas_page_sharing_pool_scavenge_result result;

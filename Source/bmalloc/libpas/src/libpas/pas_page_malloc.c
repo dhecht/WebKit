@@ -44,6 +44,8 @@
 #include <mach/vm_statistics.h>
 #endif
 
+#define NO_MADVISE 0
+
 size_t pas_page_malloc_num_allocated_bytes;
 size_t pas_page_malloc_cached_alignment;
 size_t pas_page_malloc_cached_alignment_shift;
@@ -259,8 +261,11 @@ static void decommit_impl(void* ptr, size_t size,
 #if PAS_OS(DARWIN)
     if (pas_page_malloc_decommit_zero_fill && mmap_capability)
         pas_page_malloc_zero_fill(ptr, size);
-    else
+    else {
+#if !NO_MADVISE    
         PAS_SYSCALL(madvise(ptr, size, MADV_FREE_REUSABLE));
+#endif
+    }    
 #elif PAS_OS(FREEBSD)
     PAS_SYSCALL(madvise(ptr, size, MADV_FREE));
 #elif PAS_OS(LINUX)
