@@ -35,6 +35,7 @@
 #include <wtf/CommaPrinter.h>
 
 #if PLATFORM(COCOA)
+#include <wtf/darwin/OSLogPrintStream.h> // FIXME: rdar://136782494
 #include <wtf/cocoa/CrashReporter.h>
 #endif
 
@@ -82,6 +83,8 @@ MarkedBlock::Handle::~Handle()
         if (!(balance % 10))
             dataLog("MarkedBlock Balance: ", balance, "\n");
     }
+    RELEASE_ASSERT(&m_block->handle() == this);
+    RELEASE_ASSERT(m_block->heap() == &heap);
     m_directory->removeBlock(this, BlockDirectory::WillDeleteBlock::Yes);
     m_block->~MarkedBlock();
     m_alignedMemoryAllocator->freeAlignedMemory(m_block);
@@ -108,7 +111,12 @@ MarkedBlock::Header::Header(VM& vm, Handle& handle)
 {
 }
 
-MarkedBlock::Header::~Header() = default;
+MarkedBlock::Header::~Header()
+{
+    memset(this, 0xba, sizeof(*this));
+    char* handle = bitwise_cast<char*>(this) + OBJECT_OFFSETOF(Header, m_handle);
+    *bitwise_cast<uintptr_t*>(handle) = MarkedBlock::Handle::invalid;
+}
 
 void MarkedBlock::Handle::unsweepWithNoNewlyAllocated()
 {
@@ -211,7 +219,6 @@ void MarkedBlock::Handle::resumeAllocating(FreeList& freeList)
 }
 
 #if ENABLE(MARKEDBLOCK_TEST_DUMP_INFO)
-
 inline void MarkedBlock::setupTestForDumpInfoAndCrash()
 {
     static std::atomic<uint64_t> count = 0;
@@ -227,16 +234,11 @@ inline void MarkedBlock::setupTestForDumpInfoAndCrash()
             dataLogLn("Corrupting MarkedBlock::Header::m_vm");
             *const_cast<VM**>(&header().m_vm) = bitwise_cast<VM*>(0xdeadbeefdeadbeef);
             break;
-        case 3: // Test contiguous and total zero byte counts: start and end zeroed.
+        case 3: // Test contiguous and total zero byte counts.
             dataLogLn("Zeroing start and end of MarkedBlock");
             char* blockMem = bitwise_cast<char*>(this);
             memset(blockMem, 0, blockSize / 4);
             memset(blockMem + 3 * blockSize / 4, 0, blockSize / 4);
-            break;
-        case 4: // Test contiguous and total zero byte counts: entire block zeroed.
-            dataLogLn("Zeroing MarkedBlock");
-            char* blockMem = bitwise_cast<char*>(this);
-            memset(blockMem, 0, blockSize);
             break;
         }
     }
@@ -259,8 +261,9 @@ void MarkedBlock::aboutToMarkSlow(HeapVersion markingVersion, HeapCell* cell)
         return;
 
     MarkedBlock::Handle* handle = header().handlePointerForNullCheck();
+
     if (UNLIKELY(!handle))
-        dumpInfoAndCrashForInvalidHandleV2(locker, cell);
+        dumpInfoAndCrashForInvalidHandleV2(locker, cell, nullptr);
 
     BlockDirectory* directory = handle->directory();
     bool isAllocated;
@@ -553,8 +556,8 @@ void MarkedBlock::Handle::sweep(FreeList* freeList)
     specializedSweep<false, IsEmpty, SweepOnly, BlockHasNoDestructors, DontScribble, HasNewlyAllocated, MarksStale>(freeList, emptyMode, sweepMode, BlockHasNoDestructors, scribbleMode, newlyAllocatedMode, marksMode, [] (VM&, JSCell*) { });
 }
 
-NO_RETURN_DUE_TO_CRASH NEVER_INLINE void MarkedBlock::dumpInfoAndCrashForInvalidHandleV2(AbstractLocker&, HeapCell* heapCell)
-{
+NO_RETURN_DUE_TO_CRASH NEVER_INLINE void MarkedBlock::dumpInfoAndCrashForInvalidHandleV2(AbstractLocker&, HeapCell* heapCell, VM* expectedVM)
+{   
     VM* blockVM = header().m_vm;
     VM* actualVM = nullptr;
     bool isBlockVMValid = false;
@@ -638,6 +641,13 @@ NO_RETURN_DUE_TO_CRASH NEVER_INLINE void MarkedBlock::dumpInfoAndCrashForInvalid
     updateCrashLogMsg(__LINE__);
 
     uint64_t bitfield = 0xab00ab01ab020000;
+
+    if (expectedVM && actualVM && actualVM != expectedVM)
+        bitfield |= 1 << 10;
+    if (expectedVM && blockVM != expectedVM)
+        bitfield |= 1 << 9;
+    if (!header().handlePointerForNullCheck())
+        bitfield |= 1 << 8;
     if (!isBlockVMValid)
         bitfield |= 1 << 7;
     if (!isBlockInSet)

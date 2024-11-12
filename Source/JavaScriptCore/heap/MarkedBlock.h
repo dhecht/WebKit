@@ -117,7 +117,8 @@ public:
         friend class MarkedBlock;
         friend struct VerifyMarked;
     public:
-            
+        static constexpr uintptr_t invalid = 1;
+
         ~Handle();
             
         MarkedBlock& block();
@@ -412,6 +413,8 @@ public:
     void setVerifierMemo(void*);
     template<typename T> T verifierMemo() const;
 
+    inline void checkConsistency(Heap*, JSCell*, bool knownBad);
+
 private:
     MarkedBlock(VM&, Handle&);
     ~MarkedBlock();
@@ -426,7 +429,7 @@ private:
     inline bool marksConveyLivenessDuringMarking(HeapVersion myMarkingVersion, HeapVersion markingVersion);
 
     // FIXME: rdar://139998916
-    NO_RETURN_DUE_TO_CRASH NEVER_INLINE void dumpInfoAndCrashForInvalidHandleV2(AbstractLocker&, HeapCell*);
+    JS_EXPORT_PRIVATE NO_RETURN_DUE_TO_CRASH NEVER_INLINE void dumpInfoAndCrashForInvalidHandleV2(AbstractLocker&, HeapCell*, VM*);
     inline void setupTestForDumpInfoAndCrash();
 };
 
