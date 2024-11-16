@@ -310,6 +310,7 @@ inline bool isSubtypeIndex(TypeIndex sub, TypeIndex parent)
 
 inline bool isSubtype(Type sub, Type parent)
 {
+    dataLogLn("XXX isSubtype sub: ", sub, " parent: ", parent);
     // Before the typed funcref proposal there is no non-trivial subtyping.
     if (sub.isNullable() && !parent.isNullable())
         return false;

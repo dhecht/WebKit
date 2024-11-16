@@ -994,7 +994,7 @@ auto SectionParser::parseRecursionGroup(uint32_t position, RefPtr<TypeDefinition
     // store projections for each recursion group index in the type section.
     WASM_PARSER_FAIL_IF(!m_info->typeSignatures.tryGrowCapacityBy(typeCount), "can't allocate enough memory for recursion group's "_s, typeCount, " type "_s, typeCount > 1 ? "indices"_s : "index"_s);
     WASM_PARSER_FAIL_IF(!m_info->rtts.tryGrowCapacityBy(typeCount), "can't allocate enough memory for recursion group's "_s, typeCount, " RTT"_s, typeCount > 1 ? "s"_s : ""_s);
-    if (typeCount == 1 && !signatures[0]->hasRecursiveReference()) {
+    if (false && typeCount == 1 && !signatures[0]->hasRecursiveReference()) {
         TypeInformation::registerCanonicalRTTForType(signatures[0]->index());
         m_info->rtts.append(TypeInformation::getCanonicalRTT(signatures[0]->index()));
         if (signatures[0]->is<Subtype>())
@@ -1006,6 +1006,7 @@ auto SectionParser::parseRecursionGroup(uint32_t position, RefPtr<TypeDefinition
         for (uint32_t i = 0; i < typeCount; ++i) {
             RefPtr<TypeDefinition> projection = TypeInformation::typeDefinitionForProjection(recursionGroup->index(), i);
             WASM_PARSER_FAIL_IF(!projection, "can't allocate enough memory for recursion group's "_s, i, "th projection"_s);
+            projection->unroll();
             projections.append(projection.releaseNonNull());
         }
         for (uint32_t i = 0; i < typeCount; ++i) {

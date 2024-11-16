@@ -7,6 +7,10 @@ export function compile(wat) {
 }
 
 export function instantiate(wat, imports = {}) {
+    print(wat);
     const module = compile(wat);
-    return new WebAssembly.Instance(module, imports);
+    print("Compiled\n");
+    let r = new WebAssembly.Instance(module, imports);
+    print("Got instance");
+    return r;
 }

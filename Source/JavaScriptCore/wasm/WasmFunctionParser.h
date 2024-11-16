@@ -1774,8 +1774,9 @@ auto FunctionParser<Context>::unify(const ControlType& controlData) -> PartialRe
     auto blockSignature = controlData.signature();
     const FunctionSignature* signature = blockSignature.m_signature;
     WASM_VALIDATOR_FAIL_IF(signature->returnCount() != m_expressionStack.size(), " block with type: "_s, signature->toString(), " returns: "_s, signature->returnCount(), " but stack has: "_s, m_expressionStack.size(), " values"_s);
+    dataLogLn("XXX unify");
     for (unsigned i = 0; i < signature->returnCount(); ++i)
-        WASM_VALIDATOR_FAIL_IF(!isSubtype(m_expressionStack[i].type(), signature->returnType(i)), "control flow returns with unexpected type. "_s, m_expressionStack[i].type(), " is not a "_s, signature->returnType(i));
+        WASM_VALIDATOR_FAIL_IF(!isSubtype(m_expressionStack[i].type(), signature->returnType(i)), "XXX control flow returns with unexpected type. "_s, m_expressionStack[i].type(), " is not a "_s, signature->returnType(i));
 
     return { };
 }

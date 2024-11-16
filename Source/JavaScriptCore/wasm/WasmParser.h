@@ -392,7 +392,8 @@ ALWAYS_INLINE bool ParserBase::parseValueType(const ModuleInformation& info, Typ
                 typeIndex = def->index(); // Owned by TypeInformation placeholder projections singleton.
             } else {
                 ASSERT(static_cast<uint32_t>(heapType) < info.typeCount());
-                typeIndex = TypeInformation::get(info.typeSignatures[heapType].get());
+                auto& expanded = info.typeSignatures[heapType]->expand();
+                typeIndex = TypeInformation::get(expanded);
             }
         }
     }
