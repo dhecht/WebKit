@@ -1,0 +1,47 @@
+commit d4328b4811c9432511f622e6a1431d334bb1ba03
+Author: Dan Hecht <d_hecht@apple.com>
+Date:   Fri Nov 22 12:55:13 2024 -0800
+
+    Sampling profiler patch
+
+diff --git a/resources/benchmark-runner.mjs b/resources/benchmark-runner.mjs
+index 57e4ae0..466edca 100644
+--- a/resources/benchmark-runner.mjs
++++ b/resources/benchmark-runner.mjs
+@@ -462,6 +462,8 @@ export class BenchmarkRunner {
+         const syncEndLabel = `${suite.name}.${test.name}-sync-end`;
+         const asyncStartLabel = `${suite.name}.${test.name}-async-start`;
+         const asyncEndLabel = `${suite.name}.${test.name}-async-end`;
++        const syncName = `${suite.name}.${test.name}-sync`;
++        const asyncName = `${suite.name}.${test.name}-async`;
+ 
+         let syncTime;
+         let asyncStartTime;
+@@ -476,21 +478,27 @@ export class BenchmarkRunner {
+                 performance.mark("warmup-end");
+             }
+             performance.mark(startLabel);
++            __enableSamplingProfiler();
+             const syncStartTime = performance.now();
+             test.run(this._page);
+             const syncEndTime = performance.now();
++            __disableSamplingProfiler();
++            __dumpAndClearSamplingProfilerSamples(syncName);
+             performance.mark(syncEndLabel);
+ 
+             syncTime = syncEndTime - syncStartTime;
+ 
+             performance.mark(asyncStartLabel);
+             asyncStartTime = performance.now();
++            __enableSamplingProfiler();
+         };
+         const measureAsync = () => {
+             // Some browsers don't immediately update the layout for paint.
+             // Force the layout here to ensure we're measuring the layout time.
+             const height = this._frame.contentDocument.body.getBoundingClientRect().height;
+             const asyncEndTime = performance.now();
++            __disableSamplingProfiler();
++            __dumpAndClearSamplingProfilerSamples(asyncName);
+             asyncTime = asyncEndTime - asyncStartTime;
+             this._frame.contentWindow._unusedHeightValue = height; // Prevent dead code elimination.
+             performance.mark(asyncEndLabel);

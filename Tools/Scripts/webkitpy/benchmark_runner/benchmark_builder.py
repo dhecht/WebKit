@@ -50,6 +50,7 @@ class BenchmarkBuilder(object):
             patch_file_key = "{driver}_benchmark_patch".format(driver=self._driver)
             if patch_file_key in self._plan:
                 self._apply_patch(self._plan[patch_file_key])
+            self._apply_patch("data/patches/signposts/Speedometer3-sampling-prof.patch")
             if self._enable_signposts:
                 if 'signpost_patch' in self._plan:
                     self._apply_patch(self._plan['signpost_patch'])
