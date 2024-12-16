@@ -30,6 +30,7 @@
 
 #include "AirAllocateRegistersAndStackAndGenerateCode.h"
 #include "AirAllocateRegistersAndStackByLinearScan.h"
+#include "AirAllocateRegistersAndStackByGreedy.h"
 #include "AirAllocateRegistersByGraphColoring.h"
 #include "AirAllocateStackByGraphColoring.h"
 #include "AirCode.h"
@@ -112,7 +113,19 @@ void prepareForGeneration(Code& code)
     eliminateDeadCode(code);
 
     size_t numTmps = code.numTmps(Bank::GP) + code.numTmps(Bank::FP);
-    if (!code.usesSIMD() && (code.optLevel() == 1 || numTmps > Options::maximumTmpsForGraphColoring())) {
+    
+    if (Options::airForceGreedyAllocator()) {
+        allocateRegistersAndStackByGreedy(code);
+
+        if (Options::logAirRegisterPressure()) {
+            dataLog("Register pressure after register allocation:\n");
+            logRegisterPressure(code);
+        }
+
+        // We may still need to do post-allocation lowering. Doing it after both register and
+        // stack allocation is less optimal, but it works fine.
+        lowerAfterRegAlloc(code);
+    } else if ((!code.usesSIMD() && (code.optLevel() == 1 || numTmps > Options::maximumTmpsForGraphColoring())) || true) {
         // When we're compiling quickly, we do register and stack allocation in one linear scan
         // phase. It's fast because it computes liveness only once.
         allocateRegistersAndStackByLinearScan(code);
