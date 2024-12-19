@@ -41,6 +41,7 @@
 #include "AirStackAllocation.h"
 #include "AirTmpMap.h"
 #include <wtf/ListDump.h>
+#include <wtf/PriorityQueue.h>
 #include <wtf/Range.h>
 
 using WTF::Range;
@@ -60,10 +61,45 @@ const unsigned secondPhase = 1;
 
 typedef Range<size_t> Interval;
 
+struct LiveRange {
+    Deque<Interval> ranges;
+
+    void dump(PrintStream& out) const 
+    {
+        WTF::CommaPrinter comma;
+        out.print("{ ");
+        for (auto& range : ranges)
+            out.print(comma, range);
+        out.print(" }");
+    }
+};
+
+struct QueueElement {
+    QueueElement(LiveRange& liveRange, size_t priority)
+        : liveRange(&liveRange)
+        , priority(priority)
+    {
+    }
+
+    void dump(PrintStream& out) const
+    {
+        out.print("<", priority, ", ", *liveRange, ">");
+    }
+
+    LiveRange* liveRange;
+    size_t priority;
+};
+
+static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
+{
+    // FIXME: fix priority == priority case
+    return left.priority > right.priority;
+}
+
 struct TmpData {
     void dump(PrintStream& out) const
     {
-        out.print("{interval = ", interval, ", spilled = ", pointerDump(spilled), ", assigned = ", assigned, ", isUnspillable = ", isUnspillable, ", possibleRegs = ", possibleRegs, ", didBuildPossibleRegs = ", didBuildPossibleRegs, "}");
+        out.print("{liveRange = ", liveRange, ", spilled = ", pointerDump(spilled), ", assigned = ", assigned, ", isUnspillable = ", isUnspillable, ", possibleRegs = ", possibleRegs, ", didBuildPossibleRegs = ", didBuildPossibleRegs, "}");
     }
 
     void validate()
@@ -72,6 +108,7 @@ struct TmpData {
     }
 
     Interval interval;
+    LiveRange liveRange;
     StackSlot* spilled { nullptr };
     ScalarRegisterSet possibleRegs;
     Reg assigned;
@@ -118,6 +155,7 @@ public:
             spillEverything();
             emitSpillCode();
         }
+        allocateRegisters();
         for (;;) {
             prepareIntervalsForScanForRegisters();
             m_didSpill = false;
@@ -171,7 +209,8 @@ private:
 
     size_t indexOfTail(BasicBlock* block)
     {
-        return indexOfHead(block) + block->size() * 2;
+        // FIXME: added -1, isn't it a bug with linear scan?
+        return indexOfHead(block) + block->size() * 2 - 1;
     }
 
     static Interval earlyInterval(size_t indexOfEarly)
@@ -222,84 +261,138 @@ private:
         return Interval();
     }
 
+    void buildClobbers(UnifiedTmpLiveness& liveness, BasicBlock* block)
+    {
+        size_t indexOfHead = this->indexOfHead(block);
+        RegLiveness::LocalCalcForUnifiedTmpLiveness localCalc(liveness, block);
+
+        auto record = [&] (unsigned instIndex) {
+            // FIXME: This could get the register sets from somewhere else, like the
+            // liveness constraints. Except we want those constraints to separate the late
+            // actions of one instruction from the early actions of the next.
+            // https://bugs.webkit.org/show_bug.cgi?id=170850
+            const auto& regs = localCalc.live();
+            if (Inst* prev = block->get(instIndex - 1)) {
+                RegisterSetBuilder prevRegs = regs;
+                prev->forEach<Reg>(
+                    [&] (Reg& reg, Arg::Role role, Bank, Width width) {
+                        if (Arg::isLateDef(role))
+                            prevRegs.add(reg, width);
+                    });
+                if (prev->kind.opcode == Patch)
+                    prevRegs.merge(prev->extraClobberedRegs());
+                prevRegs.filter(m_allAllowedRegisters.toRegisterSet().includeWholeRegisterWidth());
+                if (!prevRegs.isEmpty())
+                    m_clobbers.append(Clobber(indexOfHead + instIndex * 2 - 1, prevRegs.buildAndValidate()));
+            }
+            if (Inst* next = block->get(instIndex)) {
+                RegisterSetBuilder nextRegs = regs;
+                next->forEach<Reg>(
+                    [&] (Reg& reg, Arg::Role role, Bank, Width width) {
+                        if (Arg::isEarlyDef(role))
+                            nextRegs.add(reg, width);
+                    });
+                if (next->kind.opcode == Patch)
+                    nextRegs.merge(next->extraEarlyClobberedRegs().buildAndValidate());
+                if (!nextRegs.isEmpty())
+                    m_clobbers.append(Clobber(indexOfHead + instIndex * 2, nextRegs.buildAndValidate()));
+            }
+        };
+
+        record(block->size());
+        for (unsigned instIndex = block->size(); instIndex--;) {
+            localCalc.execute(instIndex);
+            record(instIndex);
+        }
+    }
+
     void buildIntervals()
     {
-        CompilerTimingScope timingScope("Air"_s, "LinearScan::buildIntervals"_s);
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildIntervals"_s);
         UnifiedTmpLiveness liveness(m_code);
 
-        for (BasicBlock* block : m_code) {
+        TmpMap<Interval> openIntervals(m_code);
+
+        auto closeInterval = [&](Tmp &tmp) {
+            ASSERT(openIntervals[tmp] != Interval());
+            m_map[tmp].liveRange.ranges.prepend(openIntervals[tmp]);
+            openIntervals[tmp] = Interval();
+        };
+
+        BasicBlock* blockAfter = nullptr;
+        for (size_t blockIndex = m_code.size(); blockIndex--;) {
+            BasicBlock* block = m_code[blockIndex];
+            if (!block)
+                continue;
+
             size_t indexOfHead = this->indexOfHead(block);
             size_t indexOfTail = this->indexOfTail(block);
             if (verbose()) {
                 dataLog("At block ", pointerDump(block), "\n");
                 dataLog("  indexOfHead = ", indexOfHead, "\n");
-                dataLog("  idnexOfTail = ", indexOfTail, "\n");
+                dataLog("  indexOfTail = ", indexOfTail, "\n");
+            }
+
+            // At tail, for every dead tmp, close interval
+            for (Tmp tmp : liveness.liveAtTail(block)) {
+                dataLogLn("liveAtTail: ", tmp);
+                if (!tmp.isReg())
+                    // FIXME: could just set interval start
+                    openIntervals[tmp] |= Interval(indexOfTail);
+            }
+            if (blockAfter) {
+                // If it was live at the head of the next block but no longer live, close
+                // the current interval.
+                for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
+                    dataLogLn("blockAfter: ", pointerDump(blockAfter), " liveAtHead:", tmp);
+                    if (!tmp.isReg() && !openIntervals[tmp].contains(indexOfTail)) {
+                        dataLogLn("closing interval: ", openIntervals[tmp], " tmp: ", tmp);
+                        ASSERT(openIntervals[tmp].begin() == this->indexOfHead(blockAfter));
+                        closeInterval(tmp);
+                    }
+                }
+            }
+            
+            for (unsigned instIndex = block->size(); instIndex--;) {
+                Inst& inst = block->at(instIndex);
+                size_t indexOfEarly = indexOfHead + instIndex * 2;
+
+                inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
+                    if (tmp.isReg())
+                        return;
+                    auto& interval = openIntervals[tmp];
+                    if (Arg::isLateUse(role))
+                        interval |= lateInterval(indexOfEarly);
+                    if (Arg::isLateDef(role)) {
+                        interval |= lateInterval(indexOfEarly);
+                        closeInterval(tmp);
+                    }
+                    if (Arg::isEarlyUse(role))
+                        interval |= earlyInterval(indexOfEarly);
+                    if (Arg::isEarlyDef(role)) {
+                        interval |= lateInterval(indexOfEarly);
+                        closeInterval(tmp);
+                    }
+                });
             }
             for (Tmp tmp : liveness.liveAtHead(block)) {
                 if (!tmp.isReg())
-                    m_map[tmp].interval |= Interval(indexOfHead);
-            }
-            for (Tmp tmp : liveness.liveAtTail(block)) {
-                if (!tmp.isReg())
-                    m_map[tmp].interval |= Interval(indexOfTail);
+                    openIntervals[tmp] |= Interval(indexOfHead);
             }
 
-            for (unsigned instIndex = 0; instIndex < block->size(); ++instIndex) {
-                Inst& inst = block->at(instIndex);
-                size_t indexOfEarly = indexOfHead + instIndex * 2;
-                // FIXME: We can get this information from the liveness constraints. Except of
-                // course we want to separate the earlies of one instruction from the lates of
-                // the next.
-                // https://bugs.webkit.org/show_bug.cgi?id=170850
-                inst.forEachTmp(
-                    [&] (Tmp& tmp, Arg::Role role, Bank, Width) {
-                        if (tmp.isReg())
-                            return;
-                        m_map[tmp].interval |= interval(indexOfEarly, Arg::timing(role));
-                    });
-            }
-
-            RegLiveness::LocalCalcForUnifiedTmpLiveness localCalc(liveness, block);
-
-            auto record = [&] (unsigned instIndex) {
-                // FIXME: This could get the register sets from somewhere else, like the
-                // liveness constraints. Except we want those constraints to separate the late
-                // actions of one instruction from the early actions of the next.
-                // https://bugs.webkit.org/show_bug.cgi?id=170850
-                const auto& regs = localCalc.live();
-                if (Inst* prev = block->get(instIndex - 1)) {
-                    RegisterSetBuilder prevRegs = regs;
-                    prev->forEach<Reg>(
-                        [&] (Reg& reg, Arg::Role role, Bank, Width width) {
-                            if (Arg::isLateDef(role))
-                                prevRegs.add(reg, width);
-                        });
-                    if (prev->kind.opcode == Patch)
-                        prevRegs.merge(prev->extraClobberedRegs());
-                    prevRegs.filter(m_allAllowedRegisters.toRegisterSet().includeWholeRegisterWidth());
-                    if (!prevRegs.isEmpty())
-                        m_clobbers.append(Clobber(indexOfHead + instIndex * 2 - 1, prevRegs.buildAndValidate()));
+            buildClobbers(liveness, block);
+            blockAfter = block;
+        }
+        if (blockAfter) {
+            for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
+                if (!tmp.isReg()) {
+                    ASSERT(openIntervals[tmp].begin() == this->indexOfHead(blockAfter));
+                    closeInterval(tmp);
                 }
-                if (Inst* next = block->get(instIndex)) {
-                    RegisterSetBuilder nextRegs = regs;
-                    next->forEach<Reg>(
-                        [&] (Reg& reg, Arg::Role role, Bank, Width width) {
-                            if (Arg::isEarlyDef(role))
-                                nextRegs.add(reg, width);
-                        });
-                    if (next->kind.opcode == Patch)
-                        nextRegs.merge(next->extraEarlyClobberedRegs().buildAndValidate());
-                    if (!nextRegs.isEmpty())
-                        m_clobbers.append(Clobber(indexOfHead + instIndex * 2, nextRegs.buildAndValidate()));
-                }
-            };
-
-            record(block->size());
-            for (unsigned instIndex = block->size(); instIndex--;) {
-                localCalc.execute(instIndex);
-                record(instIndex);
             }
         }
+        // ASSERT every interval is closed.
+
 
         std::sort(
             m_clobbers.begin(), m_clobbers.end(),
@@ -507,6 +600,24 @@ private:
         }
     }
 
+    void allocateRegisters()
+    {
+        m_code.forEachTmp(
+            [&] (Tmp tmp) {
+                size_t priority = 0;
+                LiveRange& liveRange = m_map[tmp].liveRange;
+                for (auto& interval: liveRange.ranges)
+                    priority += interval.distance();
+                m_queue.enqueue({ liveRange, priority });
+        });
+
+        while (!m_queue.isEmpty()) {
+            auto entry = m_queue.dequeue();
+            if (verbose())
+                dataLogLn("Pop: ", entry);
+        }
+    }
+
     void addToActive(Tmp tmp)
     {
         if (m_map[tmp].isUnspillable) {
@@ -671,6 +782,7 @@ private:
     ScalarRegisterSet m_allAllowedRegisters;
     IndexMap<BasicBlock*, size_t> m_startIndex;
     TmpMap<TmpData> m_map;
+    PriorityQueue<QueueElement, isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     Vector<Clobber> m_clobbers; // After we allocate this, we happily point pointers into it.
     Vector<Tmp> m_tmps;
