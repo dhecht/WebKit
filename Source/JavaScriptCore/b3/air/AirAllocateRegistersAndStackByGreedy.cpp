@@ -75,18 +75,18 @@ struct LiveRange {
 };
 
 struct QueueElement {
-    QueueElement(LiveRange& liveRange, size_t priority)
-        : liveRange(&liveRange)
+    QueueElement(Tmp tmp, size_t priority)
+        : tmp(tmp)
         , priority(priority)
     {
     }
 
     void dump(PrintStream& out) const
     {
-        out.print("<", priority, ", ", *liveRange, ">");
+        out.print("<", priority, ", ", tmp, ">");
     }
 
-    LiveRange* liveRange;
+    Tmp tmp;
     size_t priority;
 };
 
@@ -608,7 +608,7 @@ private:
                 LiveRange& liveRange = m_map[tmp].liveRange;
                 for (auto& interval: liveRange.ranges)
                     priority += interval.distance();
-                m_queue.enqueue({ liveRange, priority });
+                m_queue.enqueue({ tmp, priority });
         });
 
         while (!m_queue.isEmpty()) {
