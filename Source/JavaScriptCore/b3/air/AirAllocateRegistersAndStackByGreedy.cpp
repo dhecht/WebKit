@@ -62,14 +62,14 @@ const unsigned secondPhase = 1;
 typedef Range<size_t> Interval;
 
 struct LiveRange {
-    Deque<Interval> ranges;
+    Deque<Interval> intervals;
 
     void dump(PrintStream& out) const 
     {
         WTF::CommaPrinter comma;
         out.print("{ ");
-        for (auto& range : ranges)
-            out.print(comma, range);
+        for (auto& interval : intervals)
+            out.print(comma, interval);
         out.print(" }");
     }
 };
@@ -85,16 +85,47 @@ struct QueueElement {
     {
         out.print("<", priority, ", ", tmp, ">");
     }
+ 
+    static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
+    {
+        // FIXME: fix priority == priority case
+        return left.priority > right.priority;
+    }
 
     Tmp tmp;
     size_t priority;
 };
 
-static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
-{
-    // FIXME: fix priority == priority case
-    return left.priority > right.priority;
-}
+
+
+class RegisterRanges {
+
+public:
+    struct AllocatedInterval {
+        Tmp tmp;
+        Interval interval;
+
+        bool operator<(const AllocatedInterval& other) const
+        {
+            return interval.begin() < other.interval.begin();
+        }
+    };
+
+    struct Iterable {
+
+    };
+
+    void add(Tmp tmp, LiveRange& range)
+    {
+        for (auto& interval : range.intervals)
+            m_allocations.insert({ tmp, interval });
+    }
+
+    Iterable conflicts(LiveRange& range);
+
+private:
+    StdSet<AllocatedInterval> m_allocations;
+};
 
 struct TmpData {
     void dump(PrintStream& out) const
@@ -315,7 +346,7 @@ private:
 
         auto closeInterval = [&](Tmp &tmp) {
             ASSERT(openIntervals[tmp] != Interval());
-            m_map[tmp].liveRange.ranges.prepend(openIntervals[tmp]);
+            m_map[tmp].liveRange.intervals.prepend(openIntervals[tmp]);
             openIntervals[tmp] = Interval();
         };
 
@@ -606,16 +637,33 @@ private:
             [&] (Tmp tmp) {
                 size_t priority = 0;
                 LiveRange& liveRange = m_map[tmp].liveRange;
-                for (auto& interval: liveRange.ranges)
+                for (auto& interval: liveRange.intervals)
                     priority += interval.distance();
                 m_queue.enqueue({ tmp, priority });
         });
 
         while (!m_queue.isEmpty()) {
             auto entry = m_queue.dequeue();
+            Tmp tmp = entry.tmp;
+            TmpData& tmpData = m_map[tmp];
             if (verbose())
-                dataLogLn("Pop: ", entry);
+                dataLogLn("Pop: ", entry, " tmp: ", tmpData);
+
+            if (tryAllocateTmp(tmp))
+                continue;
+#if 0
+            if (tmpData.phase == GreedyState::New) {
+                tmpData.phase = GreedyState::Split;
+                m_queue.enqueue(entry);
+            }
+#endif
         }
+    }
+
+    bool tryAllocateTmp(Tmp tmp)
+    {
+        UNUSED_PARAM(tmp);
+        return false;
     }
 
     void addToActive(Tmp tmp)
@@ -782,7 +830,7 @@ private:
     ScalarRegisterSet m_allAllowedRegisters;
     IndexMap<BasicBlock*, size_t> m_startIndex;
     TmpMap<TmpData> m_map;
-    PriorityQueue<QueueElement, isHigherPriority> m_queue;
+    PriorityQueue<QueueElement, QueueElement::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     Vector<Clobber> m_clobbers; // After we allocate this, we happily point pointers into it.
     Vector<Tmp> m_tmps;
