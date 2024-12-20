@@ -100,6 +100,8 @@ struct QueueElement {
 
 class RegisterRanges {
 public:
+    RegisterRanges() = default;
+
     struct AllocatedInterval {
         Tmp tmp;
         Interval interval;
@@ -108,12 +110,22 @@ public:
         {
             return interval.end() < other.interval.end();
         }
+
+        void dump(PrintStream& out) const
+        {
+            out.print("{ ", tmp, " ", interval, " }");
+        }
     };
 
     struct Iterable {
 
     };
     typedef StdSet<AllocatedInterval> AllocatedIntervalSet;
+
+    void addClobber(size_t pos)
+    {
+        m_allocations.insert({ Tmp(), { pos, pos + 1 }} );
+    }
 
     void add(Tmp tmp, LiveRange& range)
     {
@@ -141,6 +153,17 @@ public:
     }
 
     Iterable conflicts(LiveRange& range);
+
+    void dump(PrintStream& out) const
+    {
+        CommaPrinter comma;
+        out.print("[");
+        for (auto& alloc : m_allocations) {
+            out.print(comma);
+            out.print(alloc);
+        }
+        out.print("]");
+    }
 
 private:
     AllocatedIntervalSet::iterator findFirstIntervalEndingAfter(size_t pos)
@@ -196,6 +219,7 @@ public:
         : m_code(code)
         , m_startIndex(code.size())
         , m_map(code)
+        , m_regRanges(Reg::maxIndex() + 1)
         , m_insertionSets(code.size())
     {
     }
@@ -655,6 +679,15 @@ private:
         }
     }
 
+    void dumpRegRanges()
+    {
+        forEachBank(
+            [&] (Bank bank) {
+                for (Reg r : m_allowedRegistersInPriorityOrder[bank])
+                    dataLogLn("regRanges[", r, "]: ", m_regRanges[r]);
+        });
+    }
+
     void allocateRegisters()
     {
         m_code.forEachTmp(
@@ -665,6 +698,13 @@ private:
                     priority += interval.distance();
                 m_queue.enqueue({ tmp, priority });
         });
+
+        // FIXME: could do this more directly rather than via m_clobbers.
+        for (Clobber& clobber : m_clobbers) {
+            for (Reg reg : clobber.regs)
+                m_regRanges[reg].addClobber(clobber.index);
+        }
+        if (verbose()) dumpRegRanges();
 
         while (!m_queue.isEmpty()) {
             auto entry = m_queue.dequeue();
@@ -854,6 +894,7 @@ private:
     ScalarRegisterSet m_allAllowedRegisters;
     IndexMap<BasicBlock*, size_t> m_startIndex;
     TmpMap<TmpData> m_map;
+    IndexMap<Reg, RegisterRanges> m_regRanges;
     PriorityQueue<QueueElement, QueueElement::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     Vector<Clobber> m_clobbers; // After we allocate this, we happily point pointers into it.
