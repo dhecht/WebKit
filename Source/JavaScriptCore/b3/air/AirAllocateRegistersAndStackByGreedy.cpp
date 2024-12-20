@@ -99,7 +99,6 @@ struct QueueElement {
 
 
 class RegisterRanges {
-
 public:
     struct AllocatedInterval {
         Tmp tmp;
@@ -107,13 +106,14 @@ public:
 
         bool operator<(const AllocatedInterval& other) const
         {
-            return interval.begin() < other.interval.begin();
+            return interval.end() < other.interval.end();
         }
     };
 
     struct Iterable {
 
     };
+    typedef StdSet<AllocatedInterval> AllocatedIntervalSet;
 
     void add(Tmp tmp, LiveRange& range)
     {
@@ -121,10 +121,34 @@ public:
             m_allocations.insert({ tmp, interval });
     }
 
+    bool hasConflict(LiveRange& range)
+    {
+        for (auto& interval: range.intervals) {
+            auto iter = findFirstIntervalEndingAfter(interval.begin());
+            // Since all allocated intervals have an end before this LiveRange interval begins (and intervals
+            // are sorted), there must not exist any allocated intervals that overlap a later LiveRange interval.
+            if (iter == m_allocations.end())
+                return false;
+            // iter references the first allocated interval with an end greater than
+            // the LiveRange interval's begin. Therefore, iff the allocated interval's begin
+            // is less than the LiveRange interval's end, these intervals overlap. Furthermore, we know
+            // that no later (in sorted order) allocated interval can overlap this LiveRange interval since all 
+            // later allocated intervals' begin is greater than or equal to the LiveRange's end.
+            if (iter->interval.begin() < interval.end())
+                return true;
+        }
+        return false;
+    }
+
     Iterable conflicts(LiveRange& range);
 
 private:
-    StdSet<AllocatedInterval> m_allocations;
+    AllocatedIntervalSet::iterator findFirstIntervalEndingAfter(size_t pos)
+    {
+        return m_allocations.upper_bound({ Tmp(), { pos, pos }});
+    }
+
+     AllocatedIntervalSet m_allocations;
 };
 
 struct TmpData {
