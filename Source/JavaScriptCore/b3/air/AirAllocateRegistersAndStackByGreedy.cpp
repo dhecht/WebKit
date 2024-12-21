@@ -108,7 +108,7 @@ public:
 
         bool operator<(const AllocatedInterval& other) const
         {
-            return interval.end() < other.interval.end();
+            return this->interval.end() < other.interval.end();
         }
 
         void dump(PrintStream& out) const
@@ -129,8 +129,11 @@ public:
 
     void add(Tmp tmp, LiveRange& range)
     {
-        for (auto& interval : range.intervals)
+        ASSERT(!hasConflict(range)); // Can't add overlapping LiveRanges
+        for (auto& interval : range.intervals) {
+            ASSERT(interval != Interval()); // Strict ordering requires no empty intervals.
             m_allocations.insert({ tmp, interval });
+        }
     }
 
     bool hasConflict(LiveRange& range)
@@ -146,8 +149,10 @@ public:
             // is less than the LiveRange interval's end, these intervals overlap. Furthermore, we know
             // that no later (in sorted order) allocated interval can overlap this LiveRange interval since all 
             // later allocated intervals' begin is greater than or equal to the LiveRange's end.
-            if (iter->interval.begin() < interval.end())
+            if (iter->interval.begin() < interval.end()) {
+                dataLogLn("XXX conflict ", interval, " with reg range ", iter->interval);
                 return true;
+            }
         }
         return false;
     }
@@ -168,10 +173,16 @@ public:
 private:
     AllocatedIntervalSet::iterator findFirstIntervalEndingAfter(size_t pos)
     {
-        return m_allocations.upper_bound({ Tmp(), { pos, pos }});
+        Interval query(pos);
+        // pos can be 0, yet we can't express a non-empty interval with end==0, so instead of looking
+        // for the first interval ending after pos we find the first interval ending at or after pos+1.
+        ASSERT(query.end() == pos + 1);
+        auto iter = m_allocations.lower_bound({ Tmp(), query });
+        ASSERT(iter == m_allocations.end() || iter->interval.end() > pos);
+        return iter;
     }
 
-     AllocatedIntervalSet m_allocations;
+    AllocatedIntervalSet m_allocations;
 };
 
 struct TmpData {
@@ -234,7 +245,10 @@ public:
             spillEverything();
             emitSpillCode();
         }
-        allocateRegisters();
+        forEachBank(
+            [&] (Bank bank) {
+                allocateRegisters(bank);
+            });
         for (;;) {
             prepareIntervalsForScanForRegisters();
             m_didSpill = false;
@@ -679,19 +693,18 @@ private:
         }
     }
 
-    void dumpRegRanges()
+    void dumpRegRanges(Bank bank)
     {
-        forEachBank(
-            [&] (Bank bank) {
-                for (Reg r : m_allowedRegistersInPriorityOrder[bank])
-                    dataLogLn("regRanges[", r, "]: ", m_regRanges[r]);
-        });
+        for (Reg r : m_allowedRegistersInPriorityOrder[bank])
+            dataLogLn("   regRanges[", r, "]: ", m_regRanges[r]);
     }
 
-    void allocateRegisters()
+    void allocateRegisters(Bank bank)
     {
         m_code.forEachTmp(
             [&] (Tmp tmp) {
+                if (tmp.bank() != bank)
+                    return;
                 size_t priority = 0;
                 LiveRange& liveRange = m_map[tmp].liveRange;
                 for (auto& interval: liveRange.intervals)
@@ -704,14 +717,15 @@ private:
             for (Reg reg : clobber.regs)
                 m_regRanges[reg].addClobber(clobber.index);
         }
-        if (verbose()) dumpRegRanges();
 
         while (!m_queue.isEmpty()) {
             auto entry = m_queue.dequeue();
             Tmp tmp = entry.tmp;
             TmpData& tmpData = m_map[tmp];
-            if (verbose())
+            if (verbose()) {
                 dataLogLn("Pop: ", entry, " tmp: ", tmpData);
+                if (verbose()) dumpRegRanges(bank);
+            }
 
             if (tryAllocateTmp(tmp))
                 continue;
@@ -726,7 +740,16 @@ private:
 
     bool tryAllocateTmp(Tmp tmp)
     {
-        UNUSED_PARAM(tmp);
+        LiveRange& liveRange = m_map[tmp].liveRange;
+        for (Reg r : m_allowedRegistersInPriorityOrder[tmp.bank()]) {
+            auto& regRanges = m_regRanges[r];
+            if (!regRanges.hasConflict(liveRange)) {
+                regRanges.add(tmp, liveRange);
+                if (verbose())
+                    dataLogLn("Assigned ", tmp, " => ", r);
+                return true;
+            }
+        }
         return false;
     }
 
