@@ -183,26 +183,14 @@ public:
         }
     }
 
-    // FIXME: rewrite using forEachConflict
     bool hasConflict(LiveRange& range)
     {
-        for (auto& interval: range.intervals()) {
-            auto iter = findFirstIntervalEndingAfter(interval.begin());
-            // Since all allocated intervals have an end before this LiveRange interval begins (and intervals
-            // are sorted), there must not exist any allocated intervals that overlap a later LiveRange interval.
-            if (iter == m_allocations.end())
-                return false;
-            // iter references the first allocated interval with an end greater than
-            // the LiveRange interval's begin. Therefore, iff the allocated interval's begin
-            // is less than the LiveRange interval's end, these intervals overlap. Furthermore, we know
-            // that no later (in sorted order) allocated interval can overlap this LiveRange interval since all 
-            // later allocated intervals' begin is greater than or equal to the LiveRange's end.
-            if (iter->interval.begin() < interval.end()) {
-                dataLogLn("XXX conflict ", interval, " with reg range ", iter->interval);
-                return true;
-            }
-        }
-        return false;
+        bool hasConflict = false;
+        forEachConflict(range, [&] (Tmp) -> IterationStatus {
+            hasConflict = true;
+            return IterationStatus::Done;
+        });
+        return hasConflict;
     }
 
     template<typename Func>
