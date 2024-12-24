@@ -40,6 +40,7 @@
 #include "AirRegLiveness.h"
 #include "AirStackAllocation.h"
 #include "AirTmpMap.h"
+#include <wtf/IterationStatus.h>
 #include <wtf/ListDump.h>
 #include <wtf/PriorityQueue.h>
 #include <wtf/Range.h>
@@ -61,42 +62,83 @@ const unsigned secondPhase = 1;
 
 typedef Range<size_t> Interval;
 
-struct LiveRange {
-    Deque<Interval> intervals;
+class LiveRange {
+public:
+    LiveRange() = default;
+
+    void prepend(Interval&& interval)
+    {
+        m_intervals.prepend(WTFMove(interval));
+        m_size += m_intervals.first().distance();
+    }
+
+    const Deque<Interval>& intervals() const
+    {
+        return m_intervals;
+    }
+
+    size_t size()
+    {
+        return m_size;
+    }
 
     void dump(PrintStream& out) const 
     {
         WTF::CommaPrinter comma;
         out.print("{ ");
-        for (auto& interval : intervals)
+        for (auto& interval : intervals())
             out.print(comma, interval);
         out.print(" }");
     }
+
+private:
+    Deque<Interval> m_intervals;
+    size_t m_size { 0 };
+};
+
+enum class Stage {
+    New,
+    Split,
+    Spill,
+    Unspillable,
+    Allocated,
+    Spilled,
 };
 
 struct QueueElement {
-    QueueElement(Tmp tmp, size_t priority)
+    QueueElement(Tmp tmp, Stage stage, size_t rangeSize)
         : tmp(tmp)
-        , priority(priority)
+        , stage(stage)
+        , rangeSize(rangeSize)
     {
     }
 
     void dump(PrintStream& out) const
     {
-        out.print("<", priority, ", ", tmp, ">");
+        out.print("<", tmp, ", ", stage, ", ", rangeSize, ">");
     }
  
     static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
     {
-        // FIXME: fix priority == priority case
-        return left.priority > right.priority;
+        // FIXME: could prepack so this can be a single comparison.
+        if (left.stage < right.stage)
+            return true;
+        if (left.stage == right.stage) {
+            if (left.rangeSize > right.rangeSize)
+                return true;
+            if (left.rangeSize == right.rangeSize)
+                return left.tmp.tmpIndex() < right.tmp.tmpIndex();
+            return false;
+        }
+        return false;
     }
 
     Tmp tmp;
-    size_t priority;
+    Stage stage;
+    size_t rangeSize;
 };
 
-
+static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
 
 class RegisterRanges {
 public:
@@ -117,9 +159,6 @@ public:
         }
     };
 
-    struct Iterable {
-
-    };
     typedef StdSet<AllocatedInterval> AllocatedIntervalSet;
 
     void addClobber(size_t pos)
@@ -130,15 +169,24 @@ public:
     void add(Tmp tmp, LiveRange& range)
     {
         ASSERT(!hasConflict(range)); // Can't add overlapping LiveRanges
-        for (auto& interval : range.intervals) {
+        for (auto& interval : range.intervals()) {
             ASSERT(interval != Interval()); // Strict ordering requires no empty intervals.
             m_allocations.insert({ tmp, interval });
         }
     }
 
+    void evict(Tmp tmp, LiveRange& range)
+    {
+        for (auto& interval : range.intervals()) {
+            auto r = m_allocations.erase({ tmp, interval });
+            ASSERT_UNUSED(r == 1, r);
+        }
+    }
+
+    // FIXME: rewrite using forEachConflict
     bool hasConflict(LiveRange& range)
     {
-        for (auto& interval: range.intervals) {
+        for (auto& interval: range.intervals()) {
             auto iter = findFirstIntervalEndingAfter(interval.begin());
             // Since all allocated intervals have an end before this LiveRange interval begins (and intervals
             // are sorted), there must not exist any allocated intervals that overlap a later LiveRange interval.
@@ -157,7 +205,31 @@ public:
         return false;
     }
 
-    Iterable conflicts(LiveRange& range);
+    template<typename Func>
+    void forEachConflict(LiveRange& range, const Func& func)
+    {
+        for (auto& interval: range.intervals()) {
+            Tmp conflict;
+            {
+                auto iter = findFirstIntervalEndingAfter(interval.begin());
+                // Since all allocated intervals have an end before this LiveRange interval begins (and intervals
+                // are sorted), there must not exist any allocated intervals that overlap a later LiveRange interval.
+                if (iter == m_allocations.end())
+                    return;
+                // iter references the first allocated interval with an end greater than
+                // the LiveRange interval's begin. Therefore, iff the allocated interval's begin
+                // is less than the LiveRange interval's end, these intervals overlap. Furthermore, we know
+                // that no later (in sorted order) allocated interval can overlap this LiveRange interval since all 
+                // later allocated intervals' begin is greater than or equal to the LiveRange's end.
+                if (interval.end() <= iter->interval.begin())
+                    continue;
+                dataLogLn("XXX conflict ", interval, " with reg range ", iter->interval);
+                conflict = iter->tmp;
+            } // func is allowed to invalidate the iterator.
+            if (func(conflict) == IterationStatus::Done)
+                return;
+        }
+    }
 
     void dump(PrintStream& out) const
     {
@@ -198,6 +270,8 @@ struct TmpData {
 
     Interval interval;
     LiveRange liveRange;
+    Stage stage { Stage::New };
+    float spillCost { 1.0f }; // FIXME
     StackSlot* spilled { nullptr };
     ScalarRegisterSet possibleRegs;
     Reg assigned;
@@ -245,10 +319,9 @@ public:
             spillEverything();
             emitSpillCode();
         }
-        forEachBank(
-            [&] (Bank bank) {
-                allocateRegisters(bank);
-            });
+        allocateRegisters<GP>();
+        allocateRegisters<FP>();
+#if 0            
         for (;;) {
             prepareIntervalsForScanForRegisters();
             m_didSpill = false;
@@ -260,6 +333,7 @@ public:
                 break;
             emitSpillCode();
         }
+#endif            
         insertSpillCode();
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
@@ -408,8 +482,7 @@ private:
 
         auto closeInterval = [&](Tmp &tmp) {
             ASSERT(openIntervals[tmp] != Interval());
-            m_map[tmp].liveRange.intervals.prepend(openIntervals[tmp]);
-            openIntervals[tmp] = Interval();
+            m_map[tmp].liveRange.prepend(WTFMove(openIntervals[tmp]));
         };
 
         BasicBlock* blockAfter = nullptr;
@@ -699,17 +772,20 @@ private:
             dataLogLn("   regRanges[", r, "]: ", m_regRanges[r]);
     }
 
-    void allocateRegisters(Bank bank)
+    void setStageAndEnqueue(Tmp tmp, TmpData& tmpData, Stage stage)
+    {
+        tmpData.stage = stage;
+        m_queue.enqueue({ tmp, stage, tmpData.liveRange.size() });
+    }
+
+    template <Bank bank>
+    void allocateRegisters()
     {
         m_code.forEachTmp(
             [&] (Tmp tmp) {
                 if (tmp.bank() != bank)
                     return;
-                size_t priority = 0;
-                LiveRange& liveRange = m_map[tmp].liveRange;
-                for (auto& interval: liveRange.intervals)
-                    priority += interval.distance();
-                m_queue.enqueue({ tmp, priority });
+                setStageAndEnqueue(tmp, m_map[tmp], Stage::New);
         });
 
         // FIXME: could do this more directly rather than via m_clobbers.
@@ -724,24 +800,43 @@ private:
             TmpData& tmpData = m_map[tmp];
             if (verbose()) {
                 dataLogLn("Pop: ", entry, " tmp: ", tmpData);
-                if (verbose()) dumpRegRanges(bank);
+                dumpRegRanges(bank);
             }
-
-            if (tryAllocateTmp(tmp))
+            if (tryAllocate<bank>(tmp, tmpData))
+                continue;
+            if (tmpData.stage != Stage::Split && tryEvict<bank>(tmp, tmpData))
                 continue;
 #if 0
-            if (tmpData.phase == GreedyState::New) {
-                tmpData.phase = GreedyState::Split;
-                m_queue.enqueue(entry);
+            switch (tmpData.stage) {
+            case Stage::New:
+                setStageAndEnqueue(tmp, tmpData, Stage::Split);
+                continue;
+            case Stage::Split:
+                if (!trySplit(tmp))
+                    setStageAndEnqueue(tmp, tmpData, Stage::Spill);
+                continue;
+            case Stage::Spill:
+                spillTmp(tmp);
+                continue;
+            case Stage::Unspillable:
+                // Unspillables must have been allocated during tryAllocate or tryEvict.
+                RELEASE_ASSERT_NOT_REACHED();
+            case Stage::Allocated:
+            case Stage::Spilled:
+                // These terminal states should never have been enqueued.
+                RELEASE_ASSERT_NOT_REACHED();
             }
+            RELEASE_ASSERT_NOT_REACHED();
 #endif
         }
     }
 
-    bool tryAllocateTmp(Tmp tmp)
+    template <Bank bank>
+    bool tryAllocate(Tmp tmp, TmpData& tmpData)
     {
-        LiveRange& liveRange = m_map[tmp].liveRange;
-        for (Reg r : m_allowedRegistersInPriorityOrder[tmp.bank()]) {
+        ASSERT(&m_map[tmp] == &tmpData);
+        LiveRange& liveRange = tmpData.liveRange;
+        for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             auto& regRanges = m_regRanges[r];
             if (!regRanges.hasConflict(liveRange)) {
                 regRanges.add(tmp, liveRange);
@@ -751,6 +846,54 @@ private:
             }
         }
         return false;
+    }
+
+    template <Bank bank>
+    bool tryEvict(Tmp tmp, TmpData& tmpData)
+    {
+        ASSERT(&m_map[tmp] == &tmpData);
+        ASSERT(tmp.bank() == bank);
+    
+        Reg bestEvictReg;
+        float bestSpillCost = unspillableCost;
+        LiveRange& liveRange = tmpData.liveRange;
+        for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
+            float conflictsSpillCost = 0.0f;
+            auto& regRanges = m_regRanges[r];
+            // TODO: maybe use IndexSparseSet instead and hoist construction (but that takes wrong type).
+            // Or add a way to reset IndexSet and hoist construction.
+            IndexSet<Tmp::Indexed<bank>> visited;
+            regRanges.forEachConflict(liveRange, [&] (Tmp conflict) -> IterationStatus {
+                if (visited.contains(tmp))
+                    return IterationStatus::Continue;
+                visited.add(conflict);
+                auto cost = m_map[conflict].spillCost;
+                if (cost == unspillableCost) {
+                    conflictsSpillCost = unspillableCost;
+                    return IterationStatus::Done;
+                }
+                conflictsSpillCost += cost;
+                return IterationStatus::Continue;
+            });
+            if (conflictsSpillCost < bestSpillCost) {
+                bestSpillCost = conflictsSpillCost;
+                bestEvictReg = r;
+            }
+        }
+        if (bestSpillCost >= tmpData.spillCost) {
+            RELEASE_ASSERT(tmpData.spillCost != unspillableCost);
+            return false;
+        }
+
+        auto& evictRegRanges = m_regRanges[bestEvictReg];
+        evictRegRanges.forEachConflict(liveRange, [&] (Tmp conflict) -> IterationStatus {
+            auto& conflictData = m_map[conflict];
+            evictRegRanges.evict(conflict, conflictData.liveRange);
+
+            setStageAndEnqueue(conflict, conflictData, Stage::New);
+            return IterationStatus::Continue;
+        });
+        return true;
     }
 
     void addToActive(Tmp tmp)
