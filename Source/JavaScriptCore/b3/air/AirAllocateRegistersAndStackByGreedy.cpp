@@ -101,7 +101,7 @@ enum class Stage {
     Split,
     Spill,
     Unspillable,
-    Allocated,
+    Assigned,
     Spilled,
 };
 
@@ -794,28 +794,28 @@ private:
                 continue;
             if (tmpData.stage != Stage::Split && tryEvict<bank>(tmp, tmpData))
                 continue;
-#if 0
+
             switch (tmpData.stage) {
             case Stage::New:
+                // If we couldn't allocate tmp, allow it to split next time.
                 setStageAndEnqueue(tmp, tmpData, Stage::Split);
                 continue;
             case Stage::Split:
-                if (!trySplit(tmp))
+                if (!trySplit(tmp, tmpData))
                     setStageAndEnqueue(tmp, tmpData, Stage::Spill);
                 continue;
             case Stage::Spill:
-                spillTmp(tmp);
+                spillTmp(tmp, tmpData);
                 continue;
             case Stage::Unspillable:
                 // Unspillables must have been allocated during tryAllocate or tryEvict.
                 RELEASE_ASSERT_NOT_REACHED();
-            case Stage::Allocated:
+            case Stage::Assigned:
             case Stage::Spilled:
                 // These terminal states should never have been enqueued.
                 RELEASE_ASSERT_NOT_REACHED();
             }
             RELEASE_ASSERT_NOT_REACHED();
-#endif
         }
     }
 
@@ -827,15 +827,14 @@ private:
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             auto& regRanges = m_regRanges[r];
             if (!regRanges.hasConflict(liveRange)) {
-                regRanges.add(tmp, liveRange);
-                if (verbose())
-                    dataLogLn("Assigned ", tmp, " => ", r);
+                assign(tmp, tmpData, r);
                 return true;
             }
         }
         return false;
     }
 
+    // FIXME: need some mechanism to avoid infinite eviction loops. (LLVM uses "Cascade").
     template <Bank bank>
     bool tryEvict(Tmp tmp, TmpData& tmpData)
     {
@@ -876,12 +875,42 @@ private:
         auto& evictRegRanges = m_regRanges[bestEvictReg];
         evictRegRanges.forEachConflict(liveRange, [&] (Tmp conflict) -> IterationStatus {
             auto& conflictData = m_map[conflict];
-            evictRegRanges.evict(conflict, conflictData.liveRange);
-
+            evict(conflict, conflictData, bestEvictReg);
             setStageAndEnqueue(conflict, conflictData, Stage::New);
             return IterationStatus::Continue;
         });
+        assign(tmp, tmpData, bestEvictReg);
         return true;
+    }
+
+    void assign(Tmp tmp, TmpData tmpData, Reg reg)
+    {
+        m_regRanges[reg].add(tmp, tmpData.liveRange);
+        ASSERT(tmpData.stage != Stage::Assigned && tmpData.stage != Stage::Spilled);
+        tmpData.stage = Stage::Assigned;
+        tmpData.assigned = reg;
+        if (verbose())
+            dataLogLn("Assigned ", tmp, " to ", reg);
+    }
+
+    void evict(Tmp tmp, TmpData tmpData, Reg reg)
+    {
+        ASSERT(tmpData.stage == Stage::Assigned);
+        ASSERT(tmpData.assigned == reg);
+        m_regRanges[reg].evict(tmp, tmpData.liveRange);
+        tmpData.assigned = Reg();
+        if (verbose())
+            dataLogLn("Evicted ", tmp, " from ", reg);
+    }
+
+    bool trySplit(Tmp, TmpData)
+    {
+        return false;
+    }
+
+    void spillTmp(Tmp tmp, TmpData)
+    {
+        if (tmp) RELEASE_ASSERT_NOT_REACHED();
     }
 
     void addToActive(Tmp tmp)
