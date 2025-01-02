@@ -503,7 +503,6 @@ private:
                 for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
                     dataLogLn("blockAfter: ", pointerDump(blockAfter), " liveAtHead:", tmp);
                     if (!tmp.isReg() && !openIntervals[tmp].contains(indexOfTail)) {
-                        dataLogLn("closing interval: ", openIntervals[tmp], " tmp: ", tmp);
                         ASSERT(openIntervals[tmp].begin() == this->indexOfHead(blockAfter));
                         closeInterval(tmp);
                     }
@@ -527,7 +526,7 @@ private:
                     if (Arg::isEarlyUse(role))
                         interval |= earlyInterval(indexOfEarly);
                     if (Arg::isEarlyDef(role)) {
-                        interval |= lateInterval(indexOfEarly);
+                        interval |= earlyInterval(indexOfEarly);
                         closeInterval(tmp);
                     }
                 });
