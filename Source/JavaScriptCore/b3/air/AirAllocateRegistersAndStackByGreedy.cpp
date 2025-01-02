@@ -66,8 +66,10 @@ class LiveRange {
 public:
     LiveRange() = default;
 
-    void prepend(Interval&& interval)
+    void prepend(Interval interval)
     {
+        // Intervals should be ordered, non-overlapping, and non-contiguous.
+        ASSERT(m_intervals.isEmpty() || interval.end() < m_intervals.last().begin());
         m_intervals.prepend(WTFMove(interval));
         m_size += m_intervals.first().distance();
     }
@@ -321,7 +323,7 @@ public:
                 break;
             emitSpillCode();
         }
-#endif            
+#endif
         insertSpillCode();
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
@@ -470,7 +472,8 @@ private:
 
         auto closeInterval = [&](Tmp &tmp) {
             ASSERT(openIntervals[tmp] != Interval());
-            m_map[tmp].liveRange.prepend(WTFMove(openIntervals[tmp]));
+            m_map[tmp].liveRange.prepend(openIntervals[tmp]);
+            openIntervals[tmp] = Interval();
         };
 
         BasicBlock* blockAfter = nullptr;
@@ -883,7 +886,7 @@ private:
         return true;
     }
 
-    void assign(Tmp tmp, TmpData tmpData, Reg reg)
+    void assign(Tmp tmp, TmpData& tmpData, Reg reg)
     {
         m_regRanges[reg].add(tmp, tmpData.liveRange);
         ASSERT(tmpData.stage != Stage::Assigned && tmpData.stage != Stage::Spilled);
@@ -893,7 +896,7 @@ private:
             dataLogLn("Assigned ", tmp, " to ", reg);
     }
 
-    void evict(Tmp tmp, TmpData tmpData, Reg reg)
+    void evict(Tmp tmp, TmpData& tmpData, Reg reg)
     {
         ASSERT(tmpData.stage == Stage::Assigned);
         ASSERT(tmpData.assigned == reg);
@@ -930,19 +933,21 @@ private:
             });
     }
 
-    void assign(Tmp tmp, Reg reg)
+    NO_RETURN void assign(Tmp tmp, Reg reg)
     {
         TmpData& entry = m_map[tmp];
         RELEASE_ASSERT(!entry.spilled);
+        ASSERT(false);
         entry.assigned = reg;
         m_activeRegs.add(reg, IgnoreVectors);
         addToActive(tmp);
     }
 
-    void spill(Tmp tmp)
+    NO_RETURN void spill(Tmp tmp)
     {
         TmpData& entry = m_map[tmp];
         RELEASE_ASSERT(!entry.isUnspillable);
+        ASSERT(false);
         entry.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
         entry.assigned = Reg();
         m_didSpill = true;
@@ -1093,13 +1098,13 @@ private:
 void allocateRegistersAndStackByGreedy(Code& code)
 {
     RELEASE_ASSERT(!code.usesSIMD());
-    PhaseScope phaseScope(code, "allocateRegistersAndStackByLinearScan"_s);
+    PhaseScope phaseScope(code, "allocateRegistersAndStackByGreedy"_s);
     if (Greedy::verbose())
-        dataLog("Air before linear scan:\n", code);
-    Greedy::GreedyAllocator linearScan(code);
-    linearScan.run();
+        dataLog("Air before greedy register allocation:\n", code);
+    Greedy::GreedyAllocator allocator(code);
+    allocator.run();
     if (Greedy::verbose())
-        dataLog("Air after linear scan:\n", code);
+        dataLog("Air after greedy register allocation:\n", code);
 }
 
 } } } // namespace JSC::B3::Air
