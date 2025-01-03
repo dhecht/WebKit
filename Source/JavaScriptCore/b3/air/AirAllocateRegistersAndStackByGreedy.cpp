@@ -163,9 +163,9 @@ public:
 
     typedef StdSet<AllocatedInterval> AllocatedIntervalSet;
 
-    void addClobber(size_t pos)
+    void addClobber(Reg r, size_t pos)
     {
-        m_allocations.insert({ Tmp(), { pos, pos + 1 }} );
+        m_allocations.insert({ Tmp(r), { pos, pos + 1 }} );
     }
 
     void add(Tmp tmp, LiveRange& range)
@@ -213,7 +213,6 @@ public:
                 // later allocated intervals' begin is greater than or equal to the LiveRange's end.
                 if (interval.end() <= iter->interval.begin())
                     continue;
-                dataLogLn("XXX conflict ", interval, " with reg range ", iter->interval);
                 conflict = iter->tmp;
             } // func is allowed to invalidate the iterator.
             if (func(conflict) == IterationStatus::Done)
@@ -492,7 +491,6 @@ private:
 
             // At tail, for every dead tmp, close interval
             for (Tmp tmp : liveness.liveAtTail(block)) {
-                dataLogLn("liveAtTail: ", tmp);
                 if (!tmp.isReg())
                     // FIXME: could just set interval start
                     openIntervals[tmp] |= Interval(indexOfTail);
@@ -501,7 +499,6 @@ private:
                 // If it was live at the head of the next block but no longer live, close
                 // the current interval.
                 for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
-                    dataLogLn("blockAfter: ", pointerDump(blockAfter), " liveAtHead:", tmp);
                     if (!tmp.isReg() && !openIntervals[tmp].contains(indexOfTail)) {
                         ASSERT(openIntervals[tmp].begin() == this->indexOfHead(blockAfter));
                         closeInterval(tmp);
@@ -764,6 +761,7 @@ private:
 
     void setStageAndEnqueue(Tmp tmp, TmpData& tmpData, Stage stage)
     {
+        ASSERT(!tmp.isReg());
         tmpData.stage = stage;
         m_queue.enqueue({ tmp, stage, tmpData.liveRange.size() });
     }
@@ -781,7 +779,7 @@ private:
         // FIXME: could do this more directly rather than via m_clobbers.
         for (Clobber& clobber : m_clobbers) {
             for (Reg reg : clobber.regs)
-                m_regRanges[reg].addClobber(clobber.index);
+                m_regRanges[reg].addClobber(reg, clobber.index);
         }
 
         while (!m_queue.isEmpty()) {
@@ -844,7 +842,7 @@ private:
         ASSERT(tmp.bank() == bank);
     
         Reg bestEvictReg;
-        float bestSpillCost = unspillableCost;
+        float minSpillCost = unspillableCost;
         LiveRange& liveRange = tmpData.liveRange;
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             float conflictsSpillCost = 0.0f;
@@ -853,7 +851,12 @@ private:
             // Or add a way to reset IndexSet and hoist construction.
             IndexSet<Tmp::Indexed<bank>> visited;
             regRanges.forEachConflict(liveRange, [&] (Tmp conflict) -> IterationStatus {
-                if (visited.contains(tmp))
+                if (conflict.isReg()) {
+                    // Conflicts with a register clobber, cannot evict clobbers.
+                    conflictsSpillCost = unspillableCost;
+                    return IterationStatus::Done;
+                }
+                if (visited.contains(conflict))
                     return IterationStatus::Continue;
                 visited.add(conflict);
                 auto cost = m_map[conflict].spillCost;
@@ -864,19 +867,18 @@ private:
                 conflictsSpillCost += cost;
                 return IterationStatus::Continue;
             });
-            if (conflictsSpillCost < bestSpillCost) {
-                bestSpillCost = conflictsSpillCost;
+            if (conflictsSpillCost < minSpillCost) {
+                minSpillCost = conflictsSpillCost;
                 bestEvictReg = r;
             }
         }
-        if (bestSpillCost >= tmpData.spillCost) {
+        if (minSpillCost >= tmpData.spillCost) {
             RELEASE_ASSERT(tmpData.spillCost != unspillableCost);
             return false;
         }
-
-        auto& evictRegRanges = m_regRanges[bestEvictReg];
-        evictRegRanges.forEachConflict(liveRange, [&] (Tmp conflict) -> IterationStatus {
-            auto& conflictData = m_map[conflict];
+        // It's cheaper to spill all the already-assigned conflicting tmps, so evict them in favor of assigning 'tmp'.
+        m_regRanges[bestEvictReg].forEachConflict(liveRange, [&] (Tmp conflict) -> IterationStatus {
+            TmpData& conflictData = m_map[conflict];
             evict(conflict, conflictData, bestEvictReg);
             setStageAndEnqueue(conflict, conflictData, Stage::New);
             return IterationStatus::Continue;
@@ -891,8 +893,7 @@ private:
         ASSERT(tmpData.stage != Stage::Assigned && tmpData.stage != Stage::Spilled);
         tmpData.stage = Stage::Assigned;
         tmpData.assigned = reg;
-        if (verbose())
-            dataLogLn("Assigned ", tmp, " to ", reg);
+        dataLogLnIf(verbose(), "Assigned ", tmp, " to ", reg);
     }
 
     void evict(Tmp tmp, TmpData& tmpData, Reg reg)
@@ -901,8 +902,7 @@ private:
         ASSERT(tmpData.assigned == reg);
         m_regRanges[reg].evict(tmp, tmpData.liveRange);
         tmpData.assigned = Reg();
-        if (verbose())
-            dataLogLn("Evicted ", tmp, " from ", reg);
+        dataLogLnIf(verbose(), "Evicted ", tmp, " from ", reg);
     }
 
     bool trySplit(Tmp, TmpData)
