@@ -68,10 +68,13 @@ public:
 
     void prepend(Interval interval)
     {
-        // Intervals should be ordered, non-overlapping, and non-contiguous.
-        ASSERT(m_intervals.isEmpty() || interval.end() < m_intervals.last().begin());
-        m_intervals.prepend(WTFMove(interval));
-        m_size += m_intervals.first().distance();
+        if (m_intervals.isEmpty() || interval.end() < m_intervals.last().begin())
+            m_intervals.prepend(WTFMove(interval));
+        else {
+            ASSERT(interval.end() == m_intervals.last().begin());
+            m_intervals.last() |= interval;
+        }
+        m_size += interval.distance();
     }
 
     const Deque<Interval>& intervals() const
