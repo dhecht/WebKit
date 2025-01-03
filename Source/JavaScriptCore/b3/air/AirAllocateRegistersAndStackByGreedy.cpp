@@ -468,12 +468,12 @@ private:
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildIntervals"_s);
         UnifiedTmpLiveness liveness(m_code);
 
-        TmpMap<Interval> openIntervals(m_code);
+        TmpMap<Interval> activeIntervals(m_code);
 
         auto closeInterval = [&](Tmp &tmp) {
-            ASSERT(openIntervals[tmp] != Interval());
-            m_map[tmp].liveRange.prepend(openIntervals[tmp]);
-            openIntervals[tmp] = Interval();
+            ASSERT(activeIntervals[tmp] != Interval());
+            m_map[tmp].liveRange.prepend(activeIntervals[tmp]);
+            activeIntervals[tmp] = Interval();
         };
 
         BasicBlock* blockAfter = nullptr;
@@ -494,14 +494,14 @@ private:
             for (Tmp tmp : liveness.liveAtTail(block)) {
                 if (!tmp.isReg())
                     // FIXME: could just set interval start
-                    openIntervals[tmp] |= Interval(indexOfTail);
+                    activeIntervals[tmp] |= Interval(indexOfTail);
             }
             if (blockAfter) {
                 // If it was live at the head of the next block but no longer live, close
                 // the current interval.
                 for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
-                    if (!tmp.isReg() && !openIntervals[tmp].contains(indexOfTail)) {
-                        ASSERT(openIntervals[tmp].begin() == this->indexOfHead(blockAfter));
+                    if (!tmp.isReg() && !activeIntervals[tmp].contains(indexOfTail)) {
+                        ASSERT(activeIntervals[tmp].begin() == this->indexOfHead(blockAfter));
                         closeInterval(tmp);
                     }
                 }
@@ -514,7 +514,7 @@ private:
                 inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
                     if (tmp.isReg())
                         return;
-                    auto& interval = openIntervals[tmp];
+                    auto& interval = activeIntervals[tmp];
                     if (Arg::isLateUse(role))
                         interval |= lateInterval(indexOfEarly);
                     if (Arg::isLateDef(role)) {
@@ -531,7 +531,7 @@ private:
             }
             for (Tmp tmp : liveness.liveAtHead(block)) {
                 if (!tmp.isReg())
-                    openIntervals[tmp] |= Interval(indexOfHead);
+                    activeIntervals[tmp] |= Interval(indexOfHead);
             }
 
             buildClobbers(liveness, block);
@@ -540,7 +540,7 @@ private:
         if (blockAfter) {
             for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
                 if (!tmp.isReg()) {
-                    ASSERT(openIntervals[tmp].begin() == this->indexOfHead(blockAfter));
+                    ASSERT(activeIntervals[tmp].begin() == this->indexOfHead(blockAfter));
                     closeInterval(tmp);
                 }
             }
