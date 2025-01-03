@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -309,33 +309,22 @@ public:
         buildIndices();
         buildIntervals();
         if (shouldSpillEverything()) {
-            spillEverything();
             RELEASE_ASSERT_NOT_REACHED();
+            // spillEverything();
             // emitSpillCode();
         }
         allocateRegisters<GP>();
         allocateRegisters<FP>();
-#if 0            
-        for (;;) {
-            prepareIntervalsForScanForRegisters();
-            m_didSpill = false;
-            forEachBank(
-                [&] (Bank bank) {
-                    attemptScanForRegisters(bank);
-                });
-            if (!m_didSpill)
-                break;
-            emitSpillCode();
-        }
-#endif
+
         insertSpillCode();
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
 
         handleCalleeSaves(m_code);
         allocateEscapedStackSlots(m_code);
-        prepareIntervalsForScanForStack();
+#if 0
         scanForStack();
+#endif        
         updateFrameSizeBasedOnStackSlots(m_code);
         m_code.setStackIsAllocated(true);
     }
@@ -347,10 +336,7 @@ private:
             [&] (Bank bank) {
                 m_allowedRegistersInPriorityOrder[bank] = m_code.regsInPriorityOrder(bank);
                 for (Reg r : m_allowedRegistersInPriorityOrder[bank])
-                    m_allowedRegisters[bank].add(r, IgnoreVectors);
-                m_allAllowedRegisters = m_allAllowedRegisters.toRegisterSet()
-                    .merge(m_allowedRegisters[bank].toRegisterSet())
-                    .buildScalarRegisterSet();
+                    m_allAllowedRegisters.add(r, IgnoreVectors);
             });
     }
 
@@ -551,7 +537,6 @@ private:
         }
         // ASSERT every interval is closed.
 
-
         std::sort(
             m_clobbers.begin(), m_clobbers.end(),
             [] (Clobber& a, Clobber& b) -> bool {
@@ -582,53 +567,9 @@ private:
     void spillEverything()
     {
         m_code.forEachTmp(
-            [&] (Tmp tmp) {
-                spill(tmp);
+            [&] (Tmp) {
+                //spill(tmp);
             });
-    }
-
-    void prepareIntervalsForScanForRegisters()
-    {
-        prepareIntervals(
-            [&] (TmpData& data) -> bool {
-                if (data.spilled)
-                    return false;
-
-                data.assigned = Reg();
-                return true;
-            });
-    }
-
-    void prepareIntervalsForScanForStack()
-    {
-        prepareIntervals(
-            [&] (TmpData& data) -> bool {
-                return data.spilled;
-            });
-    }
-
-    template<typename SelectFunc>
-    void prepareIntervals(const SelectFunc& selectFunc)
-    {
-        m_tmps.shrink(0);
-
-        m_code.forEachTmp(
-            [&] (Tmp tmp) {
-                TmpData& data = m_map[tmp];
-                if (!selectFunc(data))
-                    return;
-
-                m_tmps.append(tmp);
-            });
-
-        std::sort(
-            m_tmps.begin(), m_tmps.end(),
-            [&] (Tmp& a, Tmp& b) {
-                return m_map[a].interval.begin() < m_map[b].interval.begin();
-            });
-
-        if (verbose())
-            dataLog("Tmps: ", listDump(m_tmps), "\n");
     }
 
     Tmp addSpillTmpWithInterval(Bank bank, Interval interval)
@@ -644,122 +585,6 @@ private:
 
         dataLogLnIf(verbose(), "New spill tmp: ", tmp, ": ", data);
         return tmp;
-    }
-
-    void attemptScanForRegisters(Bank bank)
-    {
-        // This is modeled after LinearScanRegisterAllocation in Fig. 1 in
-        // http://dl.acm.org/citation.cfm?id=330250.
-
-        m_active.clear();
-        m_activeRegs = { };
-
-        size_t clobberIndex = 0;
-        for (Tmp& tmp : m_tmps) {
-            if (tmp.bank() != bank)
-                continue;
-
-            TmpData& entry = m_map[tmp];
-            size_t index = entry.interval.begin();
-
-            if (verbose()) {
-                dataLog("Index #", index, ": ", tmp, "\n");
-                dataLog("  ", tmp, ": ", entry, "\n");
-                dataLog("  clobberIndex = ", clobberIndex, "\n");
-                // This could be so much faster.
-                BasicBlock* block = m_code[0];
-                for (BasicBlock* candidateBlock : m_code) {
-                    if (m_startIndex[candidateBlock] > index)
-                        break;
-                    block = candidateBlock;
-                }
-                unsigned instIndex = (index - m_startIndex[block] + 1) / 2;
-                dataLog("  At: ", pointerDump(block), ", instIndex = ", instIndex, "\n");
-                dataLog("    Prev: ", pointerDump(block->get(instIndex - 1)), "\n");
-                dataLog("    Next: ", pointerDump(block->get(instIndex)), "\n");
-                dataLog("  Active:\n");
-                for (Tmp tmp : m_active)
-                    dataLog("    ", tmp, ": ", m_map[tmp], "\n");
-            }
-
-            // This is ExpireOldIntervals in Fig. 1.
-            while (!m_active.isEmpty()) {
-                Tmp tmp = m_active.first();
-                TmpData& entry = m_map[tmp];
-
-                bool expired = entry.interval.end() <= index;
-
-                if (!expired)
-                    break;
-
-                m_active.removeFirst();
-                m_activeRegs.remove(entry.assigned);
-            }
-
-            // If necessary, compute the set of registers that this tmp could even use. This is not
-            // part of Fig. 1, but it's a technique that the authors claim to have implemented in one of
-            // their two implementations. There may be other more efficient ways to do this, but this
-            // implementation gets some perf wins from piggy-backing this calculation in the scan.
-            //
-            // Note that the didBuild flag sticks through spilling. Spilling doesn't change the
-            // interference situation.
-            //
-            // Note that we could short-circuit this if we're dealing with a spillable tmp, there are no
-            // free registers, and this register's interval ends after the one on the top of the active
-            // stack.
-            if (!entry.didBuildPossibleRegs) {
-                // Advance the clobber index until it's at a clobber that is relevant to us.
-                while (clobberIndex < m_clobbers.size() && m_clobbers[clobberIndex].index < index)
-                    clobberIndex++;
-
-                RegisterSetBuilder possibleRegs = m_allowedRegisters[bank].toRegisterSet();
-                for (size_t i = clobberIndex; i < m_clobbers.size() && m_clobbers[i].index < entry.interval.end(); ++i)
-                    possibleRegs.exclude(m_clobbers[i].regs.includeWholeRegisterWidth());
-
-                entry.possibleRegs = possibleRegs.buildScalarRegisterSet();
-                entry.didBuildPossibleRegs = true;
-            }
-
-            if (verbose())
-                dataLog("  Possible regs: ", entry.possibleRegs, "\n");
-
-            // Find a free register that we are allowed to use.
-            if (m_active.size() != m_allowedRegistersInPriorityOrder[bank].size()) {
-                bool didAssign = false;
-                for (Reg reg : m_allowedRegistersInPriorityOrder[bank]) {
-                    // FIXME: Could do priority coloring here.
-                    // https://bugs.webkit.org/show_bug.cgi?id=170304
-                    if (!m_activeRegs.contains(reg, IgnoreVectors) && entry.possibleRegs.contains(reg, IgnoreVectors)) {
-                        assign(tmp, reg);
-                        didAssign = true;
-                        break;
-                    }
-                }
-                if (didAssign)
-                    continue;
-            }
-
-            // This is SpillAtInterval in Fig. 1, but modified to handle clobbers.
-            Tmp spillTmp = m_active.takeLast(
-                [&] (Tmp spillCandidate) -> bool {
-                    return entry.possibleRegs.contains(m_map[spillCandidate].assigned, IgnoreVectors);
-                });
-            if (!spillTmp) {
-                spill(tmp);
-                continue;
-            }
-            TmpData& spillEntry = m_map[spillTmp];
-            RELEASE_ASSERT(spillEntry.assigned);
-            if (spillEntry.isUnspillable ||
-                (!entry.isUnspillable && spillEntry.interval.end() <= entry.interval.end())) {
-                spill(tmp);
-                addToActive(spillTmp);
-                continue;
-            }
-
-            assign(tmp, spillEntry.assigned);
-            spill(spillTmp);
-        }
     }
 
     void dumpRegRanges(Bank bank)
@@ -815,7 +640,7 @@ private:
                     setStageAndEnqueue(tmp, tmpData, Stage::Spill);
                 continue;
             case Stage::Spill:
-                spillTmp(tmp, tmpData);
+                spill(tmp, tmpData);
                 continue;
             case Stage::Unspillable:
                 // Unspillables must have been allocated during tryAllocate or tryEvict.
@@ -920,50 +745,13 @@ private:
         return false;
     }
 
-    void spillTmp(Tmp tmp, TmpData data)
+    void spill(Tmp tmp, TmpData data)
     {
         RELEASE_ASSERT(!data.isUnspillable && data.spillCost != unspillableCost);
         data.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
         ASSERT(data.assigned == Reg());
         
         emitSpillCodeAndEnqueueNewTmps(tmp, data.spilled);
-    }
-
-    void addToActive(Tmp tmp)
-    {
-        if (m_map[tmp].isUnspillable) {
-            m_active.prepend(tmp);
-            return;
-        }
-
-        m_active.appendAndBubble(
-            tmp,
-            [&] (Tmp otherTmp) -> bool {
-                TmpData& otherEntry = m_map[otherTmp];
-                if (otherEntry.isUnspillable)
-                    return false;
-                return m_map[otherTmp].interval.end() > m_map[tmp].interval.end();
-            });
-    }
-
-    NO_RETURN void assign(Tmp tmp, Reg reg)
-    {
-        TmpData& entry = m_map[tmp];
-        RELEASE_ASSERT(!entry.spilled);
-        ASSERT(false);
-        entry.assigned = reg;
-        m_activeRegs.add(reg, IgnoreVectors);
-        addToActive(tmp);
-    }
-
-    NO_RETURN void spill(Tmp tmp)
-    {
-        TmpData& entry = m_map[tmp];
-        RELEASE_ASSERT(!entry.isUnspillable);
-        ASSERT(false);
-        entry.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
-        entry.assigned = Reg();
-        m_didSpill = true;
     }
 
     void emitSpillCodeAndEnqueueNewTmps(Tmp spilledTmp, StackSlot* stackSlot)
@@ -1008,6 +796,7 @@ private:
 
     void scanForStack()
     {
+#if 0        
         // This is loosely modeled after LinearScanRegisterAllocation in Fig. 1 in
         // http://dl.acm.org/citation.cfm?id=330250.
 
@@ -1045,6 +834,7 @@ private:
             m_usedSpillSlots.set(entry.spillIndex);
             m_active.append(tmp);
         }
+#endif        
     }
 
     void insertSpillCode()
@@ -1087,19 +877,13 @@ private:
 
     Code& m_code;
     Vector<Reg> m_allowedRegistersInPriorityOrder[numBanks];
-    ScalarRegisterSet m_allowedRegisters[numBanks];
     ScalarRegisterSet m_allAllowedRegisters;
     IndexMap<BasicBlock*, size_t> m_startIndex;
     TmpMap<TmpData> m_map;
     IndexMap<Reg, RegisterRanges> m_regRanges;
     PriorityQueue<QueueElement, QueueElement::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
-    Vector<Clobber> m_clobbers; // After we allocate this, we happily point pointers into it.
-    Vector<Tmp> m_tmps;
-    Deque<Tmp> m_active;
-    RegisterSet m_activeRegs;
-    BitVector m_usedSpillSlots;
-    bool m_didSpill { false };
+    Vector<Clobber> m_clobbers;
 };
 
 } // anonymous namespace
