@@ -310,7 +310,8 @@ public:
         buildIntervals();
         if (shouldSpillEverything()) {
             spillEverything();
-            emitSpillCode();
+            RELEASE_ASSERT_NOT_REACHED();
+            // emitSpillCode();
         }
         allocateRegisters<GP>();
         allocateRegisters<FP>();
@@ -634,10 +635,14 @@ private:
     {
         TmpData data;
         data.interval = interval;
+        data.spillCost = unspillableCost;
         data.isUnspillable = true;
+        data.liveRange.prepend(interval);
 
         Tmp tmp = m_code.newTmp(bank);
         m_map.append(tmp, data);
+
+        dataLogLnIf(verbose(), "New spill tmp: ", tmp, ": ", data);
         return tmp;
     }
 
@@ -766,6 +771,7 @@ private:
     void setStageAndEnqueue(Tmp tmp, TmpData& tmpData, Stage stage)
     {
         ASSERT(!tmp.isReg());
+        ASSERT(stage != Stage::Assigned && stage != Stage::Spilled);
         tmpData.stage = stage;
         m_queue.enqueue({ tmp, stage, tmpData.liveRange.size() });
     }
@@ -816,7 +822,7 @@ private:
                 RELEASE_ASSERT_NOT_REACHED();
             case Stage::Assigned:
             case Stage::Spilled:
-                // These terminal states should never have been enqueued.
+                // Tmps in these stages should not have been enqueued.
                 RELEASE_ASSERT_NOT_REACHED();
             }
             RELEASE_ASSERT_NOT_REACHED();
@@ -914,9 +920,13 @@ private:
         return false;
     }
 
-    void spillTmp(Tmp tmp, TmpData)
+    void spillTmp(Tmp tmp, TmpData data)
     {
-        if (tmp) RELEASE_ASSERT_NOT_REACHED();
+        RELEASE_ASSERT(!data.isUnspillable && data.spillCost != unspillableCost);
+        data.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
+        ASSERT(data.assigned == Reg());
+        
+        emitSpillCodeAndEnqueueNewTmps(tmp, data.spilled);
     }
 
     void addToActive(Tmp tmp)
@@ -956,8 +966,9 @@ private:
         m_didSpill = true;
     }
 
-    void emitSpillCode()
+    void emitSpillCodeAndEnqueueNewTmps(Tmp spilledTmp, StackSlot* stackSlot)
     {
+        // FIXME: this is too inefficient to do for each spilled tmp, one at a time.
         for (BasicBlock* block : m_code) {
             size_t indexOfHead = this->indexOfHead(block);
             for (unsigned instIndex = 0; instIndex < block->size(); ++instIndex) {
@@ -969,32 +980,27 @@ private:
                     Arg& arg = inst.args[i];
                     if (!arg.isTmp())
                         continue;
-                    if (arg.isReg())
-                        continue;
-                    StackSlot* spilled = m_map[arg.tmp()].spilled;
-                    if (!spilled)
+                    if (arg.tmp() != spilledTmp)
                         continue;
                     if (!inst.admitsStack(i))
                         continue;
-                    arg = Arg::stack(spilled);
+                    arg = Arg::stack(stackSlot);
                 }
 
                 // Fall back on the hard way.
                 inst.forEachTmp(
                     [&] (Tmp& tmp, Arg::Role role, Bank bank, Width) {
-                        if (tmp.isReg())
-                            return;
-                        StackSlot* spilled = m_map[tmp].spilled;
-                        if (!spilled)
+                        if (tmp != spilledTmp)
                             return;
                         Opcode move = bank == GP ? Move : MoveDouble;
                         tmp = addSpillTmpWithInterval(bank, intervalForSpill(indexOfEarly, role));
+                        setStageAndEnqueue(tmp, m_map[tmp], Stage::Unspillable);
                         if (role == Arg::Scratch)
                             return;
                         if (Arg::isAnyUse(role))
-                            m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, Arg::stack(spilled), tmp);
+                            m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, Arg::stack(stackSlot), tmp);
                         if (Arg::isAnyDef(role))
-                            m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, tmp, Arg::stack(spilled));
+                            m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, tmp, Arg::stack(stackSlot));
                     });
             }
         }
