@@ -122,6 +122,7 @@ struct QueueElement {
  
     static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
     {
+        ASSERT(!left.tmp.isReg() && !right.tmp.isReg());
         // FIXME: could prepack so this can be a single comparison.
         if (left.stage < right.stage)
             return true;
