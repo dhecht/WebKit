@@ -24,7 +24,7 @@
  */
 
 #include "config.h"
-#include "AirAllocateRegistersByGreedy.h"
+#include "AirAllocateRegistersAndStackByGreedy.h"
 
 #if ENABLE(B3_JIT)
 
@@ -38,6 +38,7 @@
 #include "AirPhaseScope.h"
 #include "AirRegLiveness.h"
 #include "AirTmpMap.h"
+#include "AirUseCounts.h"
 #include <wtf/IterationStatus.h>
 #include <wtf/ListDump.h>
 #include <wtf/PriorityQueue.h>
@@ -85,7 +86,7 @@ public:
         return m_size;
     }
 
-    void dump(PrintStream& out) const
+    void dump(PrintStream& out) const 
     {
         WTF::CommaPrinter comma;
         out.print("{ ");
@@ -482,7 +483,7 @@ private:
                     }
                 }
             }
-
+            
             for (unsigned instIndex = block->size(); instIndex--;) {
                 Inst& inst = block->at(instIndex);
                 size_t indexOfEarly = indexOfHead + instIndex * 2;
@@ -537,6 +538,11 @@ private:
                 });
             dataLog("Clobbers: ", listDump(m_clobbers), "\n");
         }
+    }
+
+    void initializeSpillCosts()
+    {
+        UseCounts useCounts(m_code);
     }
 
     Tmp addSpillTmpWithInterval(Bank bank, Interval interval)
@@ -642,7 +648,7 @@ private:
     {
         ASSERT(&m_map[tmp] == &tmpData);
         ASSERT(tmp.bank() == bank);
-
+    
         Reg bestEvictReg;
         float minSpillCost = unspillableCost;
         LiveRange& liveRange = tmpData.liveRange;
@@ -717,7 +723,7 @@ private:
         RELEASE_ASSERT(!data.isUnspillable && data.spillCost != unspillableCost);
         data.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
         ASSERT(data.assigned == Reg());
-
+        
         emitSpillCodeAndEnqueueNewTmps(tmp, data.spilled);
     }
 
