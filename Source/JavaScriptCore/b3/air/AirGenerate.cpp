@@ -30,8 +30,8 @@
 
 #include "AirAllocateRegistersAndStackAndGenerateCode.h"
 #include "AirAllocateRegistersAndStackByLinearScan.h"
-#include "AirAllocateRegistersAndStackByGreedy.h"
 #include "AirAllocateRegistersByGraphColoring.h"
+#include "AirAllocateRegistersByGreedy.h"
 #include "AirAllocateStackByGraphColoring.h"
 #include "AirCode.h"
 #include "AirEliminateDeadCode.h"
