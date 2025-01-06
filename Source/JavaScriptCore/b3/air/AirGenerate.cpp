@@ -141,7 +141,7 @@ void prepareForGeneration(Code& code)
         // Register allocation for all the Tmps that do not have a corresponding machine
         // register. After this phase, every Tmp has a reg.
         if (Options::airForceGreedyAllocator() && !code.usesSIMD())
-            allocateRegistersAndStackByGreedy(code);
+            allocateRegistersByGreedy(code);
         else
             allocateRegistersByGraphColoring(code);
 

@@ -47,7 +47,7 @@ class Code;
 // For Air's primary register allocator, see AirAllocateRegistersByGraphColoring.h|cpp.
 //
 // This also does stack allocation as an afterthought. It does not do any spill coalescing.
-void allocateRegistersAndStackByGreedy(Code&);
+void allocateRegistersByGreedy(Code&);
 
 } } } // namespace JSC::B3::Air
 
