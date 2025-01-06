@@ -87,7 +87,7 @@ public:
         return m_size;
     }
 
-    void dump(PrintStream& out) const 
+    void dump(PrintStream& out) const
     {
         WTF::CommaPrinter comma;
         out.print("{ ");
@@ -484,7 +484,7 @@ private:
                     }
                 }
             }
-            
+
             for (unsigned instIndex = block->size(); instIndex--;) {
                 Inst& inst = block->at(instIndex);
                 size_t indexOfEarly = indexOfHead + instIndex * 2;
@@ -644,7 +644,7 @@ private:
     {
         ASSERT(&m_map[tmp] == &tmpData);
         ASSERT(tmp.bank() == bank);
-    
+
         Reg bestEvictReg;
         float minSpillCost = unspillableCost;
         LiveRange& liveRange = tmpData.liveRange;
@@ -719,7 +719,7 @@ private:
         RELEASE_ASSERT(!data.isUnspillable && data.spillCost != unspillableCost);
         data.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
         ASSERT(data.assigned == Reg());
-        
+
         emitSpillCodeAndEnqueueNewTmps(tmp, data.spilled);
     }
 
