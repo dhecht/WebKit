@@ -814,7 +814,7 @@ private:
 
 } // anonymous namespace
 
-void allocateRegistersAndStackByGreedy(Code& code)
+void allocateRegistersByGreedy(Code& code)
 {
     RELEASE_ASSERT(!code.usesSIMD());
     PhaseScope phaseScope(code, "allocateRegistersAndStackByGreedy"_s);
