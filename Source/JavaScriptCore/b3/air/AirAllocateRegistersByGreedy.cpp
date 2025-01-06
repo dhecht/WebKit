@@ -24,7 +24,7 @@
  */
 
 #include "config.h"
-#include "AirAllocateRegistersAndStackByGreedy.h"
+#include "AirAllocateRegistersByGreedy.h"
 
 #if ENABLE(B3_JIT)
 
