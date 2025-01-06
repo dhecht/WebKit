@@ -112,20 +112,15 @@ void prepareForGeneration(Code& code)
 
     eliminateDeadCode(code);
 
-    size_t numTmps = code.numTmps(Bank::GP) + code.numTmps(Bank::FP);
-    
-    if (Options::airForceGreedyAllocator()) {
-        allocateRegistersAndStackByGreedy(code);
+    auto useLinearScan = [&code](size_t numTmps) -> bool {
+        if (code.usesSIMD())
+            return false;
+        if (Options::airForceGreedyAllocator())
+            return false;
+        return code.optLevel() == 1 || numTmps > Options::maximumTmpsForGraphColoring();
+    };
 
-        if (Options::logAirRegisterPressure()) {
-            dataLog("Register pressure after register allocation:\n");
-            logRegisterPressure(code);
-        }
-
-        // We may still need to do post-allocation lowering. Doing it after both register and
-        // stack allocation is less optimal, but it works fine.
-        lowerAfterRegAlloc(code);
-    } else if ((!code.usesSIMD() && (code.optLevel() == 1 || numTmps > Options::maximumTmpsForGraphColoring())) || true) {
+    if (useLinearScan(code.numTmps(Bank::GP) + code.numTmps(Bank::FP))) {
         // When we're compiling quickly, we do register and stack allocation in one linear scan
         // phase. It's fast because it computes liveness only once.
         allocateRegistersAndStackByLinearScan(code);
@@ -145,7 +140,10 @@ void prepareForGeneration(Code& code)
 
         // Register allocation for all the Tmps that do not have a corresponding machine
         // register. After this phase, every Tmp has a reg.
-        allocateRegistersByGraphColoring(code);
+        if (Options::airForceGreedyAllocator() && !code.usesSIMD())
+            allocateRegistersAndStackByGreedy(code);
+        else
+            allocateRegistersByGraphColoring(code);
 
         if (Options::logAirRegisterPressure()) {
             dataLog("Register pressure after register allocation:\n");

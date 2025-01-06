@@ -305,32 +305,20 @@ public:
     void run()
     {
         padInterference(m_code);
-        buildRegisterSetBuilder();
+        buildRegisterSets();
         buildIndices();
         buildIntervals();
-        if (shouldSpillEverything()) {
-            RELEASE_ASSERT_NOT_REACHED();
-            // spillEverything();
-            // emitSpillCode();
-        }
+
         allocateRegisters<GP>();
         allocateRegisters<FP>();
 
         insertSpillCode();
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
-
-        handleCalleeSaves(m_code);
-        allocateEscapedStackSlots(m_code);
-#if 0
-        scanForStack();
-#endif        
-        updateFrameSizeBasedOnStackSlots(m_code);
-        m_code.setStackIsAllocated(true);
     }
 
 private:
-    void buildRegisterSetBuilder()
+    void buildRegisterSets()
     {
         forEachBank(
             [&] (Bank bank) {
@@ -553,25 +541,6 @@ private:
         }
     }
 
-    bool shouldSpillEverything()
-    {
-        if (!Options::airLinearScanSpillsEverything())
-            return false;
-
-        // You're meant to hack this so that you selectively spill everything depending on reasons.
-        // That's super useful for debugging.
-
-        return true;
-    }
-
-    void spillEverything()
-    {
-        m_code.forEachTmp(
-            [&] (Tmp) {
-                //spill(tmp);
-            });
-    }
-
     Tmp addSpillTmpWithInterval(Bank bank, Interval interval)
     {
         TmpData data;
@@ -792,49 +761,6 @@ private:
                     });
             }
         }
-    }
-
-    void scanForStack()
-    {
-#if 0        
-        // This is loosely modeled after LinearScanRegisterAllocation in Fig. 1 in
-        // http://dl.acm.org/citation.cfm?id=330250.
-
-        m_active.clear();
-        m_usedSpillSlots.clearAll();
-
-        for (Tmp& tmp : m_tmps) {
-            TmpData& entry = m_map[tmp];
-            if (!entry.spilled)
-                continue;
-
-            size_t index = entry.interval.begin();
-
-            // This is ExpireOldIntervals in Fig. 1.
-            while (!m_active.isEmpty()) {
-                Tmp tmp = m_active.first();
-                TmpData& entry = m_map[tmp];
-
-                bool expired = entry.interval.end() <= index;
-
-                if (!expired)
-                    break;
-
-                m_active.removeFirst();
-                m_usedSpillSlots.clear(entry.spillIndex);
-            }
-
-            entry.spillIndex = m_usedSpillSlots.findBit(0, false);
-            size_t slotSize = conservativeRegisterBytesWithoutVectors(FP);
-            ASSERT(entry.spilled->byteSize() <= slotSize);
-            ptrdiff_t offset = -static_cast<ptrdiff_t>(m_code.frameSize()) - static_cast<ptrdiff_t>(entry.spillIndex) * slotSize - slotSize;
-            if (verbose())
-                dataLog("  Assigning offset = ", offset, " to spill ", pointerDump(entry.spilled), " for ", tmp, "\n");
-            entry.spilled->setOffsetFromFP(offset);
-            m_usedSpillSlots.set(entry.spillIndex);
-            m_active.append(tmp);
-        }
-#endif        
     }
 
     void insertSpillCode()
