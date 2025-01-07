@@ -201,23 +201,33 @@ public:
     template<typename Func>
     void forEachConflict(LiveRange& range, const Func& func)
     {
-        for (auto& interval: range.intervals()) {
+        auto rangeIter = range.intervals().begin();
+        auto rangeEnd = range.intervals().end();
+
+        if (rangeIter == rangeEnd)
+            return;
+        auto nextSearch = rangeIter->begin();
+
+        while (true) {
             Tmp conflict;
             {
-                auto iter = findFirstIntervalEndingAfter(interval.begin());
-                // Since all allocated intervals have an end before this LiveRange interval begins (and intervals
-                // are sorted), there must not exist any allocated intervals that overlap a later LiveRange interval.
-                if (iter == m_allocations.end())
-                    return;
-                // iter references the first allocated interval with an end greater than
-                // the LiveRange interval's begin. Therefore, iff the allocated interval's begin
-                // is less than the LiveRange interval's end, these intervals overlap. Furthermore, we know
-                // that no later (in sorted order) allocated interval can overlap this LiveRange interval since all 
-                // later allocated intervals' begin is greater than or equal to the LiveRange's end.
-                if (interval.end() <= iter->interval.begin())
+                auto conflictIter = findFirstIntervalEndingAfter(nextSearch);
+                if (conflictIter == m_allocations.end())
+                    return; // End of 'm_allocations', so no more potential conflicts
+                if (rangeIter->end() <= conflictIter->interval.begin()) {
+                    // No more conflicts of this 'range' interval. Move on to the next interval in 'range'.
+                    if (++rangeIter == rangeEnd)
+                        return; // End of 'range', so no more potential conflicts
+                    // Start searching for conflicts of the next 'range' interval.
+                    nextSearch = rangeIter->begin();
                     continue;
-                conflict = iter->tmp;
-            } // func is allowed to invalidate the iterator.
+                }
+                // Found a conflict. There may be additional conflicts of this 'range' interval, so advance
+                // the search position beyond this conflict but don't advance the 'range' interval.
+                conflict = conflictIter->tmp;
+                nextSearch = conflictIter->interval.end();
+            }
+            // 'func' can invalidate iterators of 'm_allocations'.
             if (func(conflict) == IterationStatus::Done)
                 return;
         }
