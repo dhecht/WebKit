@@ -38,6 +38,7 @@
 #include "AirPhaseScope.h"
 #include "AirRegLiveness.h"
 #include "AirTmpMap.h"
+#include "AirUseCounts.h"
 #include <wtf/IterationStatus.h>
 #include <wtf/ListDump.h>
 #include <wtf/PriorityQueue.h>
@@ -251,24 +252,19 @@ private:
 struct TmpData {
     void dump(PrintStream& out) const
     {
-        out.print("{liveRange = ", liveRange, ", spilled = ", pointerDump(spilled), ", assigned = ", assigned, ", isUnspillable = ", isUnspillable, ", possibleRegs = ", possibleRegs, ", didBuildPossibleRegs = ", didBuildPossibleRegs, "}");
+        out.print("{liveRange = ", liveRange, ", stage = ", stage, ", spillCost = ", spillCost, ", spilled = ", pointerDump(spilled), ", assigned = ", assigned, "}");
     }
 
     void validate()
     {
-        RELEASE_ASSERT(!(spilled && assigned));
+        RELEASE_ASSERT(!(spilled && assigned) && (!spilled || spillCost != unspillableCost));
     }
 
-    Interval interval;
     LiveRange liveRange;
     Stage stage { Stage::New };
-    float spillCost { 1.0f }; // FIXME
+    float spillCost { 0.0f };
     StackSlot* spilled { nullptr };
-    ScalarRegisterSet possibleRegs;
     Reg assigned;
-    bool isUnspillable { false };
-    bool didBuildPossibleRegs { false };
-    unsigned spillIndex { 0 };
 };
 
 struct Clobber {
@@ -297,6 +293,7 @@ public:
         , m_map(code)
         , m_regRanges(Reg::maxIndex() + 1)
         , m_insertionSets(code.size())
+        , m_useCounts(m_code)
     {
     }
 
@@ -306,6 +303,8 @@ public:
         buildRegisterSets();
         buildIndices();
         buildIntervals();
+        initSpillCosts<GP>();
+        initSpillCosts<FP>();
 
         allocateRegisters<GP>();
         allocateRegisters<FP>();
@@ -539,13 +538,25 @@ private:
         }
     }
 
+    template<Bank bank>
+    void initSpillCosts()
+    {
+        m_code.forEachTmp(
+            [&] (Tmp tmp) {
+                if (tmp.bank() != bank)
+                    return;
+                if (tmp.isReg())
+                    return;
+                auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
+                m_map[tmp].spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
+        });
+    }
+
     Tmp addSpillTmpWithInterval(Bank bank, Interval interval)
     {
         TmpData data;
-        data.interval = interval;
-        data.spillCost = unspillableCost;
-        data.isUnspillable = true;
         data.liveRange.prepend(interval);
+        data.spillCost = unspillableCost;
 
         Tmp tmp = m_code.newTmp(bank);
         m_map.append(tmp, data);
@@ -574,6 +585,8 @@ private:
         m_code.forEachTmp(
             [&] (Tmp tmp) {
                 if (tmp.bank() != bank)
+                    return;
+                if (tmp.isReg())
                     return;
                 setStageAndEnqueue(tmp, m_map[tmp], Stage::New);
         });
@@ -714,7 +727,7 @@ private:
 
     void spill(Tmp tmp, TmpData data)
     {
-        RELEASE_ASSERT(!data.isUnspillable && data.spillCost != unspillableCost);
+        RELEASE_ASSERT(data.spillCost != unspillableCost);
         data.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
         ASSERT(data.assigned == Reg());
 
@@ -808,6 +821,7 @@ private:
     PriorityQueue<QueueElement, QueueElement::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     Vector<Clobber> m_clobbers;
+    UseCounts m_useCounts;
 };
 
 } // anonymous namespace
