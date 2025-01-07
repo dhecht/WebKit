@@ -184,7 +184,7 @@ public:
     {
         for (auto& interval : range.intervals()) {
             auto r = m_allocations.erase({ tmp, interval });
-            ASSERT_UNUSED(r == 1, r);
+            ASSERT_UNUSED(r, r == 1);
         }
     }
 
@@ -675,22 +675,23 @@ private:
             // TODO: maybe use IndexSparseSet instead and hoist construction (but that takes wrong type).
             // Or add a way to reset IndexSet and hoist construction.
             IndexSet<Tmp::Indexed<bank>> visited;
-            regRanges.forEachConflict(liveRange, [&] (Tmp conflict) -> IterationStatus {
-                if (conflict.isReg()) {
-                    // Conflicts with a register clobber, cannot evict clobbers.
-                    conflictsSpillCost = unspillableCost;
-                    return IterationStatus::Done;
-                }
-                if (visited.contains(conflict))
+            regRanges.forEachConflict(liveRange,
+                [&] (Tmp conflict) -> IterationStatus {
+                    if (conflict.isReg()) {
+                        // Conflicts with a register clobber, cannot evict clobbers.
+                        conflictsSpillCost = unspillableCost;
+                        return IterationStatus::Done;
+                    }
+                    if (visited.contains(conflict))
+                        return IterationStatus::Continue;
+                    visited.add(conflict);
+                    auto cost = m_map[conflict].spillCost;
+                    if (cost == unspillableCost) {
+                        conflictsSpillCost = unspillableCost;
+                        return IterationStatus::Done;
+                    }
+                    conflictsSpillCost += cost;
                     return IterationStatus::Continue;
-                visited.add(conflict);
-                auto cost = m_map[conflict].spillCost;
-                if (cost == unspillableCost) {
-                    conflictsSpillCost = unspillableCost;
-                    return IterationStatus::Done;
-                }
-                conflictsSpillCost += cost;
-                return IterationStatus::Continue;
             });
             if (conflictsSpillCost < minSpillCost) {
                 minSpillCost = conflictsSpillCost;
@@ -698,15 +699,17 @@ private:
             }
         }
         if (minSpillCost >= tmpData.spillCost) {
+            // If 'tmp' was unspillable, we better have found at least one suitable register.
             RELEASE_ASSERT(tmpData.spillCost != unspillableCost);
             return false;
         }
         // It's cheaper to spill all the already-assigned conflicting tmps, so evict them in favor of assigning 'tmp'.
-        m_regRanges[bestEvictReg].forEachConflict(liveRange, [&] (Tmp conflict) -> IterationStatus {
-            TmpData& conflictData = m_map[conflict];
-            evict(conflict, conflictData, bestEvictReg);
-            setStageAndEnqueue(conflict, conflictData, Stage::New);
-            return IterationStatus::Continue;
+        m_regRanges[bestEvictReg].forEachConflict(liveRange,
+            [&] (Tmp conflict) -> IterationStatus {
+                TmpData& conflictData = m_map[conflict];
+                evict(conflict, conflictData, bestEvictReg);
+                setStageAndEnqueue(conflict, conflictData, Stage::New);
+                return IterationStatus::Continue;
         });
         assign(tmp, tmpData, bestEvictReg);
         return true;
@@ -724,6 +727,7 @@ private:
     void evict(Tmp tmp, TmpData& tmpData, Reg reg)
     {
         ASSERT(tmpData.stage == Stage::Assigned);
+        ASSERT(tmpData.spillCost != unspillableCost);
         ASSERT(tmpData.assigned == reg);
         m_regRanges[reg].evict(tmp, tmpData.liveRange);
         tmpData.assigned = Reg();
