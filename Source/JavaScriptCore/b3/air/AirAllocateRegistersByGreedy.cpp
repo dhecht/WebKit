@@ -901,20 +901,10 @@ private:
                 inst.forEachTmp([&] (Tmp& tmp, Arg::Role role, Bank argBank, Width) {
                     if (tmp.isReg() || argBank != bank)
                         return;
-
                     StackSlot* spilled = m_map[tmp].spilled;
                     if (!spilled)
                         return;
-#if 0
-                    if (stackSlotEntry == stackSlots.end()) {
-                        Tmp alias = allocator.getAliasWhenSpilling(tmp);
-                        if (alias != tmp) {
-                            tmp = alias;
-                            hasAliasedTmps = true;
-                        }
-                        return;
-                    }
-#endif
+
                     Width spillWidth = m_tmpWidth.requiredWidth(tmp);
                     Opcode move = Oops;
                     switch (stackSlotMinimumWidth(spillWidth)) {
