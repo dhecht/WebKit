@@ -103,8 +103,8 @@ private:
 enum class Stage {
     New,
     Split,
-    Spill,
     Unspillable,
+    Spill,
     Assigned,
     Spilled,
 };
@@ -570,6 +570,7 @@ private:
 
         Tmp tmp = m_code.newTmp(bank);
         m_map.append(tmp, data);
+        setStageAndEnqueue(tmp, data, Stage::Unspillable);
 
         dataLogLnIf(verbose(), "New spill tmp: ", tmp, ": ", data);
         return tmp;
@@ -607,41 +608,49 @@ private:
                 m_regRanges[reg].addClobber(reg, clobber.index);
         }
 
-        while (!m_queue.isEmpty()) {
-            auto entry = m_queue.dequeue();
-            Tmp tmp = entry.tmp;
-            TmpData& tmpData = m_map[tmp];
-            if (verbose()) {
-                dataLogLn("Pop: ", entry, " tmp: ", tmpData);
-                dumpRegRanges(bank);
-            }
-            if (tryAllocate<bank>(tmp, tmpData))
-                continue;
-            if (tmpData.stage != Stage::Split && tryEvict<bank>(tmp, tmpData))
-                continue;
+        do {
+            while (!m_queue.isEmpty()) {
+                auto entry = m_queue.dequeue();
+                Tmp tmp = entry.tmp;
+                TmpData& tmpData = m_map[tmp];
+                if (verbose()) {
+                    dataLogLn("Pop: ", entry, " tmp: ", tmpData);
+                    dumpRegRanges(bank);
+                }
+                if (tryAllocate<bank>(tmp, tmpData))
+                    continue;
+                if (tmpData.stage != Stage::Split && tryEvict<bank>(tmp, tmpData))
+                    continue;
 
-            switch (tmpData.stage) {
-            case Stage::New:
-                // If we couldn't allocate tmp, allow it to split next time.
-                setStageAndEnqueue(tmp, tmpData, Stage::Split);
-                continue;
-            case Stage::Split:
-                if (!trySplit(tmp, tmpData))
-                    setStageAndEnqueue(tmp, tmpData, Stage::Spill);
-                continue;
-            case Stage::Spill:
-                spill(tmp, tmpData);
-                continue;
-            case Stage::Unspillable:
-                // Unspillables must have been allocated during tryAllocate or tryEvict.
-                RELEASE_ASSERT_NOT_REACHED();
-            case Stage::Assigned:
-            case Stage::Spilled:
-                // Tmps in these stages should not have been enqueued.
+                switch (tmpData.stage) {
+                case Stage::New:
+                    // If we couldn't allocate tmp, allow it to split next time.
+                    setStageAndEnqueue(tmp, tmpData, Stage::Split);
+                    continue;
+                case Stage::Split:
+                    if (!trySplit(tmp, tmpData))
+                        setStageAndEnqueue(tmp, tmpData, Stage::Spill);
+                    continue;
+                case Stage::Spill:
+                    ASSERT(queueContainsOnlySpills()); // XXX: remove
+                    spill(tmp, tmpData);
+                    continue;
+                case Stage::Unspillable:
+                    // Unspillables must have been allocated during tryAllocate or tryEvict.
+                    RELEASE_ASSERT_NOT_REACHED();
+                case Stage::Assigned:
+                case Stage::Spilled:
+                    // Tmps in these stages should not have been enqueued.
+                    RELEASE_ASSERT_NOT_REACHED();
+                }
                 RELEASE_ASSERT_NOT_REACHED();
             }
-            RELEASE_ASSERT_NOT_REACHED();
-        }
+            if (m_didSpill) {
+                emitSpillCodeAndEnqueueNewTmps();
+                m_didSpill = false;
+            }
+            // Process the spill/fill tmps,
+        } while (!m_queue.isEmpty());
     }
 
     template <Bank bank>
@@ -734,21 +743,37 @@ private:
         dataLogLnIf(verbose(), "Evicted ", tmp, " from ", reg);
     }
 
-    bool trySplit(Tmp, TmpData)
+    bool trySplit(Tmp, TmpData&)
     {
         return false;
     }
 
-    void spill(Tmp tmp, TmpData data)
+    void spill(Tmp tmp, TmpData& data)
     {
         RELEASE_ASSERT(data.spillCost != unspillableCost);
-        data.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
         ASSERT(data.assigned == Reg());
-
-        emitSpillCodeAndEnqueueNewTmps(tmp, data.spilled);
+        data.stage = Stage::Spilled;
+        data.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
+        dataLogLnIf(verbose(), "Spilled ", tmp, " to ", data.spilled);
+        // Batch generating spill tmps so that we can limit traversals of the code without
+        // needing to keep track of each tmp's use/defs.
+        // FIXME: revisit if live range splitting needs that info anyway.
+        // FIXME: this might not be the best if e.g. an unspillable forces a loop tmp to be spilled.
+        m_didSpill = true;
     }
 
-    void emitSpillCodeAndEnqueueNewTmps(Tmp spilledTmp, StackSlot* stackSlot)
+    bool queueContainsOnlySpills()
+    {
+        for (auto& elem : m_queue) {
+            if (elem.stage != Stage::Spill) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // FIXME: merge with linear scan emitSpillCode().
+    void emitSpillCodeAndEnqueueNewTmps()
     {
         // FIXME: this is too inefficient to do for each spilled tmp, one at a time.
         for (BasicBlock* block : m_code) {
@@ -762,27 +787,32 @@ private:
                     Arg& arg = inst.args[i];
                     if (!arg.isTmp())
                         continue;
-                    if (arg.tmp() != spilledTmp)
+                    if (arg.isReg())
+                        continue;
+                    StackSlot* spilled = m_map[arg.tmp()].spilled;
+                    if (!spilled)
                         continue;
                     if (!inst.admitsStack(i))
                         continue;
-                    arg = Arg::stack(stackSlot);
+                    arg = Arg::stack(spilled);
                 }
 
                 // Fall back on the hard way.
                 inst.forEachTmp(
                     [&] (Tmp& tmp, Arg::Role role, Bank bank, Width) {
-                        if (tmp != spilledTmp)
+                        if (tmp.isReg())
+                            return;
+                        StackSlot* spilled = m_map[tmp].spilled;
+                        if (!spilled)
                             return;
                         Opcode move = bank == GP ? Move : MoveDouble;
                         tmp = addSpillTmpWithInterval(bank, intervalForSpill(indexOfEarly, role));
-                        setStageAndEnqueue(tmp, m_map[tmp], Stage::Unspillable);
                         if (role == Arg::Scratch)
                             return;
                         if (Arg::isAnyUse(role))
-                            m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, Arg::stack(stackSlot), tmp);
+                            m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, Arg::stack(spilled), tmp);
                         if (Arg::isAnyDef(role))
-                            m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, tmp, Arg::stack(stackSlot));
+                            m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, tmp, Arg::stack(spilled));
                     });
             }
         }
@@ -797,7 +827,7 @@ private:
     void assignRegisters()
     {
         if (verbose()) {
-            dataLog("About to allocate registers. State of all tmps:\n");
+            dataLog("About to assign registers. State of all tmps:\n");
             m_code.forEachTmp(
                 [&] (Tmp tmp) {
                     dataLog("    ", tmp, ": ", m_map[tmp], "\n");
@@ -836,6 +866,7 @@ private:
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     Vector<Clobber> m_clobbers;
     UseCounts m_useCounts;
+    bool m_didSpill { false };
 };
 
 } // anonymous namespace
