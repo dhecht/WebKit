@@ -112,15 +112,16 @@ void prepareForGeneration(Code& code)
 
     eliminateDeadCode(code);
 
-    auto useLinearScan = [&code](size_t numTmps) -> bool {
+    auto useLinearScan = [](Code& code) -> bool {
         if (code.usesSIMD())
             return false;
         if (Options::airForceGreedyAllocator())
             return false;
+        unsigned numTmps = code.numTmps(Bank::GP) + code.numTmps(Bank::FP);
         return code.optLevel() == 1 || numTmps > Options::maximumTmpsForGraphColoring();
     };
 
-    if (useLinearScan(code.numTmps(Bank::GP) + code.numTmps(Bank::FP))) {
+    if (useLinearScan(code)) {
         // When we're compiling quickly, we do register and stack allocation in one linear scan
         // phase. It's fast because it computes liveness only once.
         allocateRegistersAndStackByLinearScan(code);
