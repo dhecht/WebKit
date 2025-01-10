@@ -38,6 +38,7 @@
 #include "AirPhaseScope.h"
 #include "AirRegLiveness.h"
 #include "AirTmpMap.h"
+#include "AirTmpWidth.h"
 #include "AirUseCounts.h"
 #include <wtf/IterationStatus.h>
 #include <wtf/ListDump.h>
@@ -304,6 +305,7 @@ public:
         , m_regRanges(Reg::maxIndex() + 1)
         , m_insertionSets(code.size())
         , m_useCounts(m_code)
+        , m_tmpWidth()
     {
     }
 
@@ -609,6 +611,9 @@ private:
         }
 
         do {
+            // FIXME: rather than recompute, try adding spill tmp widths on the fly.
+            m_tmpWidth.recompute<bank>(m_code);
+
             while (!m_queue.isEmpty()) {
                 auto entry = m_queue.dequeue();
                 Tmp tmp = entry.tmp;
@@ -646,7 +651,7 @@ private:
                 RELEASE_ASSERT_NOT_REACHED();
             }
             if (m_didSpill) {
-                emitSpillCodeAndEnqueueNewTmps();
+                emitSpillCodeAndEnqueueNewTmps<bank>();
                 m_didSpill = false;
             }
             // Process the spill/fill tmps,
@@ -748,12 +753,23 @@ private:
         return false;
     }
 
+    // FIXME: dup from GraphColoring.cpp
+    static unsigned stackSlotMinimumWidth(Width width)
+    {
+        if (width <= Width32)
+            return 4;
+        if (width <= Width64)
+            return 8;
+        ASSERT(width == Width128);
+        return 16;
+    }
+
     void spill(Tmp tmp, TmpData& data)
     {
         RELEASE_ASSERT(data.spillCost != unspillableCost);
         ASSERT(data.assigned == Reg());
         data.stage = Stage::Spilled;
-        data.spilled = m_code.addStackSlot(conservativeRegisterBytesWithoutVectors(tmp.bank()), StackSlotKind::Spill);
+        data.spilled = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
         dataLogLnIf(verbose(), "Spilled ", tmp, " to ", data.spilled);
         // Batch generating spill tmps so that we can limit traversals of the code without
         // needing to keep track of each tmp's use/defs.
@@ -773,6 +789,7 @@ private:
     }
 
     // FIXME: merge with linear scan emitSpillCode().
+    template <Bank bank>
     void emitSpillCodeAndEnqueueNewTmps()
     {
         // FIXME: this is too inefficient to do for each spilled tmp, one at a time.
@@ -782,38 +799,179 @@ private:
                 Inst& inst = block->at(instIndex);
                 unsigned indexOfEarly = indexOfHead + instIndex * 2;
 
-                // First try to spill directly.
-                for (unsigned i = 0; i < inst.args.size(); ++i) {
-                    Arg& arg = inst.args[i];
-                    if (!arg.isTmp())
-                        continue;
-                    if (arg.isReg())
-                        continue;
-                    StackSlot* spilled = m_map[arg.tmp()].spilled;
-                    if (!spilled)
-                        continue;
-                    if (!inst.admitsStack(i))
-                        continue;
-                    arg = Arg::stack(spilled);
+                // The TmpWidth analysis will say that a Move only stores 32 bits into the destination,
+                // if the source only had 32 bits worth of non-zero bits. Same for the source: it will
+                // only claim to read 32 bits from the source if only 32 bits of the destination are
+                // read. Note that we only apply this logic if this turns into a load or store, since
+                // Move is the canonical way to move data between GPRs.
+                bool canUseMove32IfDidSpill = false;
+                bool didSpill = false;
+                bool needScratch = false;
+                if (bank == GP && inst.kind.opcode == Move) {
+                    if ((inst.args[0].isTmp() && m_tmpWidth.width(inst.args[0].tmp()) <= Width32)
+                        || (inst.args[1].isTmp() && m_tmpWidth.width(inst.args[1].tmp()) <= Width32))
+                        canUseMove32IfDidSpill = true;
                 }
 
-                // Fall back on the hard way.
-                inst.forEachTmp(
-                    [&] (Tmp& tmp, Arg::Role role, Bank bank, Width) {
-                        if (tmp.isReg())
+                // Try to replace the register use by memory use when possible.
+                inst.forEachArg(
+                    [&] (Arg& arg, Arg::Role role, Bank argBank, Width width) {
+                        if (!arg.isTmp())
                             return;
-                        StackSlot* spilled = m_map[tmp].spilled;
+                        if (argBank != bank)
+                            return;
+                        if (arg.isReg())
+                            return;
+                        StackSlot* spilled = m_map[arg.tmp()].spilled;
                         if (!spilled)
                             return;
-                        Opcode move = bank == GP ? Move : MoveDouble;
-                        tmp = addSpillTmpWithInterval(bank, intervalForSpill(indexOfEarly, role));
-                        if (role == Arg::Scratch)
+                        bool needScratchIfSpilledInPlace = false;
+                        if (!inst.admitsStack(arg)) {
+                            if (false) // XXX
+                                dataLog("Have an inst that won't admit stack: ", inst, "\n");
+                            switch (inst.kind.opcode) {
+                            case Move:
+                            case MoveDouble:
+                            case MoveFloat:
+                            case Move32: {
+                                unsigned argIndex = &arg - &inst.args[0];
+                                unsigned otherArgIndex = argIndex ^ 1;
+                                Arg otherArg = inst.args[otherArgIndex];
+                                if (inst.args.size() == 2
+                                    && otherArg.isStack()
+                                    && otherArg.stackSlot()->isSpill()) {
+                                    needScratchIfSpilledInPlace = true;
+                                    break;
+                                }
+                                return;
+                            }
+                            default:
+                                return;
+                            }
+                        }
+#if 0                        
+                        // If the Tmp holds a constant then we want to rematerialize its
+                        // value rather than loading it from the stack. In order for that
+                        // optimization to kick in, we need to avoid placing the Tmp's stack
+                        // address into the instruction.
+                        if (!Arg::isColdUse(role) && m_useCounts.isConstDef<bank>(AbsoluteTmpMapper<bank>::absoluteIndex(arg.tmp())))
                             return;
-                        if (Arg::isAnyUse(role))
-                            m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, Arg::stack(spilled), tmp);
-                        if (Arg::isAnyDef(role))
-                            m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, tmp, Arg::stack(spilled));
+#endif                        
+                        Width spillWidth = m_tmpWidth.requiredWidth(arg.tmp());
+                        if (Arg::isAnyDef(role) && width < spillWidth) {
+                            // Either there are users of this tmp who will use more than width,
+                            // or there are producers who will produce more than width non-zero
+                            // bits.
+                            // FIXME: It's not clear why we should have to return here. We have
+                            // a ZDef fixup in allocateStack. And if this isn't a ZDef, then it
+                            // doesn't seem like it matters what happens to the high bits. Note
+                            // that this isn't the case where we're storing more than what the
+                            // spill slot can hold - we already got that covered because we
+                            // stretch the spill slot on demand. One possibility is that it's ZDefs of
+                            // smaller width than 32-bit.
+                            // https://bugs.webkit.org/show_bug.cgi?id=169823
+                            return;
+                        }
+                        ASSERT(inst.kind.opcode == Move || !(Arg::isAnyUse(role) && width > spillWidth));
+                        
+                        if (spillWidth != Width32)
+                            canUseMove32IfDidSpill = false;
+                        
+                        spilled->ensureSize(canUseMove32IfDidSpill ? 4 : bytesForWidth(width));
+                        arg = Arg::stack(spilled);
+                        didSpill = true;
+                        if (needScratchIfSpilledInPlace)
+                            needScratch = true;
                     });
+
+                if (didSpill && canUseMove32IfDidSpill)
+                    inst.kind.opcode = Move32;
+                
+                if (needScratch) {
+                    Bank instBank;
+                    switch (inst.kind.opcode) {
+                    case Move:
+                    case Move32:
+                        instBank = GP;
+                        break;
+                    case MoveDouble:
+                    case MoveFloat:
+                        instBank = FP;
+                        break;
+                    default:
+                        RELEASE_ASSERT_NOT_REACHED();
+                        instBank = GP;
+                        break;
+                    }
+                    
+                    RELEASE_ASSERT(instBank == bank);
+                    
+                    // XXX does this need to be EarlyAndLate? Does it matter?
+                    Tmp tmp = addSpillTmpWithInterval(bank, intervalForSpill(indexOfEarly, Arg::Scratch));
+                    // XXX
+                    dataLogLnIf(false, "Add unspillable tmp (scratch) since we introduce it during spill: ", tmp);
+                    inst.args.append(tmp);
+                    RELEASE_ASSERT(inst.args.size() == 3);
+                    
+                    // XXX remove?
+
+                    // Without this, a chain of spill moves would need two registers, not one, because
+                    // the scratch registers of successive moves would appear to interfere with each
+                    // other. As well, we need this if the previous instruction had any late effects,
+                    // since otherwise the scratch would appear to interfere with those. On the other
+                    // hand, the late use added at the end of this spill move (previously it was just a
+                    // late def) doesn't change the padding situation.: the late def would have already
+                    // caused it to report hasLateUseOrDef in Inst::needsPadding.
+                    m_insertionSets[block].insert(instIndex, firstPhase, Nop, inst.origin);
+                    continue;
+                }
+
+                // For every other case, add Load/Store as needed.
+                inst.forEachTmp([&] (Tmp& tmp, Arg::Role role, Bank argBank, Width) {
+                    if (tmp.isReg() || argBank != bank)
+                        return;
+
+                    StackSlot* spilled = m_map[tmp].spilled;
+                    if (!spilled)
+                        return;
+#if 0
+                    if (stackSlotEntry == stackSlots.end()) {
+                        Tmp alias = allocator.getAliasWhenSpilling(tmp);
+                        if (alias != tmp) {
+                            tmp = alias;
+                            hasAliasedTmps = true;
+                        }
+                        return;
+                    }
+#endif
+                    Width spillWidth = m_tmpWidth.requiredWidth(tmp);
+                    Opcode move = Oops;
+                    switch (stackSlotMinimumWidth(spillWidth)) {
+                    case 4:
+                        move = bank == GP ? Move32 : MoveFloat;
+                        break;
+                    case 8:
+                        move = bank == GP ? Move : MoveDouble;
+                        break;
+                    case 16:
+                        ASSERT(bank == FP);
+                        move = MoveVector;
+                        break;
+                    default:
+                        RELEASE_ASSERT_NOT_REACHED();
+                        break;
+                    }
+                    tmp = addSpillTmpWithInterval(bank, intervalForSpill(indexOfEarly, role));
+                    if (role == Arg::Scratch)
+                        return;
+
+                    Arg arg = Arg::stack(spilled);
+                    // FIXME: try rematerialize
+                    if (Arg::isAnyUse(role))
+                        m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, arg, tmp);
+                    if (Arg::isAnyDef(role))
+                        m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, tmp, arg);
+                });
             }
         }
     }
@@ -866,6 +1024,7 @@ private:
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     Vector<Clobber> m_clobbers;
     UseCounts m_useCounts;
+    TmpWidth m_tmpWidth;
     bool m_didSpill { false };
 };
 
