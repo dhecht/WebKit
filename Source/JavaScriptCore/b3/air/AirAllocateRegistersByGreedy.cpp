@@ -888,41 +888,12 @@ private:
                     inst.kind.opcode = Move32;
                 
                 if (needScratch) {
-                    Bank instBank;
-                    switch (inst.kind.opcode) {
-                    case Move:
-                    case Move32:
-                        instBank = GP;
-                        break;
-                    case MoveDouble:
-                    case MoveFloat:
-                        instBank = FP;
-                        break;
-                    default:
-                        RELEASE_ASSERT_NOT_REACHED();
-                        instBank = GP;
-                        break;
-                    }
-                    
-                    RELEASE_ASSERT(instBank == bank);
-                    
                     // XXX does this need to be EarlyAndLate? Does it matter?
                     Tmp tmp = addSpillTmpWithInterval(bank, intervalForSpill(indexOfEarly, Arg::Scratch));
                     // XXX
                     dataLogLnIf(false, "Add unspillable tmp (scratch) since we introduce it during spill: ", tmp);
                     inst.args.append(tmp);
                     RELEASE_ASSERT(inst.args.size() == 3);
-                    
-                    // XXX remove?
-
-                    // Without this, a chain of spill moves would need two registers, not one, because
-                    // the scratch registers of successive moves would appear to interfere with each
-                    // other. As well, we need this if the previous instruction had any late effects,
-                    // since otherwise the scratch would appear to interfere with those. On the other
-                    // hand, the late use added at the end of this spill move (previously it was just a
-                    // late def) doesn't change the padding situation.: the late def would have already
-                    // caused it to report hasLateUseOrDef in Inst::needsPadding.
-                    m_insertionSets[block].insert(instIndex, firstPhase, Nop, inst.origin);
                     continue;
                 }
 
