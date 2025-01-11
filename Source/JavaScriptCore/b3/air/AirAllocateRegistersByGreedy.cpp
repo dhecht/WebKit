@@ -994,6 +994,25 @@ private:
 
                 dataLogLnIf(verbose(), "At: ", inst, mayBeCoalescable ? " [coalescable]" : "");
 
+                if constexpr (isX86_64()) {
+                    // Move32 is cheaper if we know that it's equivalent to a Move in x86_64. It's
+                    // equivalent if the destination's high bits are not observable or if the source's high
+                    // bits are all zero.
+                    if (inst.kind.opcode == Move && inst.args[0].isTmp() && inst.args[1].isTmp()) {
+                        if (m_tmpWidth.useWidth(inst.args[1].tmp()) <= Width32 || m_tmpWidth.defWidth(inst.args[0].tmp()) <= Width32)
+                            inst.kind.opcode = Move32;
+                    }
+                }
+                if constexpr (isARM64()) {
+                    // On the other hand, on ARM64, Move is cheaper than Move32. We would like to use Move instead of Move32.
+                    // Move32 on ARM64 is explicitly selected in B3LowerToAir for ZExt32 for example. But using ZDef information
+                    // here can optimize it from Move32 to Move.
+                    if (inst.kind.opcode == Move32 && inst.args[0].isTmp() && inst.args[1].isTmp()) {
+                        if (m_tmpWidth.defWidth(inst.args[0].tmp()) <= Width32)
+                            inst.kind.opcode = Move;
+                    }
+                }
+
                 inst.forEachTmpFast(
                     [&] (Tmp& tmp) {
                         if (tmp.isReg())
