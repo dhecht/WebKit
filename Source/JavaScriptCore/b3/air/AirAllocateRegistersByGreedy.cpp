@@ -943,6 +943,39 @@ private:
             m_insertionSets[block].execute(block);
     }
 
+    // FIXME: combine with graph coloring version?
+    bool mayBeCoalescable(Inst& inst)
+    {
+        switch (inst.kind.opcode) {
+        case Move:
+        case Move32:
+        case MoveFloat:
+        case MoveDouble:
+        case MoveVector:
+            break;
+        default:
+            return false;
+        }
+
+        // Avoid the three-argument coalescable spill moves.
+        if (inst.args.size() != 2)
+            return false;
+
+        if (!inst.args[0].isTmp() || !inst.args[1].isTmp())
+            return false;
+
+        // We can coalesce a Move32 so long as either of the following holds:
+        // - The input is already zero-filled.
+        // - The output only cares about the low 32 bits.
+        //
+        // Note that the input property requires an analysis over ZDef's, so it's only valid so long
+        // as the input gets a register. We don't know if the input gets a register, but we do know
+        // that if it doesn't get a register then we will still emit this Move32.
+        if (inst.kind.opcode == Move32 && !is32Bit() && m_tmpWidth.defWidth(inst.args[0].tmp()) > Width32)
+            return false;
+        return true;
+    }
+
     void assignRegisters()
     {
         if (verbose()) {
@@ -957,8 +990,10 @@ private:
 
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
-                if (verbose())
-                    dataLog("At: ", inst, "\n");
+                bool mayBeCoalescable = this->mayBeCoalescable(inst);
+
+                dataLogLnIf(verbose(), "At: ", inst, mayBeCoalescable ? " [coalescable]" : "");
+
                 inst.forEachTmpFast(
                     [&] (Tmp& tmp) {
                         if (tmp.isReg())
@@ -971,7 +1006,15 @@ private:
                         }
                         tmp = Tmp(reg);
                     });
+
+                if (mayBeCoalescable && inst.args[0].isTmp() && inst.args[1].isTmp() 
+                    && inst.args[0].tmp() == inst.args[1].tmp())
+                    inst = Inst();
             }
+            // Remove all the useless moves we created in this block.
+            block->insts().removeAllMatching([&] (const Inst& inst) {
+                return !inst;
+            });
         }
     }
 
