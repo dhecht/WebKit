@@ -311,7 +311,7 @@ public:
 
     void run()
     {
-        //padInterference(m_code);
+        padInterference(m_code);
         buildRegisterSets();
         buildIndices();
         buildIntervals();
