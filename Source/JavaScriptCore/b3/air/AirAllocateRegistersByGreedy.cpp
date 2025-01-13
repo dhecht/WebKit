@@ -272,6 +272,7 @@ struct TmpData {
     }
 
     LiveRange liveRange;
+    Reg preferredReg;
     Stage stage { Stage::New };
     float spillCost { 0.0f };
     StackSlot* spilled { nullptr };
@@ -305,7 +306,7 @@ public:
         , m_regRanges(Reg::maxIndex() + 1)
         , m_insertionSets(code.size())
         , m_useCounts(m_code)
-        , m_tmpWidth()
+        , m_tmpWidth(m_code)
     {
     }
 
@@ -515,6 +516,12 @@ private:
                         closeInterval(tmp);
                     }
                 });
+
+                if (mayBeCoalescable(inst) && (inst.args[0].isReg() || inst.args[1].isReg())) {
+                    unsigned regIdx = inst.args[0].isReg() ? 0 : 1;
+                    Tmp other = inst.args[regIdx ^ 1].tmp();
+                    m_map[other].preferredReg = inst.args[regIdx].reg();
+                }
             }
             for (Tmp tmp : liveness.liveAtHead(block)) {
                 if (!tmp.isReg())
@@ -611,9 +618,6 @@ private:
         }
 
         do {
-            // FIXME: rather than recompute, try adding spill tmp widths on the fly.
-            m_tmpWidth.recompute<bank>(m_code);
-
             while (!m_queue.isEmpty()) {
                 auto entry = m_queue.dequeue();
                 Tmp tmp = entry.tmp;
@@ -653,6 +657,9 @@ private:
             if (m_didSpill) {
                 emitSpillCodeAndEnqueueNewTmps<bank>();
                 m_didSpill = false;
+
+                // FIXME: rather than recompute, try adding spill tmp widths on the fly.
+                m_tmpWidth.recompute<bank>(m_code);
             }
             // Process the spill/fill tmps,
         } while (!m_queue.isEmpty());
@@ -662,13 +669,25 @@ private:
     bool tryAllocate(Tmp tmp, TmpData& tmpData)
     {
         ASSERT(&m_map[tmp] == &tmpData);
-        LiveRange& liveRange = tmpData.liveRange;
-        for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
-            auto& regRanges = m_regRanges[r];
+
+        auto tryAllocateToReg = [&](Reg r) {
+            LiveRange& liveRange = tmpData.liveRange;
+            RegisterRanges& regRanges = m_regRanges[r];
             if (!regRanges.hasConflict(liveRange)) {
                 assign(tmp, tmpData, r);
                 return true;
             }
+            return false;
+        };
+
+        if (tmpData.preferredReg && tryAllocateToReg(tmpData.preferredReg))
+            return true;
+
+        for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
+            if (r == tmpData.preferredReg)
+                continue; // Already tried
+            if (tryAllocateToReg(r))
+                return true;
         }
         return false;
     }
