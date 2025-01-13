@@ -111,16 +111,17 @@ enum class Stage {
 };
 
 struct QueueElement {
-    QueueElement(Tmp tmp, Stage stage, size_t rangeSize)
+    QueueElement(Tmp tmp, Stage stage, Reg preferredReg, size_t rangeSize)
         : tmp(tmp)
         , stage(stage)
+        , preferredReg(preferredReg)
         , rangeSize(rangeSize)
     {
     }
 
     void dump(PrintStream& out) const
     {
-        out.print("<", tmp, ", ", stage, ", ", rangeSize, ">");
+        out.print("<", tmp, ", ", stage, ", ", preferredReg, ", ", rangeSize, ">");
     }
  
     static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
@@ -129,18 +130,26 @@ struct QueueElement {
         // FIXME: could prepack so this can be a single comparison.
         if (left.stage < right.stage)
             return true;
-        if (left.stage == right.stage) {
-            if (left.rangeSize > right.rangeSize)
-                return true;
-            if (left.rangeSize == right.rangeSize)
-                return left.tmp.tmpIndex() < right.tmp.tmpIndex();
+        if (left.stage > right.stage)
             return false;
-        }
-        return false;
+
+        if (left.preferredReg != Reg() && right.preferredReg == Reg())
+            return true;
+        if (left.preferredReg == Reg() && right.preferredReg != Reg())
+            return false;
+
+        if (left.rangeSize > right.rangeSize)
+            return true;
+        if (left.rangeSize < right.rangeSize)
+            return false;
+
+        // Guarantee a strict total ordering for determinism.
+        return left.tmp.tmpIndex() < right.tmp.tmpIndex();
     }
 
     Tmp tmp;
     Stage stage;
+    Reg preferredReg;
     size_t rangeSize;
 };
 
@@ -263,7 +272,7 @@ private:
 struct TmpData {
     void dump(PrintStream& out) const
     {
-        out.print("{liveRange = ", liveRange, ", stage = ", stage, ", spillCost = ", spillCost, ", spilled = ", pointerDump(spilled), ", assigned = ", assigned, "}");
+        out.print("{liveRange = ", liveRange, ", preferredReg = ", preferredReg, ", stage = ", stage, ", spillCost = ", spillCost, ", spilled = ", pointerDump(spilled), ", assigned = ", assigned, "}");
     }
 
     void validate()
@@ -596,7 +605,7 @@ private:
         ASSERT(!tmp.isReg());
         ASSERT(stage != Stage::Assigned && stage != Stage::Spilled);
         tmpData.stage = stage;
-        m_queue.enqueue({ tmp, stage, tmpData.liveRange.size() });
+        m_queue.enqueue({ tmp, stage, tmpData.preferredReg, tmpData.liveRange.size() });
     }
 
     template <Bank bank>
