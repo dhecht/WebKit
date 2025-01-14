@@ -528,8 +528,11 @@ private:
 
                 if (mayBeCoalescable(inst) && (inst.args[0].isReg() || inst.args[1].isReg())) {
                     unsigned regIdx = inst.args[0].isReg() ? 0 : 1;
-                    Tmp other = inst.args[regIdx ^ 1].tmp();
-                    m_map[other].preferredReg = inst.args[regIdx].reg();
+                    Reg reg = inst.args[regIdx].reg();
+                    if (m_allAllowedRegisters.contains(reg, IgnoreVectors)) {
+                        Tmp other = inst.args[regIdx ^ 1].tmp();
+                        m_map[other].preferredReg = inst.args[regIdx].reg();
+                    }
                 }
             }
             for (Tmp tmp : liveness.liveAtHead(block)) {
