@@ -579,7 +579,10 @@ private:
                 if (tmp.isReg())
                     return;
                 auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
-                m_map[tmp].spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
+                float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
+                if (tmp.isGP() && m_useCounts.isConstDef<GP>(index))
+                    spillCost /= 2; // Can rematerialize rather than spill in many cases.
+                m_map[tmp].spillCost = spillCost;
         });
     }
 
@@ -879,14 +882,13 @@ private:
                                 return;
                             }
                         }
-#if 0                        
                         // If the Tmp holds a constant then we want to rematerialize its
                         // value rather than loading it from the stack. In order for that
                         // optimization to kick in, we need to avoid placing the Tmp's stack
                         // address into the instruction.
                         if (!Arg::isColdUse(role) && m_useCounts.isConstDef<bank>(AbsoluteTmpMapper<bank>::absoluteIndex(arg.tmp())))
                             return;
-#endif                        
+
                         Width spillWidth = m_tmpWidth.requiredWidth(arg.tmp());
                         if (Arg::isAnyDef(role) && width < spillWidth) {
                             // Either there are users of this tmp who will use more than width,
@@ -955,14 +957,35 @@ private:
                         RELEASE_ASSERT_NOT_REACHED();
                         break;
                     }
+                    auto oldTmp = tmp;
                     tmp = addSpillTmpWithInterval(tmp, intervalForSpill(indexOfEarly, role));
                     if (role == Arg::Scratch)
                         return;
 
                     Arg arg = Arg::stack(spilled);
                     // FIXME: try rematerialize
-                    if (Arg::isAnyUse(role))
-                        m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, arg, tmp);
+                    if (Arg::isAnyUse(role)) {
+                        auto tryRematerialize = [&]() {
+                            if constexpr (bank == GP) {
+                                auto oldIndex = AbsoluteTmpMapper<bank>::absoluteIndex(oldTmp);
+                                if (m_useCounts.isConstDef<bank>(oldIndex)) {
+                                    int64_t value = m_useCounts.constant<bank>(oldIndex);
+                                    if (Arg::isValidImmForm(value) && isValidForm(Move, Arg::Imm, Arg::Tmp)) {
+                                        m_insertionSets[block].insert(instIndex, secondPhase, Move, inst.origin, Arg::imm(value), tmp);
+                                        return true;
+                                    }
+                                    if (isValidForm(Move, Arg::BigImm, Arg::Tmp)) {
+                                        m_insertionSets[block].insert(instIndex, secondPhase, Move, inst.origin, Arg::bigImm(value), tmp);
+                                        return true;
+                                    }
+                                }
+                            }
+                            return false;
+                        };
+
+                        if (!tryRematerialize())
+                            m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, arg, tmp);
+                    }
                     if (Arg::isAnyDef(role))
                         m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, tmp, arg);
                 });
