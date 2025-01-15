@@ -583,13 +583,14 @@ private:
         });
     }
 
-    Tmp addSpillTmpWithInterval(Bank bank, Interval interval)
+    Tmp addSpillTmpWithInterval(Tmp spilledTmp, Interval interval)
     {
         TmpData data;
         data.liveRange.prepend(interval);
         data.spillCost = unspillableCost;
 
-        Tmp tmp = m_code.newTmp(bank);
+        Tmp tmp = m_code.newTmp(spilledTmp.bank());
+        m_tmpWidth.setWidths(tmp, m_tmpWidth.useWidth(spilledTmp), m_tmpWidth.defWidth(spilledTmp));
         m_map.append(tmp, data);
         setStageAndEnqueue(tmp, data, Stage::Unspillable);
 
@@ -669,9 +670,6 @@ private:
             if (m_didSpill) {
                 emitSpillCodeAndEnqueueNewTmps<bank>();
                 m_didSpill = false;
-
-                // FIXME: rather than recompute, try adding spill tmp widths on the fly.
-                m_tmpWidth.recompute<bank>(m_code);
             }
             // Process the spill/fill tmps,
         } while (!m_queue.isEmpty());
@@ -838,6 +836,7 @@ private:
                 bool canUseMove32IfDidSpill = false;
                 bool didSpill = false;
                 bool needScratch = false;
+                Tmp scratchForTmp;
                 if (bank == GP && inst.kind.opcode == Move) {
                     if ((inst.args[0].isTmp() && m_tmpWidth.width(inst.args[0].tmp()) <= Width32)
                         || (inst.args[1].isTmp() && m_tmpWidth.width(inst.args[1].tmp()) <= Width32))
@@ -909,18 +908,21 @@ private:
                             canUseMove32IfDidSpill = false;
                         
                         spilled->ensureSize(canUseMove32IfDidSpill ? 4 : bytesForWidth(width));
-                        arg = Arg::stack(spilled);
                         didSpill = true;
-                        if (needScratchIfSpilledInPlace)
+                        if (needScratchIfSpilledInPlace) {
                             needScratch = true;
+                            scratchForTmp = arg.tmp();
+                        }
+                        arg = Arg::stack(spilled);
                     });
 
                 if (didSpill && canUseMove32IfDidSpill)
                     inst.kind.opcode = Move32;
                 
                 if (needScratch) {
+                    ASSERT(scratchForTmp != Tmp());
                     // XXX does this need to be EarlyAndLate? Does it matter?
-                    Tmp tmp = addSpillTmpWithInterval(bank, intervalForSpill(indexOfEarly, Arg::Scratch));
+                    Tmp tmp = addSpillTmpWithInterval(scratchForTmp, intervalForSpill(indexOfEarly, Arg::Scratch));
                     // XXX
                     dataLogLnIf(false, "Add unspillable tmp (scratch) since we introduce it during spill: ", tmp);
                     inst.args.append(tmp);
@@ -953,7 +955,7 @@ private:
                         RELEASE_ASSERT_NOT_REACHED();
                         break;
                     }
-                    tmp = addSpillTmpWithInterval(bank, intervalForSpill(indexOfEarly, role));
+                    tmp = addSpillTmpWithInterval(tmp, intervalForSpill(indexOfEarly, role));
                     if (role == Arg::Scratch)
                         return;
 
