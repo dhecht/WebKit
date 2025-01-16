@@ -269,10 +269,20 @@ private:
     AllocatedIntervalSet m_allocations;
 };
 
+struct AffinityWith {
+    void dump(PrintStream& out) const
+    {
+        out.print("(", other, ", ", weight, ")");
+    }
+
+    Tmp other;
+    float weight;
+};
+
 struct TmpData {
     void dump(PrintStream& out) const
     {
-        out.print("{liveRange = ", liveRange, ", preferredReg = ", preferredReg, ", stage = ", stage, ", spillCost = ", spillCost, ", spilled = ", pointerDump(spilled), ", assigned = ", assigned, "}");
+        out.print("{liveRange = ", liveRange, ", preferredReg = ", preferredReg, ", affinity = ", listDump(affinity), ", spillCost = ", spillCost, ", stage = ", stage, ", assigned = ", assigned, ", spilled = ", pointerDump(spilled), "}");
     }
 
     void validate()
@@ -281,12 +291,16 @@ struct TmpData {
     }
 
     LiveRange liveRange;
-    Reg preferredReg;
-    Stage stage { Stage::New };
     float spillCost { 0.0f };
-    StackSlot* spilled { nullptr };
+    Reg preferredReg;
+    Vector<AffinityWith> affinity;
+
+    Stage stage { Stage::New };
+
     Reg assigned;
+    StackSlot* spilled { nullptr };
 };
+
 
 struct Clobber {
     Clobber() = default;
@@ -327,6 +341,7 @@ public:
         buildIntervals();
         initSpillCosts<GP>();
         initSpillCosts<FP>();
+        finalizeAffinity();
 
         allocateRegisters<GP>();
         allocateRegisters<FP>();
@@ -460,6 +475,29 @@ private:
         }
     }
 
+    void addAffinity(Tmp a, Tmp b, float freq)
+    {
+        auto& tmpData = m_map[a];
+        for (auto& aff : tmpData.affinity) {
+            if (aff.other == b) {
+                aff.weight += freq;
+                return;
+            }
+        }
+        tmpData.affinity.append(AffinityWith{ b, freq });
+    }
+
+    void finalizeAffinity()
+    {
+        m_code.forAllTmps([&](Tmp tmp) {
+            auto& affinity = m_map[tmp].affinity;
+            std::sort(affinity.begin(), affinity.end(),
+                [] (AffinityWith& a, AffinityWith& b) -> bool {
+                    return a.weight > b.weight;
+            });
+        });
+    }
+
     void buildIntervals()
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildIntervals"_s);
@@ -526,13 +564,20 @@ private:
                     }
                 });
 
-                if (mayBeCoalescable(inst) && (inst.args[0].isReg() || inst.args[1].isReg())) {
-                    unsigned regIdx = inst.args[0].isReg() ? 0 : 1;
-                    Reg reg = inst.args[regIdx].reg();
-                    if (m_allAllowedRegisters.contains(reg, IgnoreVectors)) {
-                        Tmp other = inst.args[regIdx ^ 1].tmp();
-                        if (!m_map[other].preferredReg)
-                            m_map[other].preferredReg = inst.args[regIdx].reg();
+                if (mayBeCoalescable(inst)) {
+                    ASSERT(inst.args.size() == 2);
+                    if (inst.args[0].isReg() || inst.args[1].isReg()) {
+                        unsigned regIdx = inst.args[0].isReg() ? 0 : 1;
+                        Reg reg = inst.args[regIdx].reg();
+                        if (m_allAllowedRegisters.contains(reg, IgnoreVectors)) {
+                            Tmp other = inst.args[regIdx ^ 1].tmp();
+                            if (!m_map[other].preferredReg)
+                                m_map[other].preferredReg = inst.args[regIdx].reg();
+                        }
+                    } else {
+                        ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
+                        addAffinity(inst.args[0].tmp(), inst.args[1].tmp(), block->frequency());
+                        addAffinity(inst.args[1].tmp(), inst.args[0].tmp(), block->frequency());
                     }
                 }
             }
@@ -694,12 +739,23 @@ private:
             return false;
         };
 
-        if (tmpData.preferredReg && tryAllocateToReg(tmpData.preferredReg))
-            return true;
-
+        ScalarRegisterSet alreadyAttempted;
+        for (auto& affinity : tmpData.affinity) {
+            Reg r = m_map[affinity.other].assigned;
+            if (r) {
+                if (tryAllocateToReg(r))
+                    return true;
+                alreadyAttempted.add(r, IgnoreVectors);
+            }
+        }
+        if (tmpData.preferredReg) {
+            if (tryAllocateToReg(tmpData.preferredReg))
+                return true;
+            alreadyAttempted.add(tmpData.preferredReg, IgnoreVectors);
+        }
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
-            if (r == tmpData.preferredReg)
-                continue; // Already tried
+            if (alreadyAttempted.contains(r, IgnoreVectors))
+                continue;
             if (tryAllocateToReg(r))
                 return true;
         }
