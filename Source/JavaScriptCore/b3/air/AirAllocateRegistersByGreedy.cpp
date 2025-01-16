@@ -111,17 +111,17 @@ enum class Stage {
 };
 
 struct QueueElement {
-    QueueElement(Tmp tmp, Stage stage, Reg preferredReg, size_t rangeSize)
+    QueueElement(Tmp tmp, Stage stage, bool maybeCoalescable, size_t rangeSize)
         : tmp(tmp)
         , stage(stage)
-        , preferredReg(preferredReg)
+        , maybeCoalescable(maybeCoalescable)
         , rangeSize(rangeSize)
     {
     }
 
     void dump(PrintStream& out) const
     {
-        out.print("<", tmp, ", ", stage, ", ", preferredReg, ", ", rangeSize, ">");
+        out.print("<", tmp, ", ", stage, ", ", maybeCoalescable, ", ", rangeSize, ">");
     }
  
     static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
@@ -133,9 +133,9 @@ struct QueueElement {
         if (left.stage > right.stage)
             return false;
 
-        if (left.preferredReg != Reg() && right.preferredReg == Reg())
+        if (left.maybeCoalescable && !right.maybeCoalescable)
             return true;
-        if (left.preferredReg == Reg() && right.preferredReg != Reg())
+        if (!left.maybeCoalescable && right.maybeCoalescable)
             return false;
 
         if (left.rangeSize > right.rangeSize)
@@ -149,7 +149,7 @@ struct QueueElement {
 
     Tmp tmp;
     Stage stage;
-    Reg preferredReg;
+    bool maybeCoalescable;
     size_t rangeSize;
 };
 
@@ -669,7 +669,7 @@ private:
         ASSERT(!tmp.isReg());
         ASSERT(stage != Stage::Assigned && stage != Stage::Spilled);
         tmpData.stage = stage;
-        m_queue.enqueue({ tmp, stage, tmpData.preferredReg, tmpData.liveRange.size() });
+        m_queue.enqueue({ tmp, stage, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.size() });
     }
 
     template <Bank bank>
