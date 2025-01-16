@@ -492,8 +492,19 @@ private:
         m_code.forAllTmps([&](Tmp tmp) {
             auto& affinity = m_map[tmp].affinity;
             std::sort(affinity.begin(), affinity.end(),
-                [] (AffinityWith& a, AffinityWith& b) -> bool {
-                    return a.weight > b.weight;
+                [this] (AffinityWith& a, AffinityWith& b) -> bool {
+                    if (a.weight > b.weight)
+                        return true;
+                    if (a.weight < b.weight)
+                        return false;
+                    // Favor coalescing shorter live ranges.
+                    auto aSize = m_map[a.other].liveRange.size();
+                    auto bSize = m_map[b.other].liveRange.size();
+                    if (aSize < bSize)
+                        return true;
+                    if (aSize > bSize)
+                        return false;
+                    return a.other.tmpIndex() < b.other.tmpIndex();
             });
         });
     }
