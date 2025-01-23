@@ -214,7 +214,7 @@ JSValue JSStringJoiner::joinSlow(JSGlobalObject* globalObject)
         throwOutOfMemoryError(globalObject, scope);
         return { };
     }
-
+    RELEASE_ASSERT((std::bit_cast<uintptr_t>(result.impl()) & 1) == 0);
     return jsString(vm, WTFMove(result));
 }
 

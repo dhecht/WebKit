@@ -144,16 +144,27 @@ BINLINE void* memalign(size_t alignment, size_t size, CompactAllocationMode mode
 #endif
 }
 
+
 // Returns null on failure.
 BINLINE void* tryRealloc(void* object, size_t newSize, CompactAllocationMode mode, HeapKind kind = HeapKind::Primary)
 {
+static int* zeroPtr;
+
 #if BUSE(LIBPAS)
+    void *ptr;
     if (!isGigacage(kind)) {
-        return bmalloc_try_reallocate_inline(
+        ptr = bmalloc_try_reallocate_inline(
             object, newSize, asPasAllocationMode(mode), pas_reallocate_free_if_successful);
-    }
-    return bmalloc_try_reallocate_auxiliary_inline(
+    } else {
+        ptr = bmalloc_try_reallocate_auxiliary_inline(
         object, &heapForKind(gigacageKind(kind)), newSize, asPasAllocationMode(mode), pas_reallocate_free_if_successful);
+    }
+    if ((uintptr_t)ptr % 4) {
+        printf("XXX tryRealloc old=%p new=%p, newSize=%zx, isGiga=%d\n",
+            object, ptr, newSize, isGigacage(kind));
+        *zeroPtr = 42;
+    }
+    return ptr;
 #else
     BUNUSED(mode);
     return Cache::tryReallocate(kind, object, newSize);

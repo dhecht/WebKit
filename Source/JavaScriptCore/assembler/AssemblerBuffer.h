@@ -207,13 +207,32 @@ namespace JSC {
 
         void grow(unsigned extraCapacity = 0)
         {
+            void *old = m_buffer;
+            auto oldCapacity = m_capacity;
+            auto checkAlign = [&](int line) {
+#if 0
+                if (m_capacity % 2) {
+                    fflush(stdout);
+                    dataLogLn("XXX AssemblerDataImpl::grow size unaligned [", line, "] old=", RawPointer(old), " m_buffer=", RawPointer(m_buffer), " m_capacity=", m_capacity, " oldCapacity=", oldCapacity, " extraCapacity=", extraCapacity);
+                }
+#endif
+                if (((uintptr_t)m_buffer % 4)) {
+                    fflush(stdout);
+                    dataLogLn("XXX AssemblerDataImpl::grow[", line, "] old=", RawPointer(old), " m_buffer=", RawPointer(m_buffer), " m_capacity=", m_capacity, " oldCapacity=", oldCapacity, " extraCapacity=", extraCapacity);
+                    RELEASE_ASSERT_NOT_REACHED();
+                }
+            };
             m_capacity = m_capacity + m_capacity / 2 + extraCapacity;
             if (isInlineBuffer()) {
                 m_buffer = static_cast<char*>(AssemblerDataMalloc::malloc(m_capacity));
+                checkAlign(__LINE__);
                 memcpy(m_buffer, m_inlineBuffer, InlineCapacity);
-            } else
-                m_buffer = static_cast<char*>(AssemblerDataMalloc::realloc(m_buffer, m_capacity));
+            } else {
+                m_buffer = static_cast<char*>(FastMalloc::realloc(m_buffer, m_capacity));
+                checkAlign(__LINE__);
+            }
         }
+        bool isInlineBuffer() const { return m_buffer == m_inlineBuffer; }
 
     private:
         void poisonInlineBuffer()
@@ -227,7 +246,6 @@ namespace JSC {
             memset(m_inlineBuffer, poisonByte, InlineCapacity);
         }
 
-        bool isInlineBuffer() const { return m_buffer == m_inlineBuffer; }
         char* m_buffer;
         char m_inlineBuffer[InlineCapacity];
         unsigned m_capacity;

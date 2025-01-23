@@ -92,7 +92,7 @@ pas_try_allocate_intrinsic_impl_casual_case(
     pas_try_allocate_common_slow try_allocate_common_slow,
     pas_intrinsic_heap_designation_mode designation_mode)
 {
-    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_OTHER);
+    static const bool verbose = false;//PAS_SHOULD_LOG(PAS_LOG_OTHER);
     
     size_t aligned_size;
     size_t index;
@@ -192,7 +192,7 @@ pas_try_allocate_intrinsic_impl_inline_only(
     pas_try_allocate_common_fast_inline_only try_allocate_common_fast_inline_only,
     pas_intrinsic_heap_designation_mode designation_mode)
 {
-    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_OTHER);
+    static const bool verbose = false;//PAS_SHOULD_LOG(PAS_LOG_OTHER);
     
     size_t aligned_size;
     size_t index;

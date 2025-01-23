@@ -562,6 +562,7 @@ void* fastMalloc(size_t size)
         MallocCallTracker::singleton().recordMalloc(result, size);
 #endif
     BPROFILE_ALLOCATION(NON_JS_CELL, result, size);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -575,6 +576,7 @@ void* fastZeroedMalloc(size_t size)
         MallocCallTracker::singleton().recordMalloc(result, size);
 #endif
     BPROFILE_ALLOCATION(NON_JS_CELL, result, size);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -584,6 +586,7 @@ TryMallocReturnValue tryFastZeroedMalloc(size_t size)
     ASSERT(!forbidMallocUseScopeCount || disableMallocRestrictionScopeCount);
     void* result = bmalloc::api::tryZeroedMalloc(size, bmalloc::CompactAllocationMode::NonCompact);
     BPROFILE_TRY_ALLOCATION(NON_JS_CELL, result, size);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -596,6 +599,7 @@ void* fastCalloc(size_t numElements, size_t elementSize)
     if (!result)
         CRASH();
     BPROFILE_ALLOCATION(NON_JS_CELL, result, checkedSize);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -604,11 +608,13 @@ void* fastRealloc(void* object, size_t size)
     ASSERT_IS_WITHIN_LIMIT(size);
     ASSERT(!forbidMallocUseScopeCount || disableMallocRestrictionScopeCount);
     void* result = bmalloc::api::realloc(object, size, bmalloc::CompactAllocationMode::NonCompact);
+    //printf("XXX fastRealloc %p -> %p %zu\n", object, result, size);
 #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
     if (!AvoidRecordingScope::avoidRecordingCount())
         MallocCallTracker::singleton().recordRealloc(object, result, size);
 #endif
     BPROFILE_ALLOCATION(NON_JS_CELL, result, size);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -680,6 +686,7 @@ TryMallocReturnValue tryFastMalloc(size_t size)
     ASSERT(!forbidMallocUseScopeCount || disableMallocRestrictionScopeCount);
     void* result = bmalloc::api::tryMalloc(size, bmalloc::CompactAllocationMode::NonCompact);
     BPROFILE_TRY_ALLOCATION(NON_JS_CELL, result, size);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -699,6 +706,7 @@ TryMallocReturnValue tryFastRealloc(void* object, size_t newSize)
     ASSERT(!forbidMallocUseScopeCount || disableMallocRestrictionScopeCount);
     void* result = bmalloc::api::tryRealloc(object, newSize, bmalloc::CompactAllocationMode::NonCompact);
     BPROFILE_TRY_ALLOCATION(NON_JS_CELL, result, newSize);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -712,6 +720,7 @@ void* fastCompactMalloc(size_t size)
         MallocCallTracker::singleton().recordMalloc(result, size);
 #endif
     BPROFILE_ALLOCATION(COMPACTIBLE, result, size);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -725,6 +734,7 @@ void* fastCompactZeroedMalloc(size_t size)
         MallocCallTracker::singleton().recordMalloc(result, size);
 #endif
     BPROFILE_ALLOCATION(COMPACTIBLE, result, size);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -744,6 +754,7 @@ void* fastCompactCalloc(size_t numElements, size_t elementSize)
     if (!result)
         CRASH();
     BPROFILE_ALLOCATION(COMPACTIBLE, result, elementSize);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 
@@ -757,6 +768,7 @@ void* fastCompactRealloc(void* object, size_t size)
         MallocCallTracker::singleton().recordRealloc(object, result, size);
 #endif
     BPROFILE_ALLOCATION(COMPACTIBLE, result, size);
+    RELEASE_ASSERT(!((uintptr_t)result % 16));
     return result;
 }
 

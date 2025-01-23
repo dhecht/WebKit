@@ -319,6 +319,22 @@ void LinkBuffer::copyCompactAndLinkCode(MacroAssembler& macroAssembler, JITCompi
 #endif
         return value;
     };
+    auto dataLogVals = [&](int line) {
+        dataLogLn("XXX checkAlign fail [", line, "]: readPtr=", readPtr, " writePtr=", writePtr, " inData=", WTF::RawPointer(inData), " inInline=", m_assemblerStorage.isInlineBuffer(), " outData=", RawPointer(outData));
+        RELEASE_ASSERT_NOT_REACHED();
+    };
+    auto checkAlignOne = [&](int line, uintptr_t val) {
+        if (val % sizeof(InstructionType)) {
+            dataLogVals(line);
+        }
+    };
+    auto checkAlign = [&](int line) {
+        checkAlignOne(line, readPtr);
+        checkAlignOne(line, writePtr);
+        checkAlignOne(line, (uintptr_t)inData);
+        checkAlignOne(line, (uintptr_t)outData);
+    };
+    checkAlign(__LINE__);
 
     if (g_jscConfig.useFastJITPermissions)
         threadSelfRestrict<MemoryRestriction::kRwxToRw>();
@@ -328,6 +344,8 @@ void LinkBuffer::copyCompactAndLinkCode(MacroAssembler& macroAssembler, JITCompi
 
     if (m_shouldPerformBranchCompaction) {
         for (unsigned i = 0; i < jumpCount; ++i) {
+            checkAlign(__LINE__);
+
             auto& linkRecord = jumpsToLink[i];
             int offset = readPtr - writePtr;
             ASSERT(!(offset & 1));
@@ -377,6 +395,8 @@ void LinkBuffer::copyCompactAndLinkCode(MacroAssembler& macroAssembler, JITCompi
                 ASSERT(!MacroAssembler::canCompact(jumpsToLink[i].type()));
         }
     }
+    checkAlign(__LINE__);
+
 
     // Copy everything after the last jump
     {
@@ -384,6 +404,7 @@ void LinkBuffer::copyCompactAndLinkCode(MacroAssembler& macroAssembler, JITCompi
         InstructionType* src = std::bit_cast<InstructionType*>(inData + readPtr);
         size_t bytes = initialSize - readPtr;
 
+        checkAlign(__LINE__);
         RELEASE_ASSERT(!(std::bit_cast<uintptr_t>(dst) % sizeof(InstructionType)));
         RELEASE_ASSERT(!(std::bit_cast<uintptr_t>(src) % sizeof(InstructionType)));
         RELEASE_ASSERT(!(bytes % sizeof(InstructionType)));

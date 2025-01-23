@@ -123,18 +123,22 @@ pas_try_reallocate_table_segregated_case(pas_page_base* page_base,
                                          pas_try_reallocate_allocate_callback allocate_callback,
                                          void* allocate_callback_arg)
 {
+    static const bool verbose = false;
+
     size_t old_size;
     pas_allocation_result result;
     pas_heap* old_heap;
     pas_segregated_page* page;
     
     page = pas_page_base_get_segregated(page_base);
+    if (verbose) printf("XXX pas_try_reallocate_table_segregated_case %lx, teleport_rule=%x\n", begin, teleport_rule);
     
     switch (teleport_rule) {
     case pas_reallocate_allow_heap_teleport:
         old_size = pas_segregated_page_get_object_size_for_address_in_page(
             page, begin, segregated_config, segregated_role);
         old_heap = NULL;
+        if (verbose) printf("XXX pas_try_reallocate_table_segregated_case allow %lx, old_size=%zx\n", begin, old_size);
         break;
         
     case pas_reallocate_disallow_heap_teleport: {
@@ -143,6 +147,7 @@ pas_try_reallocate_table_segregated_case(pas_page_base* page_base,
             page, begin, segregated_config, segregated_role);
         old_size = directory->object_size;
         old_heap = pas_heap_for_segregated_heap(directory->heap);
+        if (verbose) printf("XXX pas_try_reallocate_table_segregated_case disallow %lx, old_size=%zx\n", begin, old_size);
         break;
     } }
     
@@ -208,10 +213,14 @@ pas_try_reallocate(void* old_ptr,
                    pas_try_reallocate_allocate_callback allocate_callback,
                    void* allocate_callback_arg)
 {
+    static const bool verbose = false;
+
     uintptr_t begin;
     begin = (uintptr_t)old_ptr;
     PAS_PROFILE(TRY_REALLOCATE, &config, begin);
     old_ptr = (void*)begin;
+
+    if (verbose) printf("XXX try_realloc begin=%lx kind=%x new_size=%zu\n", begin, config.fast_megapage_kind_func(begin), new_size);
 
     switch (config.fast_megapage_kind_func(begin)) {
     case pas_small_exclusive_segregated_fast_megapage_kind: {
@@ -238,6 +247,7 @@ pas_try_reallocate(void* old_ptr,
         result = pas_try_allocate_for_reallocate_and_copy(
             old_heap, heap, old_ptr, old_size, new_size, allocation_mode, teleport_rule,
             allocate_callback, allocate_callback_arg);
+        PAS_ASSERT(!(result.begin % 4));
         if (result.begin || free_mode == pas_reallocate_free_always) {
             pas_deallocate_known_segregated(old_ptr, config.small_segregated_config,
                                             pas_segregated_page_exclusive_role);
@@ -270,7 +280,9 @@ pas_try_reallocate(void* old_ptr,
         pas_page_base* page_base;
 
         page_base = config.page_header_func(begin);
+        if (verbose) printf("XXX try_realloc page_base=%p\n", page_base);
         if (page_base) {
+            if (verbose) printf("XXX try_realloc page_base=%p kind=%x\n", page_base, pas_page_base_get_kind(page_base));
             switch (pas_page_base_get_kind(page_base)) {
             case pas_small_shared_segregated_page_kind:
                 PAS_ASSERT(!config.small_segregated_is_in_megapage);
@@ -344,10 +356,12 @@ pas_try_reallocate(void* old_ptr,
         // Check for PGM case for slow path if object is using PGM large heap
         if (config.pgm_enabled && pas_probabilistic_guard_malloc_check_exists(begin)) {
             entry = pas_probabilistic_guard_malloc_return_as_large_map_entry(begin);
+            if (verbose) printf("XXX try_realloc PGM %lx %lx\n", entry.begin, entry.end);
         } else {
             entry = pas_large_map_find(begin);
             if (pas_large_map_entry_is_empty(entry))
                 pas_reallocation_did_fail("Source object not allocated", NULL, heap, old_ptr, 0, new_size);
+            if (verbose) printf("XXX try_realloc large %lx %lx\n", entry.begin, entry.end);
         }
 
         PAS_PROFILE(LARGE_MAP_FOUND_ENTRY, &config, entry.begin, entry.end);
@@ -363,6 +377,7 @@ pas_try_reallocate(void* old_ptr,
             source_heap, heap, old_ptr, old_size, new_size, allocation_mode, teleport_rule,
             allocate_callback, allocate_callback_arg);
         
+        if (verbose) printf("XXX try_realloc result %lx %d\n", result.begin, result.did_succeed);
         if (result.begin || free_mode == pas_reallocate_free_always) {
             // Deallocate old PGM entry if its the one reallocated to other entry
             if (pas_try_deallocate_pgm_large(old_ptr, config.config_ptr)) {
@@ -584,7 +599,7 @@ pas_try_reallocate_primitive_allocate_callback(
     data = (pas_try_reallocate_primitive_allocate_data*)arg;
 
     result = data->try_allocate_primitive(data->heap_ref, new_size, allocation_mode);
-
+    PAS_ASSERT(!(result.begin % 4));
     if (verbose)
         pas_log("in realloc - result.begin = %p\n", (void*)result.begin);
     
