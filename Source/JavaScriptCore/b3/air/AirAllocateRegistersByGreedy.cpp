@@ -668,12 +668,12 @@ private:
 
             dataLogLnIf(verbose(), "Creating group rooted at ", tmp);
             worklist.enqueue({ tmp, 0 });
+            visited.add(tmp);
 
             while (!worklist.isEmpty()) {
                 Tmp candidate = worklist.dequeue().tmp;
                 LiveRange& candidateRange = m_map[candidate].liveRange;
 
-                visited.add(candidate);
                 if (!group.hasConflict(candidateRange)) {
                     dataLogLnIf(verbose(), "   Adding ", candidate, " to group");
                     group.add(candidate, candidateRange);
@@ -682,10 +682,11 @@ private:
                     if (!groupPreferredReg && m_map[candidate].preferredReg)
                         groupPreferredReg = m_map[candidate].preferredReg;
                     for (auto& other : m_map[candidate].affinity) {
-                        if (!visited.contains(other.other))
+                        if (!visited.contains(other.other)) {
+                            visited.add(other.other);
                             worklist.enqueue({ other.other, other.weight });
+                        }
                     }
-                    m_map[candidate].affinity.resize(0);
                 } else
                     dataLogLnIf(verbose(), "   Rejected ", candidate);
             }
@@ -751,8 +752,9 @@ private:
     {
         ASSERT(!tmp.isReg());
         ASSERT(stage != Stage::Assigned && stage != Stage::Spilled && stage != Stage::WasSplit);
-        ASSERT(!eagerGroups || !tmpData.affinity.size()); // Eager group -> no affinity
         ASSERT(!tmpData.groupLeader); // Group member should not be enquened
+        ASSERT(eagerGroups || !tmpData.members.size()); // Lazy groups -> not a group leader
+        ASSERT(!tmpData.members.size() || !tmpData.affinity.size()); // Group leader -> no affinities
         tmpData.stage = stage;
         m_queue.enqueue({ tmp, stage, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.size() });
     }
@@ -843,7 +845,6 @@ private:
 
         ScalarRegisterSet alreadyAttempted;
         for (auto& affinity : tmpData.affinity) {
-            ASSERT(!eagerGroups);
             Reg r = m_map[affinity.other].assigned;
             if (r) {
                 if (tryAllocateToReg(r))
