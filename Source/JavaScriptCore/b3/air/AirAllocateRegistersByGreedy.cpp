@@ -751,7 +751,7 @@ private:
         ASSERT(!tmp.isReg());
         ASSERT(stage != Stage::Assigned && stage != Stage::Spilled);
         ASSERT(!eagerGroups || !tmpData.affinity.size()); // Eager group -> no affinity
-        ASSERT(eagerGroups || !tmpData.groupLeader); // Lazy group -> no group leader
+        ASSERT(!tmpData.groupLeader); // Group member should not be enquened
         tmpData.stage = stage;
         m_queue.enqueue({ tmp, stage, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.size() });
     }
@@ -982,6 +982,17 @@ private:
     template <Bank bank>
     void emitSpillCodeAndEnqueueNewTmps()
     {
+        auto spilledLoc = [&](Tmp tmp) {
+            TmpData& tmpData = m_map[tmp];
+            StackSlot* spilled = tmpData.spilled;
+            if (tmpData.groupLeader) {
+                ASSERT(eagerGroups);
+                ASSERT(!spilled);
+                spilled = m_map[tmpData.groupLeader].spilled;
+            }
+            return spilled;
+        };
+
         // FIXME: this is too inefficient to do for each spilled tmp, one at a time.
         for (BasicBlock* block : m_code) {
             size_t indexOfHead = this->indexOfHead(block);
@@ -1013,7 +1024,8 @@ private:
                             return;
                         if (arg.isReg())
                             return;
-                        StackSlot* spilled = m_map[arg.tmp()].spilled;
+
+                        StackSlot* spilled = spilledLoc(arg.tmp());
                         if (!spilled)
                             return;
                         bool needScratchIfSpilledInPlace = false;
@@ -1094,7 +1106,7 @@ private:
                 inst.forEachTmp([&] (Tmp& tmp, Arg::Role role, Bank argBank, Width) {
                     if (tmp.isReg() || argBank != bank)
                         return;
-                    StackSlot* spilled = m_map[tmp].spilled;
+                    StackSlot* spilled = spilledLoc(tmp);
                     if (!spilled)
                         return;
 
