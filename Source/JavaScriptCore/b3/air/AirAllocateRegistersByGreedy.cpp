@@ -243,6 +243,14 @@ public:
         }
     }
 
+    LiveRange toMergedLiveRange()
+    {
+        LiveRange merged;
+        for (auto i = m_allocations.rbegin(); i != m_allocations.rend(); i++)
+            merged.prepend(i->interval);
+        return merged;
+    }
+
     void dump(PrintStream& out) const
     {
         CommaPrinter comma;
@@ -282,7 +290,7 @@ struct AffinityWith {
 struct TmpData {
     void dump(PrintStream& out) const
     {
-        out.print("{liveRange = ", liveRange, ", preferredReg = ", preferredReg, ", affinity = ", listDump(affinity), ", spillCost = ", spillCost, ", stage = ", stage, ", assigned = ", assigned, ", spilled = ", pointerDump(spilled), "}");
+        out.print("{liveRange = ", liveRange, ", preferredReg = ", preferredReg, ", affinity = ", listDump(affinity), ", members = ", listDump(members), ", groupLeader = ", groupLeader, " spillCost = ", spillCost, ", stage = ", stage, ", assigned = ", assigned, ", spilled = ", pointerDump(spilled), "}");
     }
 
     void validate()
@@ -294,6 +302,8 @@ struct TmpData {
     float spillCost { 0.0f };
     Reg preferredReg;
     Vector<AffinityWith> affinity;
+    Vector<Tmp> members;
+    Tmp groupLeader;
 
     Stage stage { Stage::New };
 
@@ -322,6 +332,8 @@ struct Clobber {
 
 class GreedyAllocator {
 public:
+    static constexpr bool eagerGroups = true;
+
     GreedyAllocator(Code& code)
         : m_code(code)
         , m_startIndex(code.size())
@@ -341,7 +353,8 @@ public:
         buildIntervals();
         initSpillCosts<GP>();
         initSpillCosts<FP>();
-        finalizeAffinity();
+        finalizeAffinity<GP>();
+        finalizeAffinity<FP>();
 
         allocateRegisters<GP>();
         allocateRegisters<FP>();
@@ -475,40 +488,6 @@ private:
         }
     }
 
-    void addAffinity(Tmp a, Tmp b, float freq)
-    {
-        auto& tmpData = m_map[a];
-        for (auto& aff : tmpData.affinity) {
-            if (aff.other == b) {
-                aff.weight += freq;
-                return;
-            }
-        }
-        tmpData.affinity.append(AffinityWith{ b, freq });
-    }
-
-    void finalizeAffinity()
-    {
-        m_code.forAllTmps([&](Tmp tmp) {
-            auto& affinity = m_map[tmp].affinity;
-            std::sort(affinity.begin(), affinity.end(),
-                [this] (AffinityWith& a, AffinityWith& b) -> bool {
-                    if (a.weight > b.weight)
-                        return true;
-                    if (a.weight < b.weight)
-                        return false;
-                    // Favor coalescing shorter live ranges.
-                    auto aSize = m_map[a.other].liveRange.size();
-                    auto bSize = m_map[b.other].liveRange.size();
-                    if (aSize < bSize)
-                        return true;
-                    if (aSize > bSize)
-                        return false;
-                    return a.other.tmpIndex() < b.other.tmpIndex();
-            });
-        });
-    }
-
     void buildIntervals()
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildIntervals"_s);
@@ -626,6 +605,109 @@ private:
         }
     }
 
+    void addAffinity(Tmp a, Tmp b, float freq)
+    {
+        auto& tmpData = m_map[a];
+        for (auto& aff : tmpData.affinity) {
+            if (aff.other == b) {
+                aff.weight += freq;
+                return;
+            }
+        }
+        tmpData.affinity.append(AffinityWith{ b, freq });
+    }
+
+    template <Bank bank>
+    void finalizeAffinity()
+    {
+        IndexSet<Tmp::Indexed<bank>> alreadyInGroup;
+        m_code.forAllTmps([&](Tmp tmp) {
+            if (tmp.bank() != bank)
+                return;
+
+            if (alreadyInGroup.contains(tmp))
+                return;
+
+            auto& affinity = m_map[tmp].affinity;
+            if (affinity.isEmpty())
+                return;
+
+            std::sort(affinity.begin(), affinity.end(),
+                [this] (AffinityWith& a, AffinityWith& b) -> bool {
+                    if (a.weight > b.weight)
+                        return true;
+                    if (a.weight < b.weight)
+                        return false;
+                    // Favor coalescing shorter live ranges.
+                    auto aSize = m_map[a.other].liveRange.size();
+                    auto bSize = m_map[b.other].liveRange.size();
+                    if (aSize < bSize)
+                        return true;
+                    if (aSize > bSize)
+                        return false;
+                    return a.other.tmpIndex() < b.other.tmpIndex();
+            });
+
+            if (!eagerGroups)
+                return;
+
+            RegisterRanges group;
+            struct Elem {
+                Tmp tmp;
+                float weight;
+
+                static bool isHigherPriority(const Elem& a, const Elem& b) {
+                    return a.weight > b.weight;
+                }
+            };
+            PriorityQueue<Elem, Elem::isHigherPriority> worklist;
+            Vector<Tmp> groupMembers;
+            IndexSet<Tmp::Indexed<bank>> visited = alreadyInGroup;
+            Reg groupPreferredReg;
+
+            dataLogLnIf(verbose(), "Creating group rooted at ", tmp);
+            worklist.enqueue({ tmp, 0 });
+
+            while (!worklist.isEmpty()) {
+                Tmp candidate = worklist.dequeue().tmp;
+                LiveRange& candidateRange = m_map[candidate].liveRange;
+
+                visited.add(candidate);
+                if (!group.hasConflict(candidateRange)) {
+                    dataLogLnIf(verbose(), "   Adding ", candidate, " to group");
+                    group.add(candidate, candidateRange);
+                    groupMembers.append(candidate);
+                    alreadyInGroup.add(candidate);
+                    if (!groupPreferredReg && m_map[candidate].preferredReg)
+                        groupPreferredReg = m_map[candidate].preferredReg;
+                    for (auto& other : m_map[candidate].affinity) {
+                        if (!visited.contains(other.other))
+                            worklist.enqueue({ other.other, other.weight });
+                    }
+                    m_map[candidate].affinity.resize(0);
+                } else
+                    dataLogLnIf(verbose(), "   Rejected ", candidate);
+            }
+            if (groupMembers.size() > 1) {
+                Tmp groupTmp = m_code.newTmp(bank);
+                TmpData groupData;
+                groupData.liveRange = group.toMergedLiveRange();
+                groupData.preferredReg = groupPreferredReg;
+                groupData.members = WTFMove(groupMembers);
+                Width defWidth, useWidth;
+                defWidth = useWidth = widthForBytes(0);
+                for (Tmp member : groupData.members) {
+                    defWidth = std::max(defWidth, m_tmpWidth.defWidth(member));
+                    useWidth = std::max(useWidth, m_tmpWidth.useWidth(member));
+                    m_map[member].groupLeader = groupTmp;
+                }
+                m_tmpWidth.setWidths(groupTmp, useWidth, defWidth);
+                m_map.append(groupTmp, groupData);
+                dataLogLnIf(verbose(), "Created group ", groupTmp, ": ", m_map[groupTmp]);
+            }
+        });
+    }
+
     template<Bank bank>
     void initSpillCosts()
     {
@@ -668,6 +750,8 @@ private:
     {
         ASSERT(!tmp.isReg());
         ASSERT(stage != Stage::Assigned && stage != Stage::Spilled);
+        ASSERT(!eagerGroups || !tmpData.affinity.size()); // Eager group -> no affinity
+        ASSERT(eagerGroups || !tmpData.groupLeader); // Lazy group -> no group leader
         tmpData.stage = stage;
         m_queue.enqueue({ tmp, stage, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.size() });
     }
@@ -681,7 +765,12 @@ private:
                     return;
                 if (tmp.isReg())
                     return;
-                setStageAndEnqueue(tmp, m_map[tmp], Stage::New);
+                TmpData& tmpData = m_map[tmp];
+                if (tmpData.groupLeader) {
+                    ASSERT(eagerGroups);
+                    return;
+                }
+                setStageAndEnqueue(tmp, tmpData, Stage::New);
         });
 
         // FIXME: could do this more directly rather than via m_clobbers.
@@ -752,6 +841,7 @@ private:
 
         ScalarRegisterSet alreadyAttempted;
         for (auto& affinity : tmpData.affinity) {
+            ASSERT(!eagerGroups);
             Reg r = m_map[affinity.other].assigned;
             if (r) {
                 if (tryAllocateToReg(r))
@@ -1143,6 +1233,12 @@ private:
                             return;
 
                         Reg reg = m_map[tmp].assigned;
+                        TmpData& tmpData = m_map[tmp];
+                        if (tmpData.groupLeader) {
+                            ASSERT(eagerGroups);
+                            ASSERT(!reg);
+                            reg = m_map[tmpData.groupLeader].assigned;
+                        }
                         if (!reg) {
                             dataLog("Failed to allocate reg for: ", tmp, "\n");
                             RELEASE_ASSERT_NOT_REACHED();
