@@ -108,6 +108,7 @@ enum class Stage {
     Spill,
     Assigned,
     Spilled,
+    WasSplit,
 };
 
 struct QueueElement {
@@ -749,7 +750,7 @@ private:
     void setStageAndEnqueue(Tmp tmp, TmpData& tmpData, Stage stage)
     {
         ASSERT(!tmp.isReg());
-        ASSERT(stage != Stage::Assigned && stage != Stage::Spilled);
+        ASSERT(stage != Stage::Assigned && stage != Stage::Spilled && stage != Stage::WasSplit);
         ASSERT(!eagerGroups || !tmpData.affinity.size()); // Eager group -> no affinity
         ASSERT(!tmpData.groupLeader); // Group member should not be enquened
         tmpData.stage = stage;
@@ -811,6 +812,7 @@ private:
                     RELEASE_ASSERT_NOT_REACHED();
                 case Stage::Assigned:
                 case Stage::Spilled:
+                case Stage::WasSplit:
                     // Tmps in these stages should not have been enqueued.
                     RELEASE_ASSERT_NOT_REACHED();
                 }
@@ -938,9 +940,17 @@ private:
         dataLogLnIf(verbose(), "Evicted ", tmp, " from ", reg);
     }
 
-    bool trySplit(Tmp, TmpData&)
+    bool trySplit(Tmp, TmpData& tmpData)
     {
-        return false;
+        if (!tmpData.members.size())
+            return false;
+        for (Tmp member : tmpData.members) {
+            TmpData& memberData = m_map[member];
+            memberData.groupLeader = Tmp();
+            setStageAndEnqueue(member, memberData, Stage::New);
+        }
+        tmpData.stage = Stage::WasSplit;
+        return true;
     }
 
     // FIXME: dup from GraphColoring.cpp
