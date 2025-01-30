@@ -93,7 +93,7 @@ public:
         out.print("{ ");
         for (auto& interval : intervals())
             out.print(comma, interval);
-        out.print(" }");
+        out.print(" }[", m_size, "]");
     }
 
 private:
@@ -732,6 +732,7 @@ private:
         TmpData data;
         data.liveRange.prepend(interval);
         data.spillCost = unspillableCost;
+        data.affinity = m_map[spilledTmp].affinity;
 
         Tmp tmp = m_code.newTmp(spilledTmp.bank());
         m_tmpWidth.setWidths(tmp, m_tmpWidth.useWidth(spilledTmp), m_tmpWidth.defWidth(spilledTmp));
@@ -757,6 +758,7 @@ private:
         ASSERT(!tmpData.members.size() || !tmpData.affinity.size()); // Group leader -> no affinities
         tmpData.stage = stage;
         m_queue.enqueue({ tmp, stage, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.size() });
+        dataLogLnIf(verbose(), "Enqueued (", stage, ") ", tmp);
     }
 
     template <Bank bank>
@@ -941,7 +943,7 @@ private:
         dataLogLnIf(verbose(), "Evicted ", tmp, " from ", reg);
     }
 
-    bool trySplit(Tmp, TmpData& tmpData)
+    bool trySplit(Tmp tmp, TmpData& tmpData)
     {
         if (!tmpData.members.size())
             return false;
@@ -951,6 +953,7 @@ private:
             setStageAndEnqueue(member, memberData, Stage::New);
         }
         tmpData.stage = Stage::WasSplit;
+        dataLogLnIf(verbose(), "Split (group) ", tmp);
         return true;
     }
 
@@ -969,6 +972,7 @@ private:
     {
         RELEASE_ASSERT(data.spillCost != unspillableCost);
         ASSERT(data.assigned == Reg());
+        ASSERT(!data.members.size()); // Should have been split
         data.stage = Stage::Spilled;
         data.spilled = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
         dataLogLnIf(verbose(), "Spilled ", tmp, " to ", data.spilled);
@@ -1106,8 +1110,6 @@ private:
                     ASSERT(scratchForTmp != Tmp());
                     // XXX does this need to be EarlyAndLate? Does it matter?
                     Tmp tmp = addSpillTmpWithInterval(scratchForTmp, intervalForSpill(indexOfEarly, Arg::Scratch));
-                    // XXX
-                    dataLogLnIf(false, "Add unspillable tmp (scratch) since we introduce it during spill: ", tmp);
                     inst.args.append(tmp);
                     RELEASE_ASSERT(inst.args.size() == 3);
                     continue;
@@ -1153,10 +1155,12 @@ private:
                                     int64_t value = m_useCounts.constant<bank>(oldIndex);
                                     if (Arg::isValidImmForm(value) && isValidForm(Move, Arg::Imm, Arg::Tmp)) {
                                         m_insertionSets[block].insert(instIndex, secondPhase, Move, inst.origin, Arg::imm(value), tmp);
+                                        dataLogLnIf(verbose(), "Rematerialized (imm) ", oldTmp, ": ", tmp, " <- ", WTF::RawHex(value));
                                         return true;
                                     }
                                     if (isValidForm(Move, Arg::BigImm, Arg::Tmp)) {
                                         m_insertionSets[block].insert(instIndex, secondPhase, Move, inst.origin, Arg::bigImm(value), tmp);
+                                        dataLogLnIf(verbose(), "Rematerialized (bigImm) ", oldTmp, ": ", tmp, " <- ", WTF::RawHex(value));
                                         return true;
                                     }
                                 }
