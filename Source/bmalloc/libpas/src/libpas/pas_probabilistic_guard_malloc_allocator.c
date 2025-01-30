@@ -86,6 +86,7 @@ pas_allocation_result pas_probabilistic_guard_malloc_allocate(pas_large_heap* la
 {
     size_t alignment;
     const pas_heap_type* type;
+    int sys_res;
     static const bool verbose = false;
 
     pas_heap_lock_assert_held();
@@ -128,21 +129,23 @@ pas_allocation_result pas_probabilistic_guard_malloc_allocate(pas_large_heap* la
     uintptr_t lower_guard_page = result.begin;
     uintptr_t upper_guard_page = result.begin + (mem_to_alloc - page_size);
 
-    int mprotect_res = mprotect( (void *) lower_guard_page, page_size, PROT_NONE);
-    PAS_ASSERT(!mprotect_res);
-
-    mprotect_res = mprotect( (void *) upper_guard_page, page_size, PROT_NONE);
-    PAS_ASSERT(!mprotect_res);
-
-    /*
+   /*
      * ensure physical addresses are released
-     * TODO: investigate using MADV_FREE_REUSABLE instead
+     * TODO: investigate using MADV_FREE_REUSABLE_REUSABLE instead
      */
-    int madvise_res = madvise((void *) upper_guard_page, page_size, MADV_FREE);
-    PAS_ASSERT(!madvise_res);
+    PAS_SYSCALL(sys_res = madvise((void *) upper_guard_page, page_size, MADV_FREE_REUSABLE));
+    if (sys_res) pas_log("XXX0: %d %d\n", sys_res, errno);
+    PAS_ASSERT(!sys_res);
 
-    madvise_res = madvise((void *) lower_guard_page, page_size, MADV_FREE);
-    PAS_ASSERT(!madvise_res);
+    PAS_SYSCALL(sys_res = madvise((void *) lower_guard_page, page_size, MADV_FREE_REUSABLE));
+    if (sys_res) pas_log("XXX1: %d %d\n", sys_res, errno);
+    PAS_ASSERT(!sys_res);
+
+    PAS_SYSCALL(sys_res = mprotect( (void *) lower_guard_page, page_size, PROT_NONE));
+    PAS_ASSERT(!sys_res);
+
+    PAS_SYSCALL(sys_res = mprotect( (void *) upper_guard_page, page_size, PROT_NONE));
+    PAS_ASSERT(!sys_res);
 
     /*
      * the key is the location where the user's starting memory address is located.
@@ -192,6 +195,8 @@ pas_allocation_result pas_probabilistic_guard_malloc_allocate(pas_large_heap* la
 
 void pas_probabilistic_guard_malloc_deallocate(void* mem)
 {
+    int sys_res;
+
     pas_heap_lock_assert_held();
     static const bool verbose = false;
 
@@ -206,18 +211,18 @@ void pas_probabilistic_guard_malloc_deallocate(void* mem)
         return;
 
     pas_pgm_storage* value = (pas_pgm_storage*)entry->value;
-    int mprotect_res = mprotect((void*)value->start_of_data_pages, value->size_of_data_pages, PROT_NONE);
-    PAS_ASSERT(!mprotect_res);
+    /*
+     * ensure physical addresses are released
+     * TODO: investigate using MADV_FREE_REUSABLE_REUSABLE instead
+     */
+    PAS_SYSCALL(sys_res = madvise((void*)value->start_of_data_pages, value->size_of_data_pages, MADV_FREE_REUSABLE));
+    PAS_ASSERT(!sys_res);
+
+    PAS_SYSCALL(sys_res = mprotect((void*)value->start_of_data_pages, value->size_of_data_pages, PROT_NONE));
+    PAS_ASSERT(!sys_res);
 
     /* capture deallocation backtrace */
     value->dealloc_backtrace.frame_size = backtrace(value->dealloc_backtrace.backtrace_buffer, PGM_BACKTRACE_MAX_FRAMES);
-
-    /*
-     * ensure physical addresses are released
-     * TODO: investigate using MADV_FREE_REUSABLE instead
-     */
-    int madvise_res = madvise((void*)value->start_of_data_pages, value->size_of_data_pages, MADV_FREE);
-    PAS_ASSERT(!madvise_res);
 
     free_wasted_mem  += value->mem_to_waste;
     free_virtual_mem += (2 * value->page_size) + value->allocation_size_requested + value->mem_to_waste;

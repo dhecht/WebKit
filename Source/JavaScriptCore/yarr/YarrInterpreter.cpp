@@ -1932,7 +1932,13 @@ public:
             backTrack->matchAmount = 0;
             MATCH_NEXT();
         }
-
+        case ByteTerm::Type::PatternCharacterNonGreedy: {
+            DUMP_CURR_CHAR();
+            BackTrackInfoPatternCharacter* backTrack = reinterpret_cast<BackTrackInfoPatternCharacter*>(context->frame + currentTerm().frameLocation);
+            backTrack->begin = input.getPos();
+            backTrack->matchAmount = 0;
+            MATCH_NEXT();
+        }
         case ByteTerm::Type::CharacterClass:
             DUMP_CURR_CHAR();
             if (matchCharacterClass(currentTerm(), context))
