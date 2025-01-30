@@ -155,6 +155,8 @@ struct QueueElement {
 };
 
 static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
+static constexpr float fastTmpSpillCost = std::numeric_limits<float>::max();
+static_assert(unspillableCost > fastTmpSpillCost);
 
 class RegisterRanges {
 public:
@@ -713,17 +715,22 @@ private:
     template<Bank bank>
     void initSpillCosts()
     {
-        m_code.forEachTmp(
-            [&] (Tmp tmp) {
-                if (tmp.bank() != bank)
-                    return;
-                if (tmp.isReg())
-                    return;
-                auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
-                float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
-                if (tmp.isGP() && m_useCounts.isConstDef<GP>(index))
-                    spillCost /= 2; // Can rematerialize rather than spill in many cases.
-                m_map[tmp].spillCost = spillCost;
+        m_code.forEachTmp([&](Tmp tmp) {
+            if (tmp.bank() != bank)
+                return;
+            if (tmp.isReg())
+                return;
+            auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
+            float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
+            if (bank == GP && m_useCounts.isConstDef<GP>(index))
+                spillCost /= 2; // Can rematerialize rather than spill in many cases.
+            m_map[tmp].spillCost = spillCost;
+        });
+        m_code.forEachFastTmp([&](Tmp tmp) {
+            if (tmp.bank() != bank)
+                return;
+            m_map[tmp].spillCost = fastTmpSpillCost;
+            dataLogLnIf(verbose(), "FastTmp: ", tmp);
         });
     }
 
