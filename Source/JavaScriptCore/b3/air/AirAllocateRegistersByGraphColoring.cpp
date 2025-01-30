@@ -2276,6 +2276,9 @@ void allocateRegistersByGraphColoring(Code& code)
     UseCounts useCounts(code);
     GraphColoringRegisterAllocation graphColoringRegisterAllocation(code, useCounts);
     graphColoringRegisterAllocation.run();
+
+    if (traceDebug)
+        dataLog("Code after graph coloring:\n", code);
 }
 
 } } } // namespace JSC::B3::Air
