@@ -504,6 +504,16 @@ private:
             activeIntervals[tmp] = Interval();
         };
 
+        // Find non-rare blocks.
+        BlockWorklist fastWorklist;
+        fastWorklist.push(m_code[0]);
+        while (BasicBlock* block = fastWorklist.pop()) {
+            for (FrequentedBlock& successor : block->successors()) {
+                if (!successor.isRare())
+                    fastWorklist.push(successor.block());
+            }
+        }
+
         BasicBlock* blockAfter = nullptr;
         for (size_t blockIndex = m_code.size(); blockIndex--;) {
             BasicBlock* block = m_code[blockIndex];
@@ -567,11 +577,12 @@ private:
                             if (!m_map[other].preferredReg)
                                 m_map[other].preferredReg = inst.args[regIdx].reg();
                         }
-                    } else {
+                    } else if (fastWorklist.saw(block)) {
                         ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
                         addAffinity(inst.args[0].tmp(), inst.args[1].tmp(), block->frequency());
                         addAffinity(inst.args[1].tmp(), inst.args[0].tmp(), block->frequency());
-                    }
+                    } else
+                        dataLogLnIf(verbose(), "Rare move: ", inst);
                 }
             }
             for (Tmp tmp : liveness.liveAtHead(block)) {
@@ -659,8 +670,13 @@ private:
                 Tmp tmp;
                 float weight;
 
-                static bool isHigherPriority(const Elem& a, const Elem& b) {
+                static bool isHigherPriority(const Elem& a, const Elem& b)
+                {
                     return a.weight > b.weight;
+                }
+                void dump(PrintStream& out) const
+                {
+                    out.print(tmp, " (weight: ", weight, ")");
                 }
             };
             PriorityQueue<Elem, Elem::isHigherPriority> worklist;
@@ -673,17 +689,17 @@ private:
             visited.add(tmp);
 
             while (!worklist.isEmpty()) {
-                Tmp candidate = worklist.dequeue().tmp;
-                LiveRange& candidateRange = m_map[candidate].liveRange;
+                auto candidate = worklist.dequeue();
+                LiveRange& candidateRange = m_map[candidate.tmp].liveRange;
 
                 if (!group.hasConflict(candidateRange)) {
                     dataLogLnIf(verbose(), "   Adding ", candidate, " to group");
-                    group.add(candidate, candidateRange);
-                    groupMembers.append(candidate);
-                    alreadyInGroup.add(candidate);
-                    if (!groupPreferredReg && m_map[candidate].preferredReg)
-                        groupPreferredReg = m_map[candidate].preferredReg;
-                    for (auto& other : m_map[candidate].affinity) {
+                    group.add(candidate.tmp, candidateRange);
+                    groupMembers.append(candidate.tmp);
+                    alreadyInGroup.add(candidate.tmp);
+                    if (!groupPreferredReg && m_map[candidate.tmp].preferredReg)
+                        groupPreferredReg = m_map[candidate.tmp].preferredReg;
+                    for (auto& other : m_map[candidate.tmp].affinity) {
                         if (!visited.contains(other.other)) {
                             visited.add(other.other);
                             worklist.enqueue({ other.other, other.weight });
