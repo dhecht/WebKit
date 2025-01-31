@@ -739,7 +739,6 @@ private:
         TmpData data;
         data.liveRange.prepend(interval);
         data.spillCost = unspillableCost;
-        data.affinity = m_map[spilledTmp].affinity;
 
         Tmp tmp = m_code.newTmp(spilledTmp.bank());
         m_tmpWidth.setWidths(tmp, m_tmpWidth.useWidth(spilledTmp), m_tmpWidth.defWidth(spilledTmp));
