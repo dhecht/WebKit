@@ -66,15 +66,33 @@ class LiveRange {
 public:
     LiveRange() = default;
 
+    inline void verify()
+    {
+#if ASSERT_ENABLED
+        size_t size = 0;
+        Interval* prevInterval = nullptr;
+        for (auto& interval : m_intervals) {
+            ASSERT(interval.begin() < interval.end());
+            if (prevInterval && prevInterval->end() >= interval.begin())
+                dataLogLn("XXX ", *this);
+            ASSERT(!prevInterval || prevInterval->end() < interval.begin());
+            size += interval.distance();
+            prevInterval = &interval;
+        }
+        ASSERT(size == m_size);
+#endif
+    }
+
     void prepend(Interval interval)
     {
-        if (m_intervals.isEmpty() || interval.end() < m_intervals.last().begin())
+        if (m_intervals.isEmpty() || interval.end() < m_intervals.first().begin())
             m_intervals.prepend(WTFMove(interval));
         else {
-            ASSERT(interval.end() == m_intervals.last().begin());
-            m_intervals.last() |= interval;
+            ASSERT(interval.end() == m_intervals.first().begin());
+            m_intervals.first() |= interval;
         }
         m_size += interval.distance();
+        verify();
     }
 
     const Deque<Interval>& intervals() const
@@ -85,6 +103,75 @@ public:
     size_t size()
     {
         return m_size;
+    }
+
+    bool overlaps(LiveRange& other)
+    {
+        auto otherIter = other.intervals().begin();
+        auto otherEnd = other.intervals().end();
+        for (auto interval : intervals()) {
+            while (otherIter != otherEnd && otherIter->end() <= interval.begin())
+                ++otherIter; // otherIter was entirely before interval
+            if (otherIter == otherEnd)
+                return false;
+            // Either otherIter overlaps interval or otherIter is entirely after interval.
+            if (otherIter->begin() < interval.end())
+                return true;
+        }
+        return false;
+    }
+
+    static LiveRange merge(LiveRange& a, LiveRange& b)
+    {
+        auto appendRanges = [](LiveRange& dest, auto iter, auto end) {
+            for (; iter != end; ++iter) {
+                dest.m_intervals.append(*iter);
+                dest.m_size += iter->distance();
+            }
+        };
+
+        auto consumeOverlapping = [](LiveRange& dest, auto& iter, auto end) {
+            bool merged = false;
+            auto& last = dest.m_intervals.last();
+            while (iter != end && (last.end() == iter->begin() || last.overlaps(*iter))) {
+                last |= *iter;
+                ++iter;
+                merged = true;
+            }
+            return merged;
+        };
+
+        LiveRange result;
+        auto aIter = a.intervals().begin();
+        auto bIter = b.intervals().begin();
+
+        while (true) {
+            if (aIter == a.intervals().end()) {
+                appendRanges(result, bIter, b.intervals().end());
+                break;
+            }
+            if (bIter == b.intervals().end()) {
+                appendRanges(result, aIter, a.intervals().end());
+                break;
+            }
+            ASSERT(aIter != a.intervals().end() && bIter != b.intervals().end());
+            if (aIter->begin() < bIter->begin()) {
+                result.m_intervals.append(*aIter);
+                ++aIter;
+            } else {
+                result.m_intervals.append(*bIter);
+                ++bIter;
+            }
+            bool merged;
+            do {
+                merged = false;
+                merged |= consumeOverlapping(result, aIter, a.intervals().end());
+                merged |= consumeOverlapping(result, bIter, b.intervals().end());
+            } while (merged);
+            result.m_size += result.intervals().last().distance();
+        }
+        result.verify();
+        return result;
     }
 
     void dump(PrintStream& out) const
@@ -244,14 +331,6 @@ public:
             if (func(conflict) == IterationStatus::Done)
                 return;
         }
-    }
-
-    LiveRange toMergedLiveRange()
-    {
-        LiveRange merged;
-        for (auto i = m_allocations.rbegin(); i != m_allocations.rend(); i++)
-            merged.prepend(i->interval);
-        return merged;
     }
 
     void dump(PrintStream& out) const
@@ -498,12 +577,6 @@ private:
 
         TmpMap<Interval> activeIntervals(m_code);
 
-        auto closeInterval = [&](Tmp &tmp) {
-            ASSERT(activeIntervals[tmp] != Interval());
-            m_map[tmp].liveRange.prepend(activeIntervals[tmp]);
-            activeIntervals[tmp] = Interval();
-        };
-
         // Find non-rare blocks.
         BlockWorklist fastWorklist;
         fastWorklist.push(m_code[0]);
@@ -511,6 +584,72 @@ private:
             for (FrequentedBlock& successor : block->successors()) {
                 if (!successor.isRare())
                     fastWorklist.push(successor.block());
+            }
+        }
+
+        auto coalescableMoveSrc = [&](Inst& inst) {
+            return mayBeCoalescable(inst) ? inst.args[0].tmp() : Tmp();
+        };
+
+        auto addAffinity = [&](Tmp a, Tmp b, BasicBlock* block) {
+            TmpData& tmpData = m_map[a];
+            float freq = block->frequency();
+            if (!fastWorklist.saw(block))
+                freq *= Options::rareBlockPenalty();
+            for (AffinityWith& aff : tmpData.affinity) {
+                if (aff.other == b) {
+                    aff.weight += freq;
+                    return;
+                }
+            }
+            tmpData.affinity.append(AffinityWith{ b, freq });
+        };
+
+        auto pruneAffinity = [&](Inst& inst, Tmp def) {
+            TmpData& defData = m_map[def];
+            if (!defData.affinity.size())
+                return;
+            Tmp movSrc = coalescableMoveSrc(inst);
+            dataLogLnIf(verbose(), "Checking affinity ", inst, " def=", def, " movSrc=", movSrc);
+            defData.affinity.removeAllMatching([&](AffinityWith& with) {
+                if (with.other != movSrc && activeIntervals[with.other]) {
+                    dataLogLnIf(verbose(), "Pruning affinity ", def, " ", with.other);
+                    m_map[with.other].affinity.removeAllMatching([def](AffinityWith& with) {
+                        return with.other == def;
+                    });
+                    return true;
+                }
+                return false;
+            });
+        };
+
+        auto closeInterval = [&](Tmp tmp) {
+            ASSERT(activeIntervals[tmp] != Interval());
+            m_map[tmp].liveRange.prepend(activeIntervals[tmp]);
+            activeIntervals[tmp] = Interval();
+        };
+
+        for (BasicBlock* block : m_code) {
+            if (!block)
+                continue;
+            for (Inst& inst : block->insts()) {
+                if (mayBeCoalescable(inst)) {
+                    ASSERT(inst.args.size() == 2);
+                    if (inst.args[0].isReg() || inst.args[1].isReg()) {
+                        unsigned regIdx = inst.args[0].isReg() ? 0 : 1;
+                        Reg reg = inst.args[regIdx].reg();
+                        if (m_allAllowedRegisters.contains(reg, IgnoreVectors)) {
+                            Tmp other = inst.args[regIdx ^ 1].tmp();
+                            if (!m_map[other].preferredReg)
+                                m_map[other].preferredReg = inst.args[regIdx].reg();
+                        }
+                    } else if (fastWorklist.saw(block)) {
+                        ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
+                        addAffinity(inst.args[0].tmp(), inst.args[1].tmp(), block);
+                        addAffinity(inst.args[1].tmp(), inst.args[0].tmp(), block);
+                    } else
+                        dataLogLnIf(verbose(), "Rare move: ", inst);
+                }
             }
         }
 
@@ -558,32 +697,16 @@ private:
                     if (Arg::isLateDef(role)) {
                         interval |= lateInterval(indexOfEarly);
                         closeInterval(tmp);
+                        pruneAffinity(inst, tmp);
                     }
                     if (Arg::isEarlyUse(role))
                         interval |= earlyInterval(indexOfEarly);
                     if (Arg::isEarlyDef(role)) {
                         interval |= earlyInterval(indexOfEarly);
                         closeInterval(tmp);
+                        pruneAffinity(inst, tmp);
                     }
                 });
-
-                if (mayBeCoalescable(inst)) {
-                    ASSERT(inst.args.size() == 2);
-                    if (inst.args[0].isReg() || inst.args[1].isReg()) {
-                        unsigned regIdx = inst.args[0].isReg() ? 0 : 1;
-                        Reg reg = inst.args[regIdx].reg();
-                        if (m_allAllowedRegisters.contains(reg, IgnoreVectors)) {
-                            Tmp other = inst.args[regIdx ^ 1].tmp();
-                            if (!m_map[other].preferredReg)
-                                m_map[other].preferredReg = inst.args[regIdx].reg();
-                        }
-                    } else if (fastWorklist.saw(block)) {
-                        ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
-                        addAffinity(inst.args[0].tmp(), inst.args[1].tmp(), block->frequency());
-                        addAffinity(inst.args[1].tmp(), inst.args[0].tmp(), block->frequency());
-                    } else
-                        dataLogLnIf(verbose(), "Rare move: ", inst);
-                }
             }
             for (Tmp tmp : liveness.liveAtHead(block)) {
                 if (!tmp.isReg())
@@ -617,18 +740,6 @@ private:
                 });
             dataLog("Clobbers: ", listDump(m_clobbers), "\n");
         }
-    }
-
-    void addAffinity(Tmp a, Tmp b, float freq)
-    {
-        auto& tmpData = m_map[a];
-        for (auto& aff : tmpData.affinity) {
-            if (aff.other == b) {
-                aff.weight += freq;
-                return;
-            }
-        }
-        tmpData.affinity.append(AffinityWith{ b, freq });
     }
 
     template <Bank bank>
@@ -665,7 +776,6 @@ private:
             if (!eagerGroups)
                 return;
 
-            RegisterRanges group;
             struct Elem {
                 Tmp tmp;
                 float weight;
@@ -684,17 +794,28 @@ private:
             IndexSet<Tmp::Indexed<bank>> visited = alreadyInGroup;
             Reg groupPreferredReg;
 
+            auto conflictsWithGroup = [&](Tmp candidate) {
+                TmpData& candidateData = m_map[candidate];
+                for (Tmp member : groupMembers) {
+                    if (candidateData.affinity.containsIf([member](auto& a) { return a.other == member; })) {
+                        dataLogLnIf(verbose(), "   member and candidate already verified: ", member, " ", candidate);
+                        continue; // Already verified no conflict even if overlaps
+                    }
+                    if (candidateData.liveRange.overlaps(m_map[member].liveRange))
+                        return true;
+                }
+                return false;
+            };
+
             dataLogLnIf(verbose(), "Creating group rooted at ", tmp);
             worklist.enqueue({ tmp, 0 });
             visited.add(tmp);
 
             while (!worklist.isEmpty()) {
                 auto candidate = worklist.dequeue();
-                LiveRange& candidateRange = m_map[candidate.tmp].liveRange;
 
-                if (!group.hasConflict(candidateRange)) {
+                if (!conflictsWithGroup(candidate.tmp)) {
                     dataLogLnIf(verbose(), "   Adding ", candidate, " to group");
-                    group.add(candidate.tmp, candidateRange);
                     groupMembers.append(candidate.tmp);
                     alreadyInGroup.add(candidate.tmp);
                     if (!groupPreferredReg && m_map[candidate.tmp].preferredReg)
@@ -711,16 +832,17 @@ private:
             if (groupMembers.size() > 1) {
                 Tmp groupTmp = m_code.newTmp(bank);
                 TmpData groupData;
-                groupData.liveRange = group.toMergedLiveRange();
                 groupData.preferredReg = groupPreferredReg;
                 groupData.members = WTFMove(groupMembers);
                 Width defWidth, useWidth;
                 defWidth = useWidth = widthForBytes(0);
                 for (Tmp member : groupData.members) {
-                    groupData.spillCost += m_map[member].spillCost;
-                    defWidth = std::max(defWidth, m_tmpWidth.defWidth(member));
+                    TmpData& memberData = m_map[member];
+                    groupData.liveRange = LiveRange::merge(groupData.liveRange, memberData.liveRange);
+                    groupData.spillCost += memberData.spillCost;
+                        defWidth = std::max(defWidth, m_tmpWidth.defWidth(member));
                     useWidth = std::max(useWidth, m_tmpWidth.useWidth(member));
-                    m_map[member].groupLeader = groupTmp;
+                    memberData.groupLeader = groupTmp;
                 }
                 m_tmpWidth.setWidths(groupTmp, useWidth, defWidth);
                 m_map.append(groupTmp, groupData);
