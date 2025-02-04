@@ -643,12 +643,11 @@ private:
                             if (!m_map[other].preferredReg)
                                 m_map[other].preferredReg = inst.args[regIdx].reg();
                         }
-                    } else if (fastWorklist.saw(block)) {
+                    } else {
                         ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
                         addAffinity(inst.args[0].tmp(), inst.args[1].tmp(), block);
                         addAffinity(inst.args[1].tmp(), inst.args[0].tmp(), block);
-                    } else
-                        dataLogLnIf(verbose(), "Rare move: ", inst);
+                    }
                 }
             }
         }
