@@ -717,6 +717,7 @@ private:
                 Width defWidth, useWidth;
                 defWidth = useWidth = widthForBytes(0);
                 for (Tmp member : groupData.members) {
+                    groupData.spillCost += m_map[member].spillCost;
                     defWidth = std::max(defWidth, m_tmpWidth.defWidth(member));
                     useWidth = std::max(useWidth, m_tmpWidth.useWidth(member));
                     m_map[member].groupLeader = groupTmp;
@@ -775,9 +776,11 @@ private:
     {
         ASSERT(!tmp.isReg());
         ASSERT(stage != Stage::Assigned && stage != Stage::Spilled && stage != Stage::WasSplit);
+        ASSERT(tmpData.spillCost || !tmpData.liveRange.size()); // spillCost == 0 only if empty live-range
         ASSERT(!tmpData.groupLeader); // Group member should not be enquened
         ASSERT(eagerGroups || !tmpData.members.size()); // Lazy groups -> not a group leader
         ASSERT(!tmpData.members.size() || !tmpData.affinity.size()); // Group leader -> no affinities
+
         tmpData.stage = stage;
         m_queue.enqueue({ tmp, stage, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.size() });
         dataLogLnIf(verbose(), "Enqueued (", stage, ") ", tmp);
