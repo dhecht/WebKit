@@ -93,6 +93,16 @@ public:
         validate();
     }
 
+    void crossBasicBlockBoundary()
+    {
+        crossesBasicBlockBoundary = true;
+    }
+
+    bool isLocal()
+    {
+        return !crossesBasicBlockBoundary && m_intervals.size() <= 1;
+    }
+
     const Deque<Interval>& intervals() const
     {
         return m_intervals;
@@ -184,6 +194,7 @@ public:
 private:
     Deque<Interval> m_intervals;
     size_t m_size { 0 };
+    bool crossesBasicBlockBoundary { false };
 };
 
 enum class Stage {
@@ -197,11 +208,12 @@ enum class Stage {
 };
 
 struct QueueElement {
-    QueueElement(Tmp tmp, Stage stage, bool maybeCoalescable, size_t rangeSize)
+    QueueElement(Tmp tmp, Stage stage, size_t rangeSize, bool maybeCoalescable, bool isLocal)
         : tmp(tmp)
         , stage(stage)
-        , maybeCoalescable(maybeCoalescable)
         , rangeSize(rangeSize)
+        , maybeCoalescable(maybeCoalescable)
+        , isLocal(isLocal)
     {
     }
 
@@ -224,6 +236,11 @@ struct QueueElement {
         if (!left.maybeCoalescable && right.maybeCoalescable)
             return false;
 
+        if (!left.isLocal && right.isLocal)
+            return true;
+        if (left.isLocal && !right.isLocal)
+            return false;
+
         if (left.rangeSize > right.rangeSize)
             return true;
         if (left.rangeSize < right.rangeSize)
@@ -235,8 +252,9 @@ struct QueueElement {
 
     Tmp tmp;
     Stage stage;
-    bool maybeCoalescable;
     size_t rangeSize;
+    bool maybeCoalescable;
+    bool isLocal;
 };
 
 static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
@@ -699,10 +717,14 @@ private:
                     activeIntervals[tmp] |= Interval(indexOfTail);
             }
             if (blockAfter) {
-                // If it was live at the head of the next block but no longer live, close
-                // the current interval.
                 for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
-                    if (!tmp.isReg() && !activeIntervals[tmp].contains(indexOfTail)) {
+                    if (tmp.isReg())
+                        continue;
+                    if (activeIntervals[tmp].contains(indexOfTail)) {
+                        m_map[tmp].liveRange.crossBasicBlockBoundary();
+                    } else {
+                        // If tmp was live at the head of the next block but no longer live, close
+                        // the current interval.
                         ASSERT(activeIntervals[tmp].begin() == this->indexOfHead(blockAfter));
                         closeInterval(tmp);
                     }
@@ -965,7 +987,11 @@ private:
         tmpData.validate();
 
         tmpData.stage = stage;
-        m_queue.enqueue({ tmp, stage, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.size() });
+        size_t rangeSizeOrStart = tmpData.liveRange.size();
+        if (tmpData.liveRange.isLocal())
+            rangeSizeOrStart = tmpData.liveRange.intervals().first().begin();
+
+        m_queue.enqueue({ tmp, stage, rangeSizeOrStart, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.isLocal() });
         dataLogLnIf(verbose(), "Enqueued (", stage, ") ", tmp);
     }
 
@@ -981,6 +1007,8 @@ private:
                     ASSERT(eagerGroups);
                     return;
                 }
+                if (tmpData.liveRange.intervals().isEmpty())
+                    return;
                 setStageAndEnqueue(tmp, tmpData, Stage::New);
         });
 
