@@ -442,6 +442,7 @@ struct Clobber {
 class GreedyAllocator {
 public:
     static constexpr bool eagerGroups = true;
+    static constexpr bool eagerGroupsSplitFully = true;
 
     GreedyAllocator(Code& code)
         : m_code(code)
@@ -1206,12 +1207,21 @@ private:
     {
         if (!tmpData.isGroup())
             return false;
+        ASSERT(eagerGroups);
         auto enqueueSubgroup = [&](Tmp subGrp) {
             m_map[subGrp].parentGroup = Tmp();
             setStageAndEnqueue(subGrp, m_map[subGrp], Stage::New);
         };
-        enqueueSubgroup(tmpData.subGroup0);
-        enqueueSubgroup(tmpData.subGroup1);
+        if (eagerGroupsSplitFully) {
+            forEachTmpInGroup(tmp, [&](Tmp member) {
+                enqueueSubgroup(member);
+                return IterationStatus::Continue;
+            });
+        } else {
+            enqueueSubgroup(tmpData.subGroup0);
+            enqueueSubgroup(tmpData.subGroup1);
+        }
+        tmpData.stage = Stage::WasSplit;
         dataLogLnIf(verbose(), "Split (group) ", tmp);
         return true;
     }
