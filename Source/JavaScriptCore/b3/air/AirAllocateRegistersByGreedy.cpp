@@ -66,7 +66,7 @@ class LiveRange {
 public:
     LiveRange() = default;
 
-    inline void verify()
+    inline void validate()
     {
 #if ASSERT_ENABLED
         size_t size = 0;
@@ -90,7 +90,7 @@ public:
             m_intervals.first() |= interval;
         }
         m_size += interval.distance();
-        verify();
+        validate();
     }
 
     const Deque<Interval>& intervals() const
@@ -168,7 +168,7 @@ public:
             } while (merged);
             result.m_size += result.intervals().last().distance();
         }
-        result.verify();
+        result.validate();
         return result;
     }
 
@@ -385,7 +385,7 @@ struct TmpData {
         ASSERT_IMPLIES(spilled, spillCost != unspillableCost);
         ASSERT_IMPLIES(spilled, !isGroup()); // Should have been split
         ASSERT_IMPLIES(!spillCost, !liveRange.size());
-        ASSERT_IMPLIES(assigned, !groupLeader); // Only top-most should be assigned
+        ASSERT_IMPLIES(assigned, !parentGroup); // Only top-most should be assigned
         ASSERT_IMPLIES(affinity.size(), !isGroup()); // Only bottom-most should have affinity
     }
 
@@ -393,7 +393,7 @@ struct TmpData {
     float spillCost { 0.0f };
     Reg preferredReg;
     Vector<AffinityWith> affinity;
-    Tmp groupLeader;
+    Tmp parentGroup;
     Tmp subGroup0, subGroup1;
 
     Stage stage { Stage::New };
@@ -536,8 +536,8 @@ private:
 
     Tmp groupForTmp(Tmp tmp)
     {
-        while (Tmp leader = m_map[tmp].groupLeader)
-            tmp = leader;
+        while (Tmp parent = m_map[tmp].parentGroup)
+            tmp = parent;
         return tmp;
     }
 
@@ -858,20 +858,20 @@ private:
             return conflicts;
         };
 
-        auto addSubGroup = [this](Tmp leader, TmpData& leaderData, Tmp& subGroupField, Tmp subGroup) {
+        auto addSubGroup = [this](Tmp group, TmpData& groupData, Tmp& subGroupField, Tmp subGroup) {
             TmpData& subGroupData = m_map[subGroup];
             subGroupField = subGroup;
-            subGroupData.groupLeader = leader;
+            subGroupData.parentGroup = group;
 
-            leaderData.liveRange = LiveRange::merge(leaderData.liveRange, subGroupData.liveRange);
-            leaderData.spillCost += subGroupData.spillCost;
-            if (!leaderData.preferredReg)
-                leaderData.preferredReg = subGroupData.preferredReg;
+            groupData.liveRange = LiveRange::merge(groupData.liveRange, subGroupData.liveRange);
+            groupData.spillCost += subGroupData.spillCost;
+            if (!groupData.preferredReg)
+                groupData.preferredReg = subGroupData.preferredReg;
 
             Width defWidth, useWidth;
-            defWidth = std::max(m_tmpWidth.defWidth(leader), m_tmpWidth.defWidth(subGroup));
-            useWidth = std::max(m_tmpWidth.useWidth(leader), m_tmpWidth.useWidth(subGroup));
-            m_tmpWidth.setWidths(leader, useWidth, defWidth);
+            defWidth = std::max(m_tmpWidth.defWidth(group), m_tmpWidth.defWidth(subGroup));
+            useWidth = std::max(m_tmpWidth.useWidth(group), m_tmpWidth.useWidth(subGroup));
+            m_tmpWidth.setWidths(group, useWidth, defWidth);
         };
 
         for (Move& move : moves) {
@@ -899,7 +899,7 @@ private:
                 if (tmp.bank() != bank || tmp.isReg())
                     return;
                 TmpData& data = m_map[tmp];
-                if (!data.groupLeader && data.isGroup()) {
+                if (!data.parentGroup && data.isGroup()) {
                     dataLog("Group: ", tmp, " = { ");
                     CommaPrinter comma;
                     forEachTmpInGroup(tmp, [&comma](Tmp member) {
@@ -916,14 +916,13 @@ private:
     void initSpillCosts()
     {
         m_code.forEachTmp([&](Tmp tmp) {
-            if (tmp.bank() != bank)
-                return;
-            if (tmp.isReg())
+            if (tmp.bank() != bank || tmp.isReg())
                 return;
             auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
             float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
             if (bank == GP && m_useCounts.isConstDef<GP>(index))
                 spillCost /= 2; // Can rematerialize rather than spill in many cases.
+            ASSERT(m_map[tmp].spillCost == 0.0f);
             m_map[tmp].spillCost = spillCost;
         });
         m_code.forEachFastTmp([&](Tmp tmp) {
@@ -961,7 +960,7 @@ private:
         ASSERT(!tmp.isReg());
         ASSERT(stage != Stage::Assigned && stage != Stage::Spilled && stage != Stage::WasSplit);
         ASSERT_IMPLIES(!tmpData.spillCost, !tmpData.liveRange.size());
-        ASSERT(!tmpData.groupLeader); // Group member should not be enquened
+        ASSERT(!tmpData.parentGroup); // Group member should not be enquened
         ASSERT_IMPLIES(!eagerGroups, !tmpData.isGroup());
         tmpData.validate();
 
@@ -975,12 +974,10 @@ private:
     {
         m_code.forEachTmp(
             [&] (Tmp tmp) {
-                if (tmp.bank() != bank)
-                    return;
-                if (tmp.isReg())
+                if (tmp.bank() != bank || tmp.isReg())
                     return;
                 TmpData& tmpData = m_map[tmp];
-                if (tmpData.groupLeader) {
+                if (tmpData.parentGroup) {
                     ASSERT(eagerGroups);
                     return;
                 }
@@ -1044,7 +1041,7 @@ private:
     {
         ASSERT(&m_map[tmp] == &tmpData);
         ASSERT(!assignedReg(tmp));
-        ASSERT(!tmpData.groupLeader);
+        ASSERT(!tmpData.parentGroup);
 
         auto tryAllocateToReg = [&](Reg r) {
             LiveRange& liveRange = tmpData.liveRange;
@@ -1182,7 +1179,7 @@ private:
         if (!tmpData.isGroup())
             return false;
         auto enqueueSubgroup = [&](Tmp subGrp) {
-            m_map[subGrp].groupLeader = Tmp();
+            m_map[subGrp].parentGroup = Tmp();
             setStageAndEnqueue(subGrp, m_map[subGrp], Stage::New);
         };
         enqueueSubgroup(tmpData.subGroup0);
