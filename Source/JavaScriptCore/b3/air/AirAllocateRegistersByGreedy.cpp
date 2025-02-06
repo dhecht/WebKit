@@ -477,12 +477,12 @@ public:
 private:
     void buildRegisterSets()
     {
-        forEachBank(
-            [&] (Bank bank) {
+        forEachBank([&] (Bank bank) {
                 m_allowedRegistersInPriorityOrder[bank] = m_code.regsInPriorityOrder(bank);
                 for (Reg r : m_allowedRegistersInPriorityOrder[bank])
                     m_allAllowedRegisters.add(r, IgnoreVectors);
-            });
+        });
+        m_allAllowedRegistersWholeWidth = m_allAllowedRegisters.toRegisterSet().includeWholeRegisterWidth();
     }
 
     void buildIndices()
@@ -590,7 +590,7 @@ private:
                     });
                 if (prev->kind.opcode == Patch)
                     prevRegs.merge(prev->extraClobberedRegs());
-                prevRegs.filter(m_allAllowedRegisters.toRegisterSet().includeWholeRegisterWidth());
+                prevRegs.filter(m_allAllowedRegistersWholeWidth);
                 if (!prevRegs.isEmpty())
                     m_clobbers.append(Clobber(indexOfHead + instIndex * 2 - 1, prevRegs.buildAndValidate()));
             }
@@ -602,7 +602,8 @@ private:
                             nextRegs.add(reg, width);
                     });
                 if (next->kind.opcode == Patch)
-                    nextRegs.merge(next->extraEarlyClobberedRegs().buildAndValidate());
+                    nextRegs.merge(next->extraEarlyClobberedRegs());
+                nextRegs.filter(m_allAllowedRegistersWholeWidth);
                 if (!nextRegs.isEmpty())
                     m_clobbers.append(Clobber(indexOfHead + instIndex * 2, nextRegs.buildAndValidate()));
             }
@@ -1539,6 +1540,7 @@ private:
     Code& m_code;
     Vector<Reg> m_allowedRegistersInPriorityOrder[numBanks];
     ScalarRegisterSet m_allAllowedRegisters;
+    RegisterSet m_allAllowedRegistersWholeWidth;
     IndexMap<BasicBlock*, size_t> m_startIndex;
     TmpMap<TmpData> m_map;
     IndexMap<Reg, RegisterRanges> m_regRanges;
