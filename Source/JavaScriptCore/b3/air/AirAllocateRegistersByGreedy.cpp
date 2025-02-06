@@ -442,7 +442,7 @@ struct Clobber {
 class GreedyAllocator {
 public:
     static constexpr bool eagerGroups = true;
-    static constexpr bool eagerGroupsSplitFully = true;
+    static constexpr bool eagerGroupsSplitFully = false;
 
     GreedyAllocator(Code& code)
         : m_code(code)
