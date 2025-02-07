@@ -373,10 +373,10 @@ private:
 struct AffinityWith {
     void dump(PrintStream& out) const
     {
-        out.print("(", other, ", ", weight, ")");
+        out.print("(", tmp, ", ", weight, ")");
     }
 
-    Tmp other;
+    Tmp tmp;
     float weight;
 };
 
@@ -572,7 +572,7 @@ private:
             if (!fastWorklist.saw(block))
                 freq *= Options::rareBlockPenalty();
             for (AffinityWith& aff : tmpData.affinity) {
-                if (aff.other == b) {
+                if (aff.tmp == b) {
                     aff.weight += freq;
                     return;
                 }
@@ -587,10 +587,10 @@ private:
             Tmp movSrc = coalescableMoveSrc(inst);
             dataLogLnIf(verbose(), "Checking affinity ", inst, " def=", def, " movSrc=", movSrc);
             defData.affinity.removeAllMatching([&](AffinityWith& with) {
-                if (with.other != movSrc && activeIntervals[with.other]) {
-                    dataLogLnIf(verbose(), "Pruning affinity ", def, " ", with.other);
-                    m_map[with.other].affinity.removeAllMatching([def](AffinityWith& with) {
-                        return with.other == def;
+                if (with.tmp != movSrc && activeIntervals[with.tmp]) {
+                    dataLogLnIf(verbose(), "Pruning affinity ", def, " ", with.tmp);
+                    m_map[with.tmp].affinity.removeAllMatching([def](AffinityWith& with) {
+                        return with.tmp == def;
                     });
                     return true;
                 }
@@ -764,41 +764,35 @@ private:
             TmpData& data = m_map[tmp];
             std::sort(data.affinity.begin(), data.affinity.end(),
                 [this] (AffinityWith& a, AffinityWith& b) -> bool {
-                    if (a.weight > b.weight)
-                        return true;
-                    if (a.weight < b.weight)
-                        return false;
+                    if (a.weight != b.weight)
+                        return a.weight > b.weight;
                     // Favor coalescing shorter live ranges.
-                    auto aSize = m_map[a.other].liveRange.size();
-                    auto bSize = m_map[b.other].liveRange.size();
-                    if (aSize < bSize)
-                        return true;
-                    if (aSize > bSize)
-                        return false;
-                    return a.other.tmpIndex() < b.other.tmpIndex();
+                    auto aSize = m_map[a.tmp].liveRange.size();
+                    auto bSize = m_map[b.tmp].liveRange.size();
+                    if (aSize != bSize)
+                        return aSize < bSize;
+                    return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
             });
 
             if (!eagerGroups)
                 return;
 
-            for (AffinityWith& affinity : m_map[tmp].affinity) {
-                if (tmp.tmpIndex(bank) < affinity.other.tmpIndex(bank))
-                    moves.append({ tmp, affinity.other, affinity.weight });
+            for (AffinityWith& with : m_map[tmp].affinity) {
+                if (tmp.tmpIndex(bank) < with.tmp.tmpIndex(bank))
+                    moves.append({ tmp, with.tmp, with.weight });
             }
         });
 
         ASSERT_IMPLIES(!eagerGroups, moves.isEmpty());
         std::sort(moves.begin(), moves.end(),
             [](Move& a, Move& b) -> bool {
-                if (a.weight == b.weight) {
-                    if (a.tmp0.tmpIndex(bank) == b.tmp1.tmpIndex(bank)) {
-                        ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
-                        return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
-                    }
+                if (a.weight != b.weight)
+                    return a.weight > b.weight;
+                if (a.tmp0.tmpIndex(bank) != b.tmp1.tmpIndex(bank))
                     return a.tmp0.tmpIndex(bank) < a.tmp0.tmpIndex(bank);
-                }
-                return a.weight > b.weight;
-        });
+                ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
+                return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
+            });
 
         auto hasConflict = [this](Tmp grp0, Tmp grp1) {
             bool conflicts = false;
@@ -810,7 +804,7 @@ private:
                     ASSERT(!conflicts);
                     ASSERT(tmp0 != tmp1);
                     TmpData& data1 = m_map[tmp1];
-                    if (!data0.affinity.containsIf([tmp1](auto& aff) { return aff.other == tmp1; })
+                    if (!data0.affinity.containsIf([tmp1](auto& with) { return with.tmp == tmp1; })
                         && data0.liveRange.overlaps(data1.liveRange)) {
                         conflicts = true;
                         return IterationStatus::Done;
@@ -1025,8 +1019,8 @@ private:
         // But without it, we won't try to affinitize between partially split groups.
 #if 0
         IterationStatus status = forEachTmpInGroup(tmp, [&](Tmp member) {
-            for (auto& affinity : m_map[member].affinity) {
-                Reg r = assignedReg(affinity.other);
+            for (auto& with : m_map[member].affinity) {
+                Reg r = assignedReg(with.other);
                 if (r) {
                     if (tryAllocateToReg(r))
                         return IterationStatus::Done;
@@ -1040,8 +1034,8 @@ private:
             return true;
         }
 #else
-        for (auto& affinity : tmpData.affinity) {
-            Reg r = m_map[affinity.other].assigned;
+        for (auto& with : tmpData.affinity) {
+            Reg r = m_map[with.tmp].assigned;
             if (r) {
                 if (tryAllocateToReg(r))
                     return true;
