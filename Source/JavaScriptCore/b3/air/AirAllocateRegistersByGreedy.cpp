@@ -282,11 +282,6 @@ public:
 
     typedef StdSet<AllocatedInterval> AllocatedIntervalSet;
 
-    void addClobber(Reg r, size_t pos)
-    {
-        m_allocations.insert({ Tmp(r), { pos, pos + 1 }} );
-    }
-
     void add(Tmp tmp, LiveRange& range)
     {
         ASSERT(!hasConflict(range)); // Can't add overlapping LiveRanges
@@ -307,7 +302,7 @@ public:
     bool hasConflict(LiveRange& range)
     {
         bool hasConflict = false;
-        forEachConflict(range, [&] (Tmp) -> IterationStatus {
+        forEachConflict(range, [&](auto&) -> IterationStatus {
             hasConflict = true;
             return IterationStatus::Done;
         });
@@ -325,7 +320,7 @@ public:
         auto nextSearch = rangeIter->begin();
 
         while (true) {
-            Tmp conflict;
+            AllocatedInterval conflict;
             {
                 auto conflictIter = findFirstIntervalEndingAfter(nextSearch);
                 if (conflictIter == m_allocations.end())
@@ -340,7 +335,7 @@ public:
                 }
                 // Found a conflict. There may be additional conflicts of this 'range' interval, so advance
                 // the search position beyond this conflict but don't advance the 'range' interval.
-                conflict = conflictIter->tmp;
+                conflict = *conflictIter;
                 nextSearch = conflictIter->interval.end();
             }
             // 'func' can invalidate iterators of 'm_allocations'.
@@ -418,25 +413,6 @@ struct TmpData {
 
     Reg assigned;
     StackSlot* spilled { nullptr };
-};
-
-
-struct Clobber {
-    Clobber() = default;
-
-    Clobber(size_t index, RegisterSet regs)
-        : index(index)
-        , regs(regs)
-    {
-    }
-
-    void dump(PrintStream& out) const
-    {
-        out.print(index, ":", regs);
-    }
-
-    size_t index { 0 };
-    RegisterSet regs;
 };
 
 class GreedyAllocator {
@@ -570,57 +546,10 @@ private:
         return m_map[groupForTmp(tmp)].spilled;
     }
 
-    void buildClobbers(UnifiedTmpLiveness& liveness, BasicBlock* block)
-    {
-        size_t indexOfHead = this->indexOfHead(block);
-        RegLiveness::LocalCalcForUnifiedTmpLiveness localCalc(liveness, block);
-
-        auto record = [&] (unsigned instIndex) {
-            // FIXME: This could get the register sets from somewhere else, like the
-            // liveness constraints. Except we want those constraints to separate the late
-            // actions of one instruction from the early actions of the next.
-            // https://bugs.webkit.org/show_bug.cgi?id=170850
-            const auto& regs = localCalc.live();
-            if (Inst* prev = block->get(instIndex - 1)) {
-                RegisterSetBuilder prevRegs = regs;
-                prev->forEach<Reg>(
-                    [&] (Reg& reg, Arg::Role role, Bank, Width width) {
-                        if (Arg::isLateDef(role))
-                            prevRegs.add(reg, width);
-                    });
-                if (prev->kind.opcode == Patch)
-                    prevRegs.merge(prev->extraClobberedRegs());
-                prevRegs.filter(m_allAllowedRegistersWholeWidth);
-                if (!prevRegs.isEmpty())
-                    m_clobbers.append(Clobber(indexOfHead + instIndex * 2 - 1, prevRegs.buildAndValidate()));
-            }
-            if (Inst* next = block->get(instIndex)) {
-                RegisterSetBuilder nextRegs = regs;
-                next->forEach<Reg>(
-                    [&] (Reg& reg, Arg::Role role, Bank, Width width) {
-                        if (Arg::isEarlyDef(role))
-                            nextRegs.add(reg, width);
-                    });
-                if (next->kind.opcode == Patch)
-                    nextRegs.merge(next->extraEarlyClobberedRegs());
-                nextRegs.filter(m_allAllowedRegistersWholeWidth);
-                if (!nextRegs.isEmpty())
-                    m_clobbers.append(Clobber(indexOfHead + instIndex * 2, nextRegs.buildAndValidate()));
-            }
-        };
-
-        record(block->size());
-        for (unsigned instIndex = block->size(); instIndex--;) {
-            localCalc.execute(instIndex);
-            record(instIndex);
-        }
-    }
-
     void buildIntervals()
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildIntervals"_s);
         UnifiedTmpLiveness liveness(m_code);
-
         TmpMap<Interval> activeIntervals(m_code);
 
         // Find non-rare blocks.
@@ -712,19 +641,14 @@ private:
                 dataLog("  indexOfTail = ", indexOfTail, "\n");
             }
 
-            // At tail, for every dead tmp, close interval
-            for (Tmp tmp : liveness.liveAtTail(block)) {
-                if (!tmp.isReg())
-                    // FIXME: could just set interval start
-                    activeIntervals[tmp] |= Interval(indexOfTail);
-            }
+            for (Tmp tmp : liveness.liveAtTail(block))
+                activeIntervals[tmp] |= Interval(indexOfTail); // FIXME: could just set interval start
+
             if (blockAfter) {
                 for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
-                    if (tmp.isReg())
-                        continue;
-                    if (activeIntervals[tmp].contains(indexOfTail)) {
+                    if (activeIntervals[tmp].contains(indexOfTail))
                         m_map[tmp].liveRange.crossBasicBlockBoundary();
-                    } else {
+                    else {
                         // If tmp was live at the head of the next block but no longer live, close
                         // the current interval.
                         ASSERT(activeIntervals[tmp].begin() == this->indexOfHead(blockAfter));
@@ -738,8 +662,6 @@ private:
                 size_t indexOfEarly = indexOfHead + instIndex * 2;
 
                 inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
-                    if (tmp.isReg())
-                        return;
                     auto& interval = activeIntervals[tmp];
                     if (Arg::isLateUse(role))
                         interval |= lateInterval(indexOfEarly);
@@ -756,38 +678,56 @@ private:
                         pruneAffinity(inst, tmp);
                     }
                 });
-            }
-            for (Tmp tmp : liveness.liveAtHead(block)) {
-                if (!tmp.isReg())
-                    activeIntervals[tmp] |= Interval(indexOfHead);
-            }
+                if (inst.kind.opcode == Patch) {
+                    auto clobberReg = [&](Reg reg, Interval interval) {
+                        Tmp tmp = Tmp(reg);
+                        bool isAlive = !!activeIntervals[tmp];
+                        activeIntervals[tmp] |= interval;
+                        if (!isAlive)
+                            closeInterval(tmp);
+                    };
+                    inst.extraClobberedRegs().forEachWithWidthAndPreserved(
+                        [&](Reg reg, Width, PreservedWidth) {
+                            clobberReg(reg, lateInterval(indexOfEarly));
+                        });
+                    inst.extraEarlyClobberedRegs().forEachWithWidthAndPreserved(
+                        [&](Reg reg, Width, PreservedWidth) {
+                            clobberReg(reg, earlyInterval(indexOfEarly));
+                        });
+                }
 
-            buildClobbers(liveness, block);
+            }
+            for (Tmp tmp : liveness.liveAtHead(block))
+                activeIntervals[tmp] |= Interval(indexOfHead);
+
             blockAfter = block;
         }
         if (blockAfter) {
             for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
-                if (!tmp.isReg()) {
-                    ASSERT(activeIntervals[tmp].begin() == this->indexOfHead(blockAfter));
-                    closeInterval(tmp);
-                }
+                ASSERT(activeIntervals[tmp].begin() == this->indexOfHead(blockAfter));
+                closeInterval(tmp);
             }
         }
-        // ASSERT every interval is closed.
 
-        std::sort(
-            m_clobbers.begin(), m_clobbers.end(),
-            [] (Clobber& a, Clobber& b) -> bool {
-                return a.index < b.index;
-            });
-
+#if ASSERT_ENABLED
+        m_code.forAllTmps([&](Tmp tmp) {
+            ASSERT(!activeIntervals[tmp]);
+        });
+#endif
         if (verbose()) {
             dataLog("Intervals:\n");
-            m_code.forEachTmp(
-                [&] (Tmp tmp) {
-                    dataLog("    ", tmp, ": ", m_map[tmp], "\n");
-                });
-            dataLog("Clobbers: ", listDump(m_clobbers), "\n");
+            auto dumpRegTmpData = [&](Reg r) {
+                TmpData& tmpData = m_map[Tmp(r)];
+                if (tmpData.liveRange.size())
+                    dataLog("    ", r, ": ", m_map[Tmp(r)], "\n");
+            };
+            for (Reg r : m_allowedRegistersInPriorityOrder[GP])
+                dumpRegTmpData(r);
+            for (Reg r : m_allowedRegistersInPriorityOrder[FP])
+                dumpRegTmpData(r);
+            m_code.forEachTmp([&](Tmp tmp) {
+                dataLog("    ", tmp, ": ", m_map[tmp], "\n");
+            });
         }
     }
 
@@ -1000,6 +940,9 @@ private:
     template <Bank bank>
     void allocateRegisters()
     {
+        for (Reg reg : m_allowedRegistersInPriorityOrder[bank])
+            assign(Tmp(reg), m_map[Tmp(reg)], reg);
+
         m_code.forEachTmp(
             [&] (Tmp tmp) {
                 if (tmp.bank() != bank || tmp.isReg())
@@ -1013,12 +956,6 @@ private:
                     return;
                 setStageAndEnqueue(tmp, tmpData, Stage::New);
         });
-
-        // FIXME: could do this more directly rather than via m_clobbers.
-        for (Clobber& clobber : m_clobbers) {
-            for (Reg reg : clobber.regs)
-                m_regRanges[reg].addClobber(reg, clobber.index);
-        }
 
         do {
             while (!m_queue.isEmpty()) {
@@ -1040,7 +977,7 @@ private:
                     setStageAndEnqueue(tmp, tmpData, Stage::Split);
                     continue;
                 case Stage::Split:
-                    if (!trySplit(tmp, tmpData))
+                    if (!trySplit<bank>(tmp, tmpData))
                         setStageAndEnqueue(tmp, tmpData, Stage::Spill);
                     continue;
                 case Stage::Spill:
@@ -1141,21 +1078,20 @@ private:
         LiveRange& liveRange = tmpData.liveRange;
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             float conflictsSpillCost = 0.0f;
-            auto& regRanges = m_regRanges[r];
             // TODO: maybe use IndexSparseSet instead and hoist construction (but that takes wrong type).
             // Or add a way to reset IndexSet and hoist construction.
             IndexSet<Tmp::Indexed<bank>> visited;
-            regRanges.forEachConflict(liveRange,
-                [&] (Tmp conflict) -> IterationStatus {
-                    if (conflict.isReg()) {
+            m_regRanges[r].forEachConflict(liveRange,
+                [&] (auto& conflict) -> IterationStatus {
+                    if (conflict.tmp.isReg()) {
                         // Conflicts with a register clobber, cannot evict clobbers.
                         conflictsSpillCost = unspillableCost;
                         return IterationStatus::Done;
                     }
-                    if (visited.contains(conflict))
+                    if (visited.contains(conflict.tmp))
                         return IterationStatus::Continue;
-                    visited.add(conflict);
-                    auto cost = m_map[conflict].spillCost;
+                    visited.add(conflict.tmp);
+                    auto cost = m_map[conflict.tmp].spillCost;
                     if (cost == unspillableCost) {
                         conflictsSpillCost = unspillableCost;
                         return IterationStatus::Done;
@@ -1175,12 +1111,12 @@ private:
         }
         // It's cheaper to spill all the already-assigned conflicting tmps, so evict them in favor of assigning 'tmp'.
         m_regRanges[bestEvictReg].forEachConflict(liveRange,
-            [&] (Tmp conflict) -> IterationStatus {
-                TmpData& conflictData = m_map[conflict];
-                evict(conflict, conflictData, bestEvictReg);
-                setStageAndEnqueue(conflict, conflictData, Stage::New);
+            [&](auto& conflict) -> IterationStatus {
+                TmpData& conflictData = m_map[conflict.tmp];
+                evict(conflict.tmp, conflictData, bestEvictReg);
+                setStageAndEnqueue(conflict.tmp, conflictData, Stage::New);
                 return IterationStatus::Continue;
-        });
+            });
         assign(tmp, tmpData, bestEvictReg);
         return true;
     }
@@ -1204,7 +1140,15 @@ private:
         dataLogLnIf(verbose(), "Evicted ", tmp, " from ", reg);
     }
 
+    template<Bank bank>
     bool trySplit(Tmp tmp, TmpData& tmpData)
+    {
+        if (trySplitGroup(tmp, tmpData))
+            return true;
+        return trySplitAroundClobbers<bank>(tmp, tmpData);
+    }
+
+    bool trySplitGroup(Tmp tmp, TmpData& tmpData)
     {
         if (!tmpData.isGroup())
             return false;
@@ -1225,6 +1169,25 @@ private:
         tmpData.stage = Stage::WasSplit;
         dataLogLnIf(verbose(), "Split (group) ", tmp);
         return true;
+    }
+
+    template<Bank bank>
+    bool trySplitAroundClobbers(Tmp, TmpData&)
+    {
+#if 0        
+        LiveRange& liveRange = tmpData.liveRange;
+
+        for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
+           m_regRanges[r].forEachConflict(liveRange,
+                [&](auto& conflict) -> IterationStatus {
+                    if (conflict.tmp.isReg() && conflict.interval.distance() == 1) {
+                        dataLogLn("XXX Found clobber: ", conflict);
+                    }
+                    return IterationStatus::Continue;
+                });
+        }
+#endif        
+        return false;
     }
 
     // FIXME: dup from GraphColoring.cpp
@@ -1546,7 +1509,6 @@ private:
     IndexMap<Reg, RegisterRanges> m_regRanges;
     PriorityQueue<QueueElement, QueueElement::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
-    Vector<Clobber> m_clobbers;
     UseCounts m_useCounts;
     TmpWidth m_tmpWidth;
     bool m_didSpill { false };
