@@ -115,7 +115,7 @@ void prepareForGeneration(Code& code)
     auto useLinearScan = [](Code& code) -> bool {
         if (code.usesSIMD())
             return false;
-        if (Options::airForceGreedyAllocator())
+        if (Options::airUseGreedyRegAlloc())
             return false;
         unsigned numTmps = code.numTmps(Bank::GP) + code.numTmps(Bank::FP);
         return code.optLevel() == 1 || numTmps > Options::maximumTmpsForGraphColoring();
@@ -141,7 +141,7 @@ void prepareForGeneration(Code& code)
 
         // Register allocation for all the Tmps that do not have a corresponding machine
         // register. After this phase, every Tmp has a reg.
-        if (Options::airForceGreedyAllocator() && !code.usesSIMD())
+        if (Options::airUseGreedyRegAlloc() && !code.usesSIMD())
             allocateRegistersByGreedy(code);
         else
             allocateRegistersByGraphColoring(code);

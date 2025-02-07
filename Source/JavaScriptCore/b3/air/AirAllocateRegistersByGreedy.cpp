@@ -54,7 +54,7 @@ namespace JSC { namespace B3 { namespace Air {
 // FIXME: anonymous namespace (combines with LinearScan due to unified sources)
 namespace Greedy {
 
-static bool verbose() { return Options::airLinearScanVerbose(); }
+static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 
 // Phase constants we use for the PhaseInsertionSet.
 const unsigned firstPhase = 0;
