@@ -60,6 +60,8 @@ static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 const unsigned firstPhase = 0;
 const unsigned secondPhase = 1;
 
+const size_t splitMinRangeSize = 8;
+
 typedef Range<size_t> Interval;
 
 class LiveRange {
@@ -89,6 +91,14 @@ public:
             ASSERT(interval.end() == m_intervals.first().begin());
             m_intervals.first() |= interval;
         }
+        m_size += interval.distance();
+        validate();
+    }
+
+    void append(Interval interval)
+    {
+        ASSERT(m_intervals.isEmpty() || m_intervals.last().end() < interval.begin());
+        m_intervals.append(WTFMove(interval));
         m_size += interval.distance();
         validate();
     }
@@ -129,7 +139,7 @@ public:
         return false;
     }
 
-    static LiveRange merge(LiveRange& a, LiveRange& b)
+    static LiveRange merge(const LiveRange& a, const LiveRange& b)
     {
         auto appendRanges = [](LiveRange& dest, auto iter, auto end) {
             for (; iter != end; ++iter) {
@@ -182,6 +192,45 @@ public:
         return result;
     }
 
+    static LiveRange subtract(const LiveRange& a, const LiveRange& b)
+    {
+        LiveRange result;
+        auto aIter = a.intervals().begin();
+        auto bIter = b.intervals().begin();
+
+        if (aIter == a.intervals().end())
+            return result;
+        Interval interval = *aIter;
+        ++aIter;
+
+        while (true) {
+            // Skip over intervals in b that come before the current interval of a.
+            while (bIter != b.intervals().end() && bIter->end() <= interval.begin())
+                ++bIter;
+            
+            if (bIter != b.intervals().end() && bIter->overlaps(interval)) {
+                // Overlap: Split the interval into 0, 1 or 2 intervals.
+                if (interval.begin() < bIter->begin())
+                    result.append({ interval.begin(), bIter->begin() });
+                if (bIter->end() < interval.end()) {
+                    // Process remaining portion of the interval.
+                    interval = { bIter->end(), interval.end() };
+                    continue;
+                }
+            } else {
+                // No overlap: include entire interval in result.
+                result.append(interval);
+            }
+            // Finished processing interval; move on to the next.
+            if (aIter == a.intervals().end())
+                break;
+            interval = *aIter;
+            ++aIter;
+        }
+        result.validate();
+        return result;
+    }
+
     void dump(PrintStream& out) const
     {
         WTF::CommaPrinter comma;
@@ -199,12 +248,14 @@ private:
 
 enum class Stage {
     New,
-    Split,
     Unspillable,
+    TryAllocate,
+    TrySplit,
     Spill,
     Assigned,
+    Coalesced,
     Spilled,
-    WasSplit,
+    Replaced,
 };
 
 struct QueueElement {
@@ -310,7 +361,7 @@ public:
     }
 
     template<typename Func>
-    void forEachConflict(LiveRange& range, const Func& func)
+    void forEachConflict(const LiveRange& range, const Func& func)
     {
         auto rangeIter = range.intervals().begin();
         auto rangeEnd = range.intervals().end();
@@ -383,7 +434,7 @@ struct AffinityWith {
 struct TmpData {
     void dump(PrintStream& out) const
     {
-        out.print("{liveRange = ", liveRange, ", preferredReg = ", preferredReg, ", affinity = ", listDump(affinity), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1, " spillCost = ", spillCost, ", stage = ", stage, ", assigned = ", assigned, ", spilled = ", pointerDump(spilled), "}");
+        out.print("{liveRange = ", liveRange, ", preferredReg = ", preferredReg, ", affinity = ", listDump(affinity), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1, " spillCost = ", spillCost, ", stage = ", stage, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), "}");
     }
 
     bool isGroup()
@@ -394,9 +445,11 @@ struct TmpData {
 
     void validate()
     {
-        ASSERT(!(spilled && assigned));
-        ASSERT_IMPLIES(spilled, spillCost != unspillableCost);
-        ASSERT_IMPLIES(spilled, !isGroup()); // Should have been split
+        ASSERT(!(spillSlot && assigned));
+        ASSERT(!!assigned == (stage == Stage::Assigned));
+        ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled);
+        ASSERT_IMPLIES(spillSlot, spillCost != unspillableCost);
+        ASSERT_IMPLIES(spillSlot, !isGroup()); // Should have been split
         ASSERT_IMPLIES(!spillCost, !liveRange.size());
         ASSERT_IMPLIES(assigned, !parentGroup); // Only top-most should be assigned
         ASSERT_IMPLIES(affinity.size(), !isGroup()); // Only bottom-most should have affinity
@@ -410,9 +463,19 @@ struct TmpData {
     Tmp subGroup0, subGroup1;
 
     Stage stage { Stage::New };
-
     Reg assigned;
-    StackSlot* spilled { nullptr };
+    StackSlot* spillSlot { nullptr };
+    size_t splitMetadataIndex { 0 };
+};
+
+struct SplitMetadata {
+    void dump(PrintStream& out) const
+    {
+        out.print(originalTmp, " : { ", listDump(gapTmps), " } ");
+    }
+
+    Tmp originalTmp;
+    Vector<Tmp> gapTmps;
 };
 
 class GreedyAllocator {
@@ -422,8 +485,10 @@ public:
 
     GreedyAllocator(Code& code)
         : m_code(code)
-        , m_startIndex(code.size())
+        , m_headIndex(code.size())
+        , m_tailIndicies(code.size())
         , m_map(code)
+        , m_splitMetadata(1) // Sacrifice index 0.
         , m_regRanges(Reg::maxIndex() + 1)
         , m_insertionSets(code.size())
         , m_useCounts(m_code)
@@ -445,7 +510,7 @@ public:
         allocateRegisters<GP>();
         allocateRegisters<FP>();
 
-        insertSpillCode();
+        insertFixupCode();
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
     }
@@ -463,31 +528,60 @@ private:
 
     void buildIndices()
     {
-        size_t index = 0;
-        for (BasicBlock* block : m_code) {
-            m_startIndex[block] = index;
-            index += block->size() * 2;
+        size_t headIndex = 0;
+        size_t tailIndex = 0;
+        for (size_t i = 0; i < m_code.size(); i++) {
+            BasicBlock* block = m_code[i];
+            if (!block) {
+                m_tailIndicies[i] = tailIndex;
+                continue;
+            }
+            tailIndex = headIndex + 2 * block->size() - 1;
+            m_headIndex[block] = headIndex;
+            m_tailIndicies[i] = tailIndex;
+            headIndex += 2 * block->size();
         }
+    }
+
+    BasicBlock* findBlockContainingIndex(size_t index)
+    {
+        auto iter = std::lower_bound(m_tailIndicies.begin(), m_tailIndicies.end(), index);
+        ASSERT(iter != m_tailIndicies.end()); // Should ask only about legal instruction boundaries.
+        size_t blockIndex = std::distance(m_tailIndicies.begin(), iter);
+        BasicBlock* block = m_code[blockIndex];
+        ASSERT(indexOfHead(block) <= index && index <= indexOfTail(block));
+        return block;
     }
 
     size_t indexOfHead(BasicBlock* block)
     {
-        return m_startIndex[block];
+        return m_headIndex[block];
     }
 
     size_t indexOfTail(BasicBlock* block)
     {
-        // FIXME: added -1, isn't it a bug with linear scan?
         return indexOfHead(block) + block->size() * 2 - 1;
+    }
+
+    static size_t instIndex(size_t indexOfHead, Interval interval)
+    {
+        return (interval.begin() - indexOfHead) / 2;
+    }
+
+    static size_t indexOfEarly(Interval interval)
+    {
+        return interval.begin() & ~static_cast<size_t>(1);
     }
 
     static Interval earlyInterval(size_t indexOfEarly)
     {
+        ASSERT(!(indexOfEarly & 1));
         return Interval(indexOfEarly);
     }
 
     static Interval lateInterval(size_t indexOfEarly)
     {
+        ASSERT(!(indexOfEarly & 1));
         return Interval(indexOfEarly + 1);
     }
 
@@ -543,7 +637,15 @@ private:
 
     StackSlot* spillSlot(Tmp tmp)
     {
-        return m_map[groupForTmp(tmp)].spilled;
+        return m_map[groupForTmp(tmp)].spillSlot;
+    }
+
+    float adjustedBlockFrequency(BasicBlock* block)
+    {
+        float freq = block->frequency();
+        if (UNLIKELY(!m_fastBlocks.saw(block)))
+            freq *= Options::rareBlockPenalty();
+        return freq;
     }
 
     void buildIntervals()
@@ -553,12 +655,11 @@ private:
         TmpMap<Interval> activeIntervals(m_code);
 
         // Find non-rare blocks.
-        BlockWorklist fastWorklist;
-        fastWorklist.push(m_code[0]);
-        while (BasicBlock* block = fastWorklist.pop()) {
+        m_fastBlocks.push(m_code[0]);
+        while (BasicBlock* block = m_fastBlocks.pop()) {
             for (FrequentedBlock& successor : block->successors()) {
                 if (!successor.isRare())
-                    fastWorklist.push(successor.block());
+                    m_fastBlocks.push(successor.block());
             }
         }
 
@@ -568,12 +669,10 @@ private:
 
         auto addAffinity = [&](Tmp a, Tmp b, BasicBlock* block) {
             TmpData& tmpData = m_map[a];
-            float freq = block->frequency();
-            if (!fastWorklist.saw(block))
-                freq *= Options::rareBlockPenalty();
-            for (AffinityWith& aff : tmpData.affinity) {
-                if (aff.tmp == b) {
-                    aff.weight += freq;
+            float freq = adjustedBlockFrequency(block);
+            for (AffinityWith& with : tmpData.affinity) {
+                if (with.tmp == b) {
+                    with.weight += freq;
                     return;
                 }
             }
@@ -636,7 +735,7 @@ private:
             size_t indexOfHead = this->indexOfHead(block);
             size_t indexOfTail = this->indexOfTail(block);
             if (verbose()) {
-                dataLog("At block ", pointerDump(block), "\n");
+                dataLog("At BB", pointerDump(block), "\n");
                 dataLog("  indexOfHead = ", indexOfHead, "\n");
                 dataLog("  indexOfTail = ", indexOfTail, "\n");
             }
@@ -820,6 +919,7 @@ private:
             TmpData& subGroupData = m_map[subGroup];
             subGroupField = subGroup;
             subGroupData.parentGroup = group;
+            subGroupData.stage = Stage::Coalesced;
 
             groupData.liveRange = LiveRange::merge(groupData.liveRange, subGroupData.liveRange);
             groupData.spillCost += subGroupData.spillCost;
@@ -873,6 +973,10 @@ private:
     template<Bank bank>
     void initSpillCosts()
     {
+        for (Reg reg : m_allowedRegistersInPriorityOrder[bank])
+            m_map[Tmp(reg)].spillCost = unspillableCost;
+
+        // XXX: FIXME: tmps alive only in one gap should be unspillable.
         m_code.forEachTmp([&](Tmp tmp) {
             if (tmp.bank() != bank || tmp.isReg())
                 return;
@@ -891,19 +995,26 @@ private:
         });
     }
 
+    // newTmp creates and returns a new tmp that can hold the values of 'from'.
+    // Note that all TmpData references invalidated since it may expand/realloc the TmpData map.
+    Tmp newTmp(Tmp from, float spillCost, Interval interval)
+    {
+        Tmp tmp = m_code.newTmp(from.bank());
+        m_tmpWidth.setWidths(tmp, m_tmpWidth.useWidth(from), m_tmpWidth.defWidth(from));
+
+        m_map.append(tmp, TmpData());
+        TmpData& tmpData = m_map[tmp];
+        tmpData.liveRange.prepend(interval);
+        tmpData.spillCost = spillCost;
+        tmpData.validate();
+        return tmp;
+    }
+
     Tmp addSpillTmpWithInterval(Tmp spilledTmp, Interval interval)
     {
-        TmpData data;
-        data.liveRange.prepend(interval);
-        data.spillCost = unspillableCost;
-
-        Tmp tmp = m_code.newTmp(spilledTmp.bank());
-        m_tmpWidth.setWidths(tmp, m_tmpWidth.useWidth(spilledTmp), m_tmpWidth.defWidth(spilledTmp));
-        data.validate();
-        m_map.append(tmp, data);
-        setStageAndEnqueue(tmp, data, Stage::Unspillable);
-
-        dataLogLnIf(verbose(), "New spill tmp: ", tmp, ": ", data);
+        Tmp tmp = newTmp(spilledTmp, unspillableCost, interval);
+        setStageAndEnqueue(tmp, m_map[tmp], Stage::Unspillable);
+        dataLogLnIf(verbose(), "New spill tmp: ", tmp, ": ", m_map[tmp]);
         return tmp;
     }
 
@@ -916,7 +1027,7 @@ private:
     void setStageAndEnqueue(Tmp tmp, TmpData& tmpData, Stage stage)
     {
         ASSERT(!tmp.isReg());
-        ASSERT(stage != Stage::Assigned && stage != Stage::Spilled && stage != Stage::WasSplit);
+        ASSERT(stage == Stage::Unspillable || stage == Stage::TryAllocate || stage == Stage::TrySplit || stage == Stage::Spill);
         ASSERT_IMPLIES(!tmpData.spillCost, !tmpData.liveRange.size());
         ASSERT(!tmpData.parentGroup); // Group member should not be enquened
         ASSERT_IMPLIES(!eagerGroups, !tmpData.isGroup());
@@ -948,7 +1059,7 @@ private:
                 }
                 if (tmpData.liveRange.intervals().isEmpty())
                     return;
-                setStageAndEnqueue(tmp, tmpData, Stage::New);
+                setStageAndEnqueue(tmp, tmpData, Stage::TryAllocate);
         });
 
         do {
@@ -962,15 +1073,15 @@ private:
                 }
                 if (tryAllocate<bank>(tmp, tmpData))
                     continue;
-                if (tmpData.stage != Stage::Split && tryEvict<bank>(tmp, tmpData))
+                if (tmpData.stage != Stage::TrySplit && tryEvict<bank>(tmp, tmpData))
                     continue;
 
                 switch (tmpData.stage) {
-                case Stage::New:
+                case Stage::TryAllocate:
                     // If we couldn't allocate tmp, allow it to split next time.
-                    setStageAndEnqueue(tmp, tmpData, Stage::Split);
+                    setStageAndEnqueue(tmp, tmpData, tmpData.liveRange.size() >= splitMinRangeSize ? Stage::TrySplit : Stage::Spill);
                     continue;
-                case Stage::Split:
+                case Stage::TrySplit:
                     if (!trySplit<bank>(tmp, tmpData))
                         setStageAndEnqueue(tmp, tmpData, Stage::Spill);
                     continue;
@@ -981,9 +1092,11 @@ private:
                 case Stage::Unspillable:
                     // Unspillables must have been allocated during tryAllocate or tryEvict.
                     RELEASE_ASSERT_NOT_REACHED();
+                case Stage::New:
                 case Stage::Assigned:
                 case Stage::Spilled:
-                case Stage::WasSplit:
+                case Stage::Coalesced:
+                case Stage::Replaced:
                     // Tmps in these stages should not have been enqueued.
                     RELEASE_ASSERT_NOT_REACHED();
                 }
@@ -1108,7 +1221,7 @@ private:
             [&](auto& conflict) -> IterationStatus {
                 TmpData& conflictData = m_map[conflict.tmp];
                 evict(conflict.tmp, conflictData, bestEvictReg);
-                setStageAndEnqueue(conflict.tmp, conflictData, Stage::New);
+                setStageAndEnqueue(conflict.tmp, conflictData, Stage::TryAllocate);
                 return IterationStatus::Continue;
             });
         assign(tmp, tmpData, bestEvictReg);
@@ -1122,6 +1235,7 @@ private:
         tmpData.stage = Stage::Assigned;
         tmpData.assigned = reg;
         dataLogLnIf(verbose(), "Assigned ", tmp, " to ", reg);
+        tmpData.validate();
     }
 
     void evict(Tmp tmp, TmpData& tmpData, Reg reg)
@@ -1130,13 +1244,16 @@ private:
         ASSERT(tmpData.spillCost != unspillableCost);
         ASSERT(tmpData.assigned == reg);
         m_regRanges[reg].evict(tmp, tmpData.liveRange);
+        tmpData.stage = Stage::New;
         tmpData.assigned = Reg();
         dataLogLnIf(verbose(), "Evicted ", tmp, " from ", reg);
+        tmpData.validate();
     }
 
     template<Bank bank>
     bool trySplit(Tmp tmp, TmpData& tmpData)
     {
+        ASSERT(tmpData.spillCost != unspillableCost); // Should have evicted.
         if (trySplitGroup(tmp, tmpData))
             return true;
         return trySplitAroundClobbers<bank>(tmp, tmpData);
@@ -1149,7 +1266,7 @@ private:
         ASSERT(eagerGroups);
         auto enqueueSubgroup = [&](Tmp subGrp) {
             m_map[subGrp].parentGroup = Tmp();
-            setStageAndEnqueue(subGrp, m_map[subGrp], Stage::New);
+            setStageAndEnqueue(subGrp, m_map[subGrp], Stage::TryAllocate);
         };
         if (eagerGroupsSplitFully) {
             forEachTmpInGroup(tmp, [&](Tmp member) {
@@ -1160,28 +1277,100 @@ private:
             enqueueSubgroup(tmpData.subGroup0);
             enqueueSubgroup(tmpData.subGroup1);
         }
-        tmpData.stage = Stage::WasSplit;
+        tmpData.stage = Stage::Replaced;
         dataLogLnIf(verbose(), "Split (group) ", tmp);
+        tmpData.validate();
         return true;
     }
 
     template<Bank bank>
-    bool trySplitAroundClobbers(Tmp, TmpData&)
+    bool trySplitAroundClobbers(Tmp tmp, TmpData& tmpData)
     {
-#if 0        
-        LiveRange& liveRange = tmpData.liveRange;
+        static unsigned count;
 
+        if (tmpData.splitMetadataIndex)
+            return false; // Already split around clobbers
+        if (tmpData.liveRange.size() < splitMinRangeSize)
+            return false; // Not enough instructions to be worthwhile
+
+        if (count >= Options::airGreedyLimit())
+            return false;
+
+        auto instUsesOrDefsTmp = [](Inst& inst, Tmp tmp) {
+            bool result = false;
+            inst.forEachTmpFast([&](Tmp useOrDef) {
+                result |= useOrDef == tmp;
+            });
+            return result;
+        };
+
+        Reg bestSplitReg;
+        float minSplitCost = unspillableCost;
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
-           m_regRanges[r].forEachConflict(liveRange,
+            float splitCost = 0.0f;
+            m_regRanges[r].forEachConflict(tmpData.liveRange,
                 [&](auto& conflict) -> IterationStatus {
                     if (conflict.tmp.isReg() && conflict.interval.distance() == 1) {
-                        dataLogLn("XXX Found clobber: ", conflict);
+                        // Block freq * rare block penalty
+                        BasicBlock* block = findBlockContainingIndex(conflict.interval.begin());
+                        unsigned instIndex = this->instIndex(indexOfHead(block), conflict.interval);
+                        Inst& inst = block->at(instIndex);
+                        if (instUsesOrDefsTmp(inst, tmp)) {
+                            // If the inst that clobbers regs also use/def the tmp trying to be split, then
+                            // can't split the tmp around this clobber.
+                            dataLogLnIf(verbose(), "XXX use/def: tmp=", tmp, " inst = ", inst);
+                            splitCost = unspillableCost;
+                            return IterationStatus::Done;
+                        }
+                        // Times 2 for MOV tmp, split & MOV split, tmp
+                        splitCost += adjustedBlockFrequency(block) * 2;
+                        return IterationStatus::Continue;
                     }
-                    return IterationStatus::Continue;
+                    // Conflict with non clobber - don't try to split.
+                    splitCost = unspillableCost;
+                    return IterationStatus::Done;
                 });
+            if (splitCost < minSplitCost) {
+                minSplitCost = splitCost;
+                bestSplitReg = r;
+            }
         }
-#endif        
-        return false;
+        ASSERT(tmpData.spillCost != unspillableCost); // Should have evicted.
+        if (minSplitCost >= unspillableCost) //tmpData.spillCost) // FixMe: Use a multiple?
+            return false; // Better to spill than to split.
+
+        LiveRange allGapsRange;
+        m_regRanges[bestSplitReg].forEachConflict(tmpData.liveRange,
+            [&](auto& conflict) -> IterationStatus {
+                ASSERT(conflict.tmp.isReg() && conflict.interval.distance() == 1);
+                // Extend interval to include both early and late since we'll insert a Move
+                // before and after the clobbering instruction.
+                Interval gapInterval = earlyAndLateInterval(indexOfEarly(conflict.interval));
+                allGapsRange.append(gapInterval);
+                return IterationStatus::Continue;
+            });
+
+        size_t size = tmpData.liveRange.size();
+        tmpData.liveRange = LiveRange::subtract(tmpData.liveRange, allGapsRange);
+        ASSERT(tmpData.liveRange.size() + allGapsRange.size() == size);
+        tmpData.splitMetadataIndex = m_splitMetadata.size();
+        setStageAndEnqueue(tmp, tmpData, Stage::TryAllocate);
+
+        SplitMetadata metadata;
+        metadata.originalTmp = tmp;
+        // Create tmps to carry the value across register clobbering instructions. These tmps
+        // might spill or be assigned another register.
+        for (Interval gapInterval : allGapsRange.intervals()) {
+            float freq = 2 * adjustedBlockFrequency(findBlockContainingIndex(gapInterval.begin()));
+            Tmp gapTmp = newTmp(tmp, freq, gapInterval);
+            metadata.gapTmps.append(gapTmp);
+            setStageAndEnqueue(gapTmp, m_map[gapTmp], Stage::TryAllocate);
+        }
+        dataLogLnIf(verbose(), "Split (clobbers): reg = ", bestSplitReg, " splitCost = ", minSplitCost, " split tmp = ", metadata);
+        m_splitMetadata.append(WTFMove(metadata));
+
+        count++;
+        return true;
     }
 
     // FIXME: dup from GraphColoring.cpp
@@ -1195,19 +1384,33 @@ private:
         return 16;
     }
 
-    void spill(Tmp tmp, TmpData& data)
+    void spill(Tmp tmp, TmpData& tmpData)
     {
-        RELEASE_ASSERT(data.spillCost != unspillableCost);
-        ASSERT(data.assigned == Reg());
-        ASSERT(!data.isGroup()); // Should have been split
-        data.stage = Stage::Spilled;
-        data.spilled = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
-        dataLogLnIf(verbose(), "Spilled ", tmp, " to ", data.spilled);
+        RELEASE_ASSERT(tmpData.spillCost != unspillableCost);
+        ASSERT(tmpData.assigned == Reg());
+        ASSERT(!tmpData.isGroup()); // Should have been split
+        tmpData.stage = Stage::Spilled;
+
+        dataLogLnIf(verbose(), "Spilled ", tmp);
+        if (tmpData.splitMetadataIndex) {
+            dataLogLnIf(verbose(), "   evicting tmps created during split");
+            auto& metadata = m_splitMetadata[tmpData.splitMetadataIndex];
+            ASSERT(metadata.originalTmp == tmp);
+            // Splitting didn't prevent originalTmp from spilling after all, so no point assigning
+            // registers or stack slots to the gap tmps for this split.
+            for (Tmp gapTmp : metadata.gapTmps) {
+                Reg reg = m_map[gapTmp].assigned;
+                if (reg)
+                    evict(gapTmp, m_map[gapTmp], reg);
+                m_map[gapTmp].stage = Stage::Replaced;
+            }
+        }
         // Batch generating spill tmps so that we can limit traversals of the code without
         // needing to keep track of each tmp's use/defs.
         // FIXME: revisit if live range splitting needs that info anyway.
         // FIXME: this might not be the best if e.g. an unspillable forces a loop tmp to be spilled.
         m_didSpill = true;
+        tmpData.validate();
     }
 
     bool queueContainsOnlySpills()
@@ -1224,6 +1427,11 @@ private:
     template <Bank bank>
     void emitSpillCodeAndEnqueueNewTmps()
     {
+        m_code.forAllTmps([&](Tmp tmp) {
+            TmpData& tmpData = m_map[tmp];
+            if (tmpData.stage == Stage::Spilled && !tmpData.spillSlot)
+                tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
+        });
         // FIXME: this is too inefficient to do for each spilled tmp, one at a time.
         for (BasicBlock* block : m_code) {
             size_t indexOfHead = this->indexOfHead(block);
@@ -1394,8 +1602,35 @@ private:
         }
     }
 
-    void insertSpillCode()
+    void insertFixupCode()
     {
+        for (auto& metadata : m_splitMetadata) {
+            if (!metadata.originalTmp)
+                continue;
+            if (spillSlot(metadata.originalTmp))
+                continue; // If spilled, better to not split after all
+            ASSERT(assignedReg(metadata.originalTmp));
+            // Emit moves to and from each tmp (or stack stot) that fills the split gaps.
+            for (Tmp other : metadata.gapTmps) {
+                TmpData& otherData = m_map[other];
+                for (auto& interval : otherData.liveRange.intervals()) {
+                    ASSERT(interval.distance() == 2);
+                    BasicBlock* block = findBlockContainingIndex(interval.begin());
+                    unsigned instIndex = this->instIndex(indexOfHead(block), interval);
+                    Inst& inst = block->at(instIndex);
+
+                    Arg arg = other;
+                    StackSlot* spilled = spillSlot(other);
+                    if (spilled)
+                        arg = Arg::stack(spilled);
+                    // XXX what to use for origin?
+                    m_insertionSets[block].insert(instIndex, secondPhase, Move, inst.origin, metadata.originalTmp, arg);
+                    m_insertionSets[block].insert(instIndex + 1, firstPhase, Move, inst.origin, arg, metadata.originalTmp);
+                    dataLogLnIf(verbose(), "Inserted Moves around clobber tmp=", metadata.originalTmp, " other=", other, " block=", *block, " index=", instIndex, " inst = ", inst);
+                }
+            }
+        }
+
         for (BasicBlock* block : m_code)
             m_insertionSets[block].execute(block);
     }
@@ -1470,18 +1705,17 @@ private:
                     }
                 }
 
-                inst.forEachTmpFast(
-                    [&] (Tmp& tmp) {
-                        if (tmp.isReg())
-                            return;
+                inst.forEachTmpFast([&](Tmp& tmp) {
+                    if (tmp.isReg())
+                        return;
 
-                        Reg reg = assignedReg(tmp);
-                        if (!reg) {
-                            dataLog("Failed to allocate reg for: ", tmp, "\n");
-                            RELEASE_ASSERT_NOT_REACHED();
-                        }
-                        tmp = Tmp(reg);
-                    });
+                    Reg reg = assignedReg(tmp);
+                    if (!reg) {
+                        dataLog("Failed to allocate reg for: ", tmp, "\n");
+                        RELEASE_ASSERT_NOT_REACHED();
+                    }
+                    tmp = Tmp(reg);
+                });
 
                 if (mayBeCoalescable && inst.args[0].isTmp() && inst.args[1].isTmp() 
                     && inst.args[0].tmp() == inst.args[1].tmp())
@@ -1498,11 +1732,14 @@ private:
     Vector<Reg> m_allowedRegistersInPriorityOrder[numBanks];
     ScalarRegisterSet m_allAllowedRegisters;
     RegisterSet m_allAllowedRegistersWholeWidth;
-    IndexMap<BasicBlock*, size_t> m_startIndex;
+    IndexMap<BasicBlock*, size_t> m_headIndex;
+    Vector<size_t> m_tailIndicies;
     TmpMap<TmpData> m_map;
+    Vector<SplitMetadata> m_splitMetadata;
     IndexMap<Reg, RegisterRanges> m_regRanges;
     PriorityQueue<QueueElement, QueueElement::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
+    BlockWorklist m_fastBlocks;
     UseCounts m_useCounts;
     TmpWidth m_tmpWidth;
     bool m_didSpill { false };
