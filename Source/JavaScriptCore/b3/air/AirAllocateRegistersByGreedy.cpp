@@ -1373,7 +1373,6 @@ private:
         return true;
     }
 
-    // FIXME: dup from GraphColoring.cpp
     static unsigned stackSlotMinimumWidth(Width width)
     {
         if (width <= Width32)
@@ -1421,6 +1420,28 @@ private:
             }
         }
         return true;
+    }
+
+    Opcode moveOpcode(Tmp tmp)
+    {
+        Opcode move = Oops;
+        Width width = m_tmpWidth.requiredWidth(tmp);
+        switch (stackSlotMinimumWidth(width)) {
+        case 4:
+            move = tmp.bank() == GP ? Move32 : MoveFloat;
+            break;
+        case 8:
+            move = tmp.bank() == GP ? Move : MoveDouble;
+            break;
+        case 16:
+            ASSERT(tmp.bank() == FP);
+            move = MoveVector;
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
+        }
+        return move;
     }
 
     // FIXME: merge with linear scan emitSpillCode().
@@ -1547,23 +1568,7 @@ private:
                     if (!spilled)
                         return;
 
-                    Width spillWidth = m_tmpWidth.requiredWidth(tmp);
-                    Opcode move = Oops;
-                    switch (stackSlotMinimumWidth(spillWidth)) {
-                    case 4:
-                        move = bank == GP ? Move32 : MoveFloat;
-                        break;
-                    case 8:
-                        move = bank == GP ? Move : MoveDouble;
-                        break;
-                    case 16:
-                        ASSERT(bank == FP);
-                        move = MoveVector;
-                        break;
-                    default:
-                        RELEASE_ASSERT_NOT_REACHED();
-                        break;
-                    }
+                    Opcode move = moveOpcode(tmp);
                     auto oldTmp = tmp;
                     tmp = addSpillTmpWithInterval(tmp, intervalForSpill(indexOfEarly, role));
                     if (role == Arg::Scratch)
@@ -1611,22 +1616,23 @@ private:
                 continue; // If spilled, better to not split after all
             ASSERT(assignedReg(metadata.originalTmp));
             // Emit moves to and from each tmp (or stack stot) that fills the split gaps.
-            for (Tmp other : metadata.gapTmps) {
-                TmpData& otherData = m_map[other];
-                for (auto& interval : otherData.liveRange.intervals()) {
+            for (Tmp gapTmp : metadata.gapTmps) {
+                TmpData& gapData = m_map[gapTmp];
+                for (auto& interval : gapData.liveRange.intervals()) {
                     ASSERT(interval.distance() == 2);
                     BasicBlock* block = findBlockContainingIndex(interval.begin());
                     unsigned instIndex = this->instIndex(indexOfHead(block), interval);
                     Inst& inst = block->at(instIndex);
 
-                    Arg arg = other;
-                    StackSlot* spilled = spillSlot(other);
+                    Arg arg = gapTmp;
+                    StackSlot* spilled = spillSlot(gapTmp);
                     if (spilled)
                         arg = Arg::stack(spilled);
                     // XXX what to use for origin?
-                    m_insertionSets[block].insert(instIndex, secondPhase, Move, inst.origin, metadata.originalTmp, arg);
-                    m_insertionSets[block].insert(instIndex + 1, firstPhase, Move, inst.origin, arg, metadata.originalTmp);
-                    dataLogLnIf(verbose(), "Inserted Moves around clobber tmp=", metadata.originalTmp, " other=", other, " block=", *block, " index=", instIndex, " inst = ", inst);
+                    Opcode move = moveOpcode(gapTmp);
+                    m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, metadata.originalTmp, arg);
+                    m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, arg, metadata.originalTmp);
+                    dataLogLnIf(verbose(), "Inserted Moves around clobber tmp=", metadata.originalTmp, " gapTmp=", gapTmp, " block=", *block, " index=", instIndex, " inst = ", inst);
                 }
             }
         }
