@@ -56,9 +56,11 @@ namespace Greedy {
 
 static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 
-// Phase constants we use for the PhaseInsertionSet.
-const unsigned firstPhase = 0;
-const unsigned secondPhase = 1;
+// Phase constants used for the PhaseInsertionSet.
+const unsigned spillStore = 0;
+const unsigned splitMoveTo = 1;
+const unsigned splitMoveFrom = 2;
+const unsigned spillLoad = 3;
 
 const size_t splitMinRangeSize = 8;
 
@@ -1013,8 +1015,8 @@ private:
     Tmp addSpillTmpWithInterval(Tmp spilledTmp, Interval interval)
     {
         Tmp tmp = newTmp(spilledTmp, unspillableCost, interval);
+        dataLogLnIf(verbose(), "New spill for ", spilledTmp, " tmp: ", tmp, ": ", m_map[tmp]);
         setStageAndEnqueue(tmp, m_map[tmp], Stage::Unspillable);
-        dataLogLnIf(verbose(), "New spill tmp: ", tmp, ": ", m_map[tmp]);
         return tmp;
     }
 
@@ -1293,7 +1295,7 @@ private:
         if (tmpData.liveRange.size() < splitMinRangeSize)
             return false; // Not enough instructions to be worthwhile
 
-        if (count >= Options::airGreedyLimit())
+        if (Options::airGreedyLimit() && count >= Options::airGreedyLimit())
             return false;
 
         auto instUsesOrDefsTmp = [](Inst& inst, Tmp tmp) {
@@ -1318,6 +1320,8 @@ private:
                         if (instUsesOrDefsTmp(inst, tmp)) {
                             // If the inst that clobbers regs also use/def the tmp trying to be split, then
                             // can't split the tmp around this clobber.
+                            // FixMe: could allow uses, but then we'd have to make split tmp conflict with any
+                            // spill tmps used by this instruction, so unclear if that's better.
                             dataLogLnIf(verbose(), "XXX use/def: tmp=", tmp, " inst = ", inst);
                             splitCost = unspillableCost;
                             return IterationStatus::Done;
@@ -1583,12 +1587,12 @@ private:
                                 if (m_useCounts.isConstDef<bank>(oldIndex)) {
                                     int64_t value = m_useCounts.constant<bank>(oldIndex);
                                     if (Arg::isValidImmForm(value) && isValidForm(Move, Arg::Imm, Arg::Tmp)) {
-                                        m_insertionSets[block].insert(instIndex, secondPhase, Move, inst.origin, Arg::imm(value), tmp);
+                                        m_insertionSets[block].insert(instIndex, spillLoad, Move, inst.origin, Arg::imm(value), tmp);
                                         dataLogLnIf(verbose(), "Rematerialized (imm) ", oldTmp, ": ", tmp, " <- ", WTF::RawHex(value));
                                         return true;
                                     }
                                     if (isValidForm(Move, Arg::BigImm, Arg::Tmp)) {
-                                        m_insertionSets[block].insert(instIndex, secondPhase, Move, inst.origin, Arg::bigImm(value), tmp);
+                                        m_insertionSets[block].insert(instIndex, spillLoad, Move, inst.origin, Arg::bigImm(value), tmp);
                                         dataLogLnIf(verbose(), "Rematerialized (bigImm) ", oldTmp, ": ", tmp, " <- ", WTF::RawHex(value));
                                         return true;
                                     }
@@ -1598,10 +1602,10 @@ private:
                         };
 
                         if (!tryRematerialize())
-                            m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, arg, tmp);
+                            m_insertionSets[block].insert(instIndex, spillLoad, move, inst.origin, arg, tmp);
                     }
                     if (Arg::isAnyDef(role))
-                        m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, tmp, arg);
+                        m_insertionSets[block].insert(instIndex + 1, spillStore, move, inst.origin, tmp, arg);
                 });
             }
         }
@@ -1630,8 +1634,8 @@ private:
                         arg = Arg::stack(spilled);
                     // XXX what to use for origin?
                     Opcode move = moveOpcode(gapTmp);
-                    m_insertionSets[block].insert(instIndex, secondPhase, move, inst.origin, metadata.originalTmp, arg);
-                    m_insertionSets[block].insert(instIndex + 1, firstPhase, move, inst.origin, arg, metadata.originalTmp);
+                    m_insertionSets[block].insert(instIndex, splitMoveFrom, move, inst.origin, metadata.originalTmp, arg);
+                    m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, inst.origin, arg, metadata.originalTmp);
                     dataLogLnIf(verbose(), "Inserted Moves around clobber tmp=", metadata.originalTmp, " gapTmp=", gapTmp, " block=", *block, " index=", instIndex, " inst = ", inst);
                 }
             }
