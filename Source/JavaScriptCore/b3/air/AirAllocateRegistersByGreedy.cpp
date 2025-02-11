@@ -436,7 +436,9 @@ struct AffinityWith {
 struct TmpData {
     void dump(PrintStream& out) const
     {
-        out.print("{liveRange = ", liveRange, ", preferredReg = ", preferredReg, ", affinity = ", listDump(affinity), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1, " spillCost = ", spillCost, ", stage = ", stage, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), "}");
+        out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
+            ", affinity = ", listDump(affinity), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
+            ", spillCost = ",spillCost, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), "splitMetadatIndex = ", splitMetadataIndex, "}");
     }
 
     bool isGroup()
@@ -1073,6 +1075,8 @@ private:
                     dataLogLn("Pop: ", entry, " tmp: ", tmpData);
                     dumpRegRanges(bank);
                 }
+                if (tmpData.stage == Stage::Replaced)
+                    continue; // Tmp no longer relevant
                 if (tryAllocate<bank>(tmp, tmpData))
                     continue;
                 if (tmpData.stage != Stage::TrySplit && tryEvict<bank>(tmp, tmpData))
@@ -1099,6 +1103,8 @@ private:
                 case Stage::Spilled:
                 case Stage::Coalesced:
                 case Stage::Replaced:
+                    dataLogLn("Invalid stage tmp = ", tmp, " tmpData = ", tmpData);
+                    ASSERT(&tmpData == &m_map[tmp]);
                     // Tmps in these stages should not have been enqueued.
                     RELEASE_ASSERT_NOT_REACHED();
                 }
