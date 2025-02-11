@@ -1082,6 +1082,7 @@ private:
                 if (tmpData.stage != Stage::TrySplit && tryEvict<bank>(tmp, tmpData))
                     continue;
 
+                ASSERT(&tmpData == &m_map[tmp]); // Verify m_map hasn't been resized on this path
                 switch (tmpData.stage) {
                 case Stage::TryAllocate:
                     // If we couldn't allocate tmp, allow it to split next time.
@@ -1104,7 +1105,6 @@ private:
                 case Stage::Coalesced:
                 case Stage::Replaced:
                     dataLogLn("Invalid stage tmp = ", tmp, " tmpData = ", tmpData);
-                    ASSERT(&tmpData == &m_map[tmp]);
                     // Tmps in these stages should not have been enqueued.
                     RELEASE_ASSERT_NOT_REACHED();
                 }
