@@ -54,15 +54,16 @@ namespace JSC { namespace B3 { namespace Air {
 // FIXME: anonymous namespace (combines with LinearScan due to unified sources)
 namespace Greedy {
 
+constexpr float splitCostMultiplier = 1.0f;
+constexpr size_t splitMinRangeSize = 8;
+
 static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 
 // Phase constants used for the PhaseInsertionSet.
-const unsigned spillStore = 0;
-const unsigned splitMoveTo = 1;
-const unsigned splitMoveFrom = 2;
-const unsigned spillLoad = 3;
-
-const size_t splitMinRangeSize = 8;
+constexpr unsigned spillStore = 0;
+constexpr unsigned splitMoveTo = 1;
+constexpr unsigned splitMoveFrom = 2;
+constexpr unsigned spillLoad = 3;
 
 typedef Range<size_t> Interval;
 
@@ -438,7 +439,7 @@ struct TmpData {
     {
         out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
             ", affinity = ", listDump(affinity), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
-            ", spillCost = ",spillCost, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), "splitMetadatIndex = ", splitMetadataIndex, "}");
+            ", spillCost = ",spillCost, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), ", splitMetadataIndex = ", splitMetadataIndex, "}");
     }
 
     bool isGroup()
@@ -1346,8 +1347,10 @@ private:
             }
         }
         ASSERT(tmpData.spillCost != unspillableCost); // Should have evicted.
-        if (minSplitCost >= unspillableCost) //tmpData.spillCost) // FixMe: Use a multiple?
-            return false; // Better to spill than to split.
+        if (minSplitCost >= unspillableCost)
+            return false; // Other conflicts exist, so splitting is not productive
+        if (minSplitCost * splitCostMultiplier >= tmpData.spillCost)
+            return false; // Better to spill than to split
 
         LiveRange allGapsRange;
         m_regRanges[bestSplitReg].forEachConflict(tmpData.liveRange,
@@ -1360,9 +1363,7 @@ private:
                 return IterationStatus::Continue;
             });
 
-        size_t size = tmpData.liveRange.size();
         tmpData.liveRange = LiveRange::subtract(tmpData.liveRange, allGapsRange);
-        ASSERT(tmpData.liveRange.size() + allGapsRange.size() == size);
         tmpData.splitMetadataIndex = m_splitMetadata.size();
         setStageAndEnqueue(tmp, tmpData, Stage::TryAllocate);
 
