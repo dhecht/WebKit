@@ -54,7 +54,9 @@ namespace JSC { namespace B3 { namespace Air {
 // FIXME: anonymous namespace (combines with LinearScan due to unified sources)
 namespace Greedy {
 
-constexpr float splitCostMultiplier = 1.0f;
+// Multiplier of 0 means split around clobbers at ever opportunity. The higher the multiplier,
+// the less often the split will be applied (i.e. treats splitting as more costly).
+constexpr float splitCostMultiplier = 0.0f;
 constexpr size_t splitMinRangeSize = 8;
 
 static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
@@ -516,6 +518,10 @@ public:
         allocateRegisters<FP>();
 
         insertFixupCode();
+
+        validateAssignments<GP>(); // XXX
+        validateAssignments<FP>(); // XXX
+
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
     }
@@ -568,9 +574,9 @@ private:
         return indexOfHead(block) + block->size() * 2 - 1;
     }
 
-    static size_t instIndex(size_t indexOfHead, Interval interval)
+    static size_t instIndex(size_t indexOfHead, size_t index)
     {
-        return (interval.begin() - indexOfHead) / 2;
+        return (index - indexOfHead) / 2;
     }
 
     static size_t indexOfEarly(Interval interval)
@@ -651,6 +657,45 @@ private:
         if (UNLIKELY(!m_fastBlocks.saw(block)))
             freq *= Options::rareBlockPenalty();
         return freq;
+    }
+
+    template<Bank bank>
+    void validateAssignments()
+    {
+        bool anyFailures = false;
+        auto checkConflicts = [&](BasicBlock* block, const typename TmpLiveness<bank>::LocalCalc& localCalc) {
+            for (Tmp a : localCalc.live()) {
+                Tmp aGrp = groupForTmp(a);
+                for (Tmp b : localCalc.live()) {
+                    Tmp bGrp = groupForTmp(b);
+                    if (aGrp == bGrp)
+                        continue;
+                    Reg aReg = assignedReg(a);
+                    Reg bReg = assignedReg(b);
+                    if (aReg == bReg) {
+                        dataLogLn("AIR GREEDY REGISTER ALLOCATION VALIDATION FAILURE");
+                        dataLogLn("   In BB", *block);
+                        dataLogLn("     tmp = ", a, " : ", m_map[a]);
+                        dataLogLn("     tmp = ", b, " : ", m_map[b]);
+                        anyFailures = true;
+                    }
+                }
+            }
+        };
+
+        TmpLiveness<bank> liveness(m_code);
+        for (BasicBlock* block : m_code) {
+            typename TmpLiveness<bank>::LocalCalc localCalc(liveness, block);
+            for (unsigned instIndex = block->size(); instIndex--;) {
+                checkConflicts(block, localCalc);
+                localCalc.execute(instIndex);
+            }
+            checkConflicts(block, localCalc);
+        }
+        if (anyFailures) {
+            dataLogLn("IR:");
+            dataLogLn(m_code);
+        }
     }
 
     void buildIntervals()
@@ -1295,15 +1340,10 @@ private:
     template<Bank bank>
     bool trySplitAroundClobbers(Tmp tmp, TmpData& tmpData)
     {
-        static unsigned count;
-
         if (tmpData.splitMetadataIndex)
             return false; // Already split around clobbers
         if (tmpData.liveRange.size() < splitMinRangeSize)
             return false; // Not enough instructions to be worthwhile
-
-        if (Options::airGreedyLimit() && count >= Options::airGreedyLimit())
-            return false;
 
         auto instUsesOrDefsTmp = [](Inst& inst, Tmp tmp) {
             bool result = false;
@@ -1322,22 +1362,21 @@ private:
                     if (conflict.tmp.isReg() && conflict.interval.distance() == 1) {
                         // Block freq * rare block penalty
                         BasicBlock* block = findBlockContainingIndex(conflict.interval.begin());
-                        unsigned instIndex = this->instIndex(indexOfHead(block), conflict.interval);
+                        unsigned instIndex = this->instIndex(indexOfHead(block), conflict.interval.begin());
                         Inst& inst = block->at(instIndex);
                         if (instUsesOrDefsTmp(inst, tmp)) {
                             // If the inst that clobbers regs also use/def the tmp trying to be split, then
                             // can't split the tmp around this clobber.
-                            // FixMe: could allow uses, but then we'd have to make split tmp conflict with any
+                            // FIXME: could allow uses, but then we'd have to make split tmp conflict with any
                             // spill tmps used by this instruction, so unclear if that's better.
-                            dataLogLnIf(verbose(), "XXX use/def: tmp=", tmp, " inst = ", inst);
                             splitCost = unspillableCost;
                             return IterationStatus::Done;
                         }
-                        // Times 2 for MOV tmp, split & MOV split, tmp
+                        // Times 2 for 'MOV tmp, gapTmp' and 'MOV gapTmp, tmp'
                         splitCost += adjustedBlockFrequency(block) * 2;
                         return IterationStatus::Continue;
                     }
-                    // Conflict with non clobber - don't try to split.
+                    // Non-clobber conflict exists so splitting won't help.
                     splitCost = unspillableCost;
                     return IterationStatus::Done;
                 });
@@ -1352,18 +1391,19 @@ private:
         if (minSplitCost * splitCostMultiplier >= tmpData.spillCost)
             return false; // Better to spill than to split
 
-        LiveRange allGapsRange;
+        LiveRange holeRange;
         m_regRanges[bestSplitReg].forEachConflict(tmpData.liveRange,
             [&](auto& conflict) -> IterationStatus {
                 ASSERT(conflict.tmp.isReg() && conflict.interval.distance() == 1);
-                // Extend interval to include both early and late since we'll insert a Move
-                // before and after the clobbering instruction.
-                Interval gapInterval = earlyAndLateInterval(indexOfEarly(conflict.interval));
-                allGapsRange.append(gapInterval);
+                // Punched hole should always include the instructions late interval so the
+                // split tmp won't be modeled as conflicting with late defs.
+                Interval hole = conflict.interval | lateInterval(indexOfEarly(conflict.interval));
+                ASSERT(hole.distance() == 1 || hole.distance() == 2);
+                holeRange.append(hole);
                 return IterationStatus::Continue;
             });
 
-        tmpData.liveRange = LiveRange::subtract(tmpData.liveRange, allGapsRange);
+        tmpData.liveRange = LiveRange::subtract(tmpData.liveRange, holeRange);
         tmpData.splitMetadataIndex = m_splitMetadata.size();
         setStageAndEnqueue(tmp, tmpData, Stage::TryAllocate);
 
@@ -1371,16 +1411,17 @@ private:
         metadata.originalTmp = tmp;
         // Create tmps to carry the value across register clobbering instructions. These tmps
         // might spill or be assigned another register.
-        for (Interval gapInterval : allGapsRange.intervals()) {
-            float freq = 2 * adjustedBlockFrequency(findBlockContainingIndex(gapInterval.begin()));
+        for (Interval hole : holeRange.intervals()) {
+            BasicBlock* block = findBlockContainingIndex(hole.begin());
+            float freq = 2 * adjustedBlockFrequency(block);
+            ASSERT(hole.begin() > indexOfHead(block)); // padInterference() ensures this
+            Interval gapInterval = hole | Interval(hole.begin() - 1);
             Tmp gapTmp = newTmp(tmp, freq, gapInterval);
             metadata.gapTmps.append(gapTmp);
             setStageAndEnqueue(gapTmp, m_map[gapTmp], Stage::TryAllocate);
         }
         dataLogLnIf(verbose(), "Split (clobbers): reg = ", bestSplitReg, " splitCost = ", minSplitCost, " split tmp = ", metadata);
         m_splitMetadata.append(WTFMove(metadata));
-
-        count++;
         return true;
     }
 
@@ -1614,6 +1655,7 @@ private:
                     if (Arg::isAnyDef(role))
                         m_insertionSets[block].insert(instIndex + 1, spillStore, move, inst.origin, tmp, arg);
                 });
+                ASSERT(inst.isValidForm());
             }
         }
     }
@@ -1631,8 +1673,9 @@ private:
                 TmpData& gapData = m_map[gapTmp];
                 for (auto& interval : gapData.liveRange.intervals()) {
                     ASSERT(interval.distance() == 2);
-                    BasicBlock* block = findBlockContainingIndex(interval.begin());
-                    unsigned instIndex = this->instIndex(indexOfHead(block), interval);
+                    size_t lastIndex = interval.end() - 1;
+                    BasicBlock* block = findBlockContainingIndex(lastIndex);
+                    unsigned instIndex = this->instIndex(indexOfHead(block), lastIndex);
                     Inst& inst = block->at(instIndex);
 
                     Arg arg = gapTmp;
@@ -1643,7 +1686,7 @@ private:
                     Opcode move = moveOpcode(gapTmp);
                     m_insertionSets[block].insert(instIndex, splitMoveFrom, move, inst.origin, metadata.originalTmp, arg);
                     m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, inst.origin, arg, metadata.originalTmp);
-                    dataLogLnIf(verbose(), "Inserted Moves around clobber tmp=", metadata.originalTmp, " gapTmp=", gapTmp, " block=", *block, " index=", instIndex, " inst = ", inst);
+                    dataLogLnIf(verbose(), "Inserted Moves around clobber tmp=", metadata.originalTmp, " gapTmp=", gapTmp, " gapReg = ", assignedReg(gapTmp), " block=", *block, " index=", instIndex, " inst = ", inst);
                 }
             }
         }
@@ -1702,6 +1745,7 @@ private:
                 bool mayBeCoalescable = this->mayBeCoalescable(inst);
 
                 dataLogLnIf(verbose(), "At: ", inst, mayBeCoalescable ? " [coalescable]" : "");
+                ASSERT(inst.isValidForm());
 
                 if constexpr (isX86_64()) {
                     // Move32 is cheaper if we know that it's equivalent to a Move in x86_64. It's
@@ -1733,6 +1777,30 @@ private:
                     }
                     tmp = Tmp(reg);
                 });
+                if (!inst.isValidForm()) {
+                    dataLogLn("--: ", inst);
+                    if (inst.kind.opcode == Patch) {
+                        dataLogLn("early clobbers=", inst.extraEarlyClobberedRegs());
+                        dataLogLn("clobbers=", inst.extraClobberedRegs());
+                    }
+                    auto clobberedEarly = inst.extraEarlyClobberedRegs().filter(RegisterSetBuilder::allScalarRegisters()).buildAndValidate();
+                    auto clobberedLate = inst.extraClobberedRegs().filter(RegisterSetBuilder::allScalarRegisters()).buildAndValidate();
+                    inst.forEachTmp(
+                        [&] (Tmp& tmp, Arg::Role role, Bank, Width) {
+                            if (!tmp.isReg())
+                                return;
+                            if (Arg::isLateDef(role) || Arg::isLateUse(role)) {
+                                if (clobberedLate.contains(tmp.reg(), IgnoreVectors)) {
+                                    dataLogLn("conflict late def/use: ", tmp);
+                                }
+                            } else {
+                                if (clobberedEarly.contains(tmp.reg(), IgnoreVectors)) {
+                                    dataLogLn("conflict early def/use: ", tmp);
+                                }
+                            }
+                        });
+                }
+                ASSERT(inst.isValidForm());
 
                 if (mayBeCoalescable && inst.args[0].isTmp() && inst.args[1].isTmp() 
                     && inst.args[0].tmp() == inst.args[1].tmp())
