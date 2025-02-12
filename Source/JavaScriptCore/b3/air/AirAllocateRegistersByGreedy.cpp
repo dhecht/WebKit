@@ -519,8 +519,8 @@ public:
 
         insertFixupCode();
 
-        validateAssignments<GP>(); // XXX
-        validateAssignments<FP>(); // XXX
+        validateAssignments<GP>();
+        validateAssignments<FP>();
 
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
@@ -662,16 +662,23 @@ private:
     template<Bank bank>
     void validateAssignments()
     {
+        if (!Options::airValidateGreedRegAlloc())
+            return;
+
         bool anyFailures = false;
         auto checkConflicts = [&](BasicBlock* block, const typename TmpLiveness<bank>::LocalCalc& localCalc) {
             for (Tmp a : localCalc.live()) {
                 Tmp aGrp = groupForTmp(a);
+                Reg aReg = assignedReg(a);
+                if (!aReg)
+                    continue;
                 for (Tmp b : localCalc.live()) {
                     Tmp bGrp = groupForTmp(b);
-                    if (aGrp == bGrp)
+                    if (aGrp == bGrp || bGrp)
                         continue;
-                    Reg aReg = assignedReg(a);
                     Reg bReg = assignedReg(b);
+                    if (!bReg)
+                        continue;
                     if (aReg == bReg) {
                         dataLogLn("AIR GREEDY REGISTER ALLOCATION VALIDATION FAILURE");
                         dataLogLn("   In BB", *block);
@@ -695,6 +702,7 @@ private:
         if (anyFailures) {
             dataLogLn("IR:");
             dataLogLn(m_code);
+            RELEASE_ASSERT_NOT_REACHED();
         }
     }
 
