@@ -226,7 +226,7 @@ public:
                 // No overlap: include entire interval in result.
                 result.append(interval);
             }
-            // Finished processing interval; move on to the next.
+            // Finished processing interval of a; move on to the next.
             if (aIter == a.intervals().end())
                 break;
             interval = *aIter;
