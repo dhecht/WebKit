@@ -121,7 +121,7 @@ public:
         crossesBasicBlockBoundary = true;
     }
 
-    bool isLocal()
+    bool isLocal() const
     {
         return !crossesBasicBlockBoundary && m_intervals.size() <= 1;
     }
@@ -239,6 +239,8 @@ public:
         for (auto& interval : intervals())
             out.print(comma, interval);
         out.print(" }[", m_size, "]");
+        if (isLocal())
+            out.print("(local)");
     }
 
 private:
@@ -253,60 +255,80 @@ enum class Stage {
     TryAllocate,
     TrySplit,
     Spill,
+    MaxInQueue = Spill,
     Assigned,
     Coalesced,
     Spilled,
     Replaced,
 };
 
-struct QueueElement {
-    QueueElement(Tmp tmp, Stage stage, size_t rangeSize, bool maybeCoalescable, bool isLocal)
-        : tmp(tmp)
-        , stage(stage)
-        , rangeSize(rangeSize)
-        , maybeCoalescable(maybeCoalescable)
-        , isLocal(isLocal)
+class TmpPriority {
+private:
+    static constexpr size_t stageBits = 3;
+    static_assert(static_cast<uint64_t>(Stage::MaxInQueue) < (1ULL << stageBits));
+    static constexpr size_t stageShift = 64 - stageBits;
+
+    static constexpr size_t maybeCoalescableBits = 1;
+    static constexpr size_t maybeCoalescableShift = stageShift - maybeCoalescableBits;
+
+    static constexpr size_t isGlobalBits = 1;
+    static constexpr size_t isGlobalShift = maybeCoalescableShift - isGlobalBits;
+
+    static constexpr size_t rangeSizeBits = 27;
+    static constexpr size_t rangeSizeShift = isGlobalShift - rangeSizeBits;
+
+    static constexpr size_t tmpIndexBits = 32;
+    static constexpr size_t tmpIndexShift = rangeSizeShift - tmpIndexBits;
+    static_assert(tmpIndexShift == 0);
+
+    inline void pack_priority(uint64_t val, size_t numBits, size_t shift, bool reverse)
     {
+        const uint64_t mask = (1ull << numBits) - 1;
+        val &= mask;
+        if (reverse)
+            val = mask - val;
+        m_priority |= val << shift;
+    }
+
+public:
+    TmpPriority(Tmp tmp, Stage stage, size_t rangeSize, bool maybeCoalescable, bool isGlobal)
+        : m_tmp(tmp)
+    {
+        ASSERT(!tmp.isReg());
+        ASSERT(stage <= Stage::MaxInQueue);
+        // Earlier stages are higher priority.
+        pack_priority(static_cast<uint64_t>(stage), stageBits, stageShift, true);
+        pack_priority(maybeCoalescable, maybeCoalescableBits, maybeCoalescableShift, false);
+        pack_priority(isGlobal, isGlobalBits, isGlobalShift, false);
+        pack_priority(rangeSize, rangeSizeBits, rangeSizeShift, false);
+        // Make a strict total order for determinism.
+        pack_priority(tmp.tmpIndex(), tmpIndexBits, tmpIndexShift, true);
+    }
+
+    Tmp tmp() { return m_tmp; }
+
+    // XXX remove
+    Stage stage() const
+    {
+        const uint64_t mask = (1 << stageBits) - 1;
+        uint64_t stageReversed = m_priority >> stageShift;
+        stageReversed &= mask;
+        return static_cast<Stage>(mask - stageReversed);
     }
 
     void dump(PrintStream& out) const
     {
-        out.print("<", tmp, ", ", stage, ", ", maybeCoalescable, ", ", rangeSize, ">");
+        out.print("<", m_tmp, ", ", WTF::RawHex(m_priority), ">");
     }
- 
-    static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
+
+    static bool isHigherPriority(const TmpPriority& left, const TmpPriority& right)
     {
-        ASSERT(!left.tmp.isReg() && !right.tmp.isReg());
-        // XXX FIXME: could prepack so this can be a single comparison.
-        if (left.stage < right.stage)
-            return true;
-        if (left.stage > right.stage)
-            return false;
-
-        if (left.maybeCoalescable && !right.maybeCoalescable)
-            return true;
-        if (!left.maybeCoalescable && right.maybeCoalescable)
-            return false;
-
-        if (!left.isLocal && right.isLocal)
-            return true;
-        if (left.isLocal && !right.isLocal)
-            return false;
-
-        if (left.rangeSize > right.rangeSize)
-            return true;
-        if (left.rangeSize < right.rangeSize)
-            return false;
-
-        // Guarantee a strict total ordering for determinism.
-        return left.tmp.tmpIndex() < right.tmp.tmpIndex();
+        return left.m_priority > right.m_priority;
     }
 
-    Tmp tmp;
-    Stage stage;
-    size_t rangeSize;
-    bool maybeCoalescable;
-    bool isLocal;
+private:
+    Tmp m_tmp;
+    uint64_t m_priority { 0 };
 };
 
 static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
@@ -1092,7 +1114,7 @@ private:
         if (tmpData.liveRange.isLocal())
             rangeSizeOrStart = tmpData.liveRange.intervals().first().begin();
 
-        m_queue.enqueue({ tmp, stage, rangeSizeOrStart, tmpData.preferredReg || tmpData.affinity.size(), tmpData.liveRange.isLocal() });
+        m_queue.enqueue({ tmp, stage, rangeSizeOrStart, tmpData.preferredReg || tmpData.affinity.size(), !tmpData.liveRange.isLocal() });
         dataLogLnIf(verbose(), "Enqueued (", stage, ") ", tmp);
     }
 
@@ -1119,7 +1141,8 @@ private:
         do {
             while (!m_queue.isEmpty()) {
                 auto entry = m_queue.dequeue();
-                Tmp tmp = entry.tmp;
+                Tmp tmp = entry.tmp();
+                ASSERT(tmp && tmp.bank() == bank);
                 TmpData& tmpData = m_map[tmp];
                 if (verbose()) {
                     dataLogLn("Pop: ", entry, " tmp: ", tmpData);
@@ -1471,9 +1494,8 @@ private:
     bool queueContainsOnlySpills()
     {
         for (auto& elem : m_queue) {
-            if (elem.stage != Stage::Spill) {
+            if (elem.stage() != Stage::Spill)
                 return false;
-            }
         }
         return true;
     }
@@ -1826,7 +1848,7 @@ private:
     TmpMap<TmpData> m_map;
     Vector<SplitMetadata> m_splitMetadata;
     IndexMap<Reg, RegisterRanges> m_regRanges;
-    PriorityQueue<QueueElement, QueueElement::isHigherPriority> m_queue;
+    PriorityQueue<TmpPriority, TmpPriority::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     BlockWorklist m_fastBlocks;
     UseCounts m_useCounts;
