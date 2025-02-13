@@ -291,7 +291,7 @@ private:
     }
 
 public:
-    TmpPriority(Tmp tmp, Stage stage, size_t rangeSize, bool maybeCoalescable, bool isGlobal)
+    TmpPriority(Tmp tmp, Stage stage, size_t rangeSizeOrStart, bool maybeCoalescable, bool isGlobal)
         : m_tmp(tmp)
     {
         ASSERT(!tmp.isReg());
@@ -300,7 +300,9 @@ public:
         pack_priority(static_cast<uint64_t>(stage), stageBits, stageShift, true);
         pack_priority(maybeCoalescable, maybeCoalescableBits, maybeCoalescableShift, false);
         pack_priority(isGlobal, isGlobalBits, isGlobalShift, false);
-        pack_priority(rangeSize, rangeSizeBits, rangeSizeShift, false);
+        // If range is global, then rangeSizeOrStart is size, and larger ranges are higher priority.
+        // If range is local, then rangeSizeOrStart is start, and earlier ranges are higher priority.
+        pack_priority(rangeSizeOrStart, rangeSizeBits, rangeSizeShift, !isGlobal);
         // Make a strict total order for determinism.
         pack_priority(tmp.tmpIndex(), tmpIndexBits, tmpIndexShift, true);
     }
