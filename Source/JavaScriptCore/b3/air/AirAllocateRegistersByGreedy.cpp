@@ -88,10 +88,12 @@ public:
 #endif
     }
 
+    // interval must come before all the intervals already in this LiveRange.
     void prepend(Interval interval)
     {
+        ASSERT(interval);
         if (m_intervals.isEmpty() || interval.end() < m_intervals.first().begin())
-            m_intervals.prepend(WTFMove(interval));
+            m_intervals.prepend(interval);
         else {
             ASSERT(interval.end() == m_intervals.first().begin());
             m_intervals.first() |= interval;
@@ -100,10 +102,16 @@ public:
         validate();
     }
 
+    // interval must come after all the intervals already in this LiveRange.
     void append(Interval interval)
     {
-        ASSERT(m_intervals.isEmpty() || m_intervals.last().end() < interval.begin());
-        m_intervals.append(WTFMove(interval));
+        ASSERT(interval);
+        if (m_intervals.isEmpty() || m_intervals.last().end() < interval.begin())
+            m_intervals.append(interval);
+        else {
+            ASSERT(m_intervals.last().end() == interval.begin());
+            m_intervals.last() |= interval;
+        }
         m_size += interval.distance();
         validate();
     }
@@ -146,53 +154,41 @@ public:
 
     static LiveRange merge(const LiveRange& a, const LiveRange& b)
     {
-        auto appendRanges = [](LiveRange& dest, auto iter, auto end) {
-            for (; iter != end; ++iter) {
-                dest.m_intervals.append(*iter);
-                dest.m_size += iter->distance();
-            }
-        };
-
-        auto consumeOverlapping = [](LiveRange& dest, auto& iter, auto end) {
-            bool merged = false;
-            auto& last = dest.m_intervals.last();
-            while (iter != end && (last.end() == iter->begin() || last.overlaps(*iter))) {
-                last |= *iter;
+        auto getEarliestAndAdvance = [](auto& aIter, const auto aEnd, auto& bIter, const auto bEnd) {
+            auto postInc = [](auto& iter) {
+                Interval interval = *iter;
                 ++iter;
-                merged = true;
-            }
-            return merged;
+                return interval;
+            };
+            ASSERT(aIter != aEnd || bIter != bEnd);
+            if (aIter == aEnd)
+                return postInc(bIter);
+            if (bIter == bEnd)
+                return postInc(aIter);
+            if (aIter->begin() < bIter->begin())
+                return postInc(aIter);
+            return postInc(bIter);
         };
 
         LiveRange result;
         auto aIter = a.intervals().begin();
+        auto aEnd = a.intervals().end();
         auto bIter = b.intervals().begin();
+        auto bEnd = b.intervals().end();
 
-        while (true) {
-            if (aIter == a.intervals().end()) {
-                appendRanges(result, bIter, b.intervals().end());
-                break;
+        Interval current = {};
+        while (aIter != aEnd || bIter != bEnd) {
+            Interval next = getEarliestAndAdvance(aIter, aEnd, bIter, bEnd);
+            if (current.overlaps(next)) {
+                current |= next;
+                continue;
             }
-            if (bIter == b.intervals().end()) {
-                appendRanges(result, aIter, a.intervals().end());
-                break;
-            }
-            ASSERT(aIter != a.intervals().end() && bIter != b.intervals().end());
-            if (aIter->begin() < bIter->begin()) {
-                result.m_intervals.append(*aIter);
-                ++aIter;
-            } else {
-                result.m_intervals.append(*bIter);
-                ++bIter;
-            }
-            bool merged;
-            do {
-                merged = false;
-                merged |= consumeOverlapping(result, aIter, a.intervals().end());
-                merged |= consumeOverlapping(result, bIter, b.intervals().end());
-            } while (merged);
-            result.m_size += result.intervals().last().distance();
+            if (current)
+                result.append(current);
+            current = next;
         }
+        if (current)
+            result.append(current);
         result.validate();
         return result;
     }
@@ -281,7 +277,7 @@ struct QueueElement {
     static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
     {
         ASSERT(!left.tmp.isReg() && !right.tmp.isReg());
-        // FIXME: could prepack so this can be a single comparison.
+        // XXX FIXME: could prepack so this can be a single comparison.
         if (left.stage < right.stage)
             return true;
         if (left.stage > right.stage)
