@@ -906,7 +906,7 @@ private:
         }
 
 #if ASSERT_ENABLED
-        m_code.forAllTmps([&](Tmp tmp) {
+        m_code.forEachTmp([&](Tmp tmp) {
             ASSERT(!activeIntervals[tmp]);
         });
 #endif
@@ -928,11 +928,11 @@ private:
     }
 
     template<typename Func>
-    IterationStatus forEachTmpInGroup(Tmp tmp, const Func& func)
+    IterationStatus forEachTmpInGroup(Tmp grp, const Func& func)
     {
-        TmpData& data = m_map[tmp];
+        TmpData& data = m_map[grp];
         if (!data.isGroup())
-            return func(tmp);
+            return func(grp);
         ASSERT(data.subGroup0 && data.subGroup1);
         if (forEachTmpInGroup(data.subGroup0, func) == IterationStatus::Done)
             return IterationStatus::Done;
@@ -953,10 +953,8 @@ private:
         };
         Vector<Move> moves;
 
-        m_code.forAllTmps([&](Tmp tmp) {
-            if (tmp.bank() != bank || tmp.isReg())
-                return;
-
+        m_code.forEachTmp<bank>([&](Tmp tmp) {
+            ASSERT(!tmp.isReg());
             TmpData& data = m_map[tmp];
             std::sort(data.coalescables.begin(), data.coalescables.end(),
                 [this] (CoalescableWith& a, CoalescableWith& b) -> bool {
@@ -1050,9 +1048,7 @@ private:
             }
         }
         if (verbose()) {
-            m_code.forAllTmps([&](Tmp tmp) {
-                if (tmp.bank() != bank || tmp.isReg())
-                    return;
+            m_code.forEachTmp<bank>([&](Tmp tmp) {
                 TmpData& data = m_map[tmp];
                 if (!data.parentGroup && data.isGroup()) {
                     dataLog("Group: ", tmp, " = { ");
@@ -1074,9 +1070,9 @@ private:
             m_map[Tmp(reg)].spillCost = unspillableCost;
 
         // XXX: FIXME: tmps alive only in one gap should be unspillable.
-        m_code.forEachTmp([&](Tmp tmp) {
-            if (tmp.bank() != bank || tmp.isReg())
-                return;
+        m_code.forEachTmp<bank>([&](Tmp tmp) {
+            ASSERT(tmp.bank() == bank);
+            ASSERT(!tmp.isReg());
             auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
             float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
             if (bank == GP && m_useCounts.isConstDef<GP>(index))
@@ -1145,18 +1141,16 @@ private:
         for (Reg reg : m_allowedRegistersInPriorityOrder[bank])
             assign(Tmp(reg), m_map[Tmp(reg)], reg);
 
-        m_code.forEachTmp(
-            [&] (Tmp tmp) {
-                if (tmp.bank() != bank || tmp.isReg())
-                    return;
-                TmpData& tmpData = m_map[tmp];
-                if (tmpData.parentGroup) {
-                    ASSERT(eagerGroups);
-                    return;
-                }
-                if (tmpData.liveRange.intervals().isEmpty())
-                    return;
-                setStageAndEnqueue(tmp, tmpData, Stage::TryAllocate);
+        m_code.forEachTmp<bank>([&](Tmp tmp) {
+            ASSERT(!tmp.isReg());
+            TmpData& tmpData = m_map[tmp];
+            if (tmpData.parentGroup) {
+                ASSERT(eagerGroups);
+                return;
+            }
+            if (tmpData.liveRange.intervals().isEmpty())
+                return;
+            setStageAndEnqueue(tmp, tmpData, Stage::TryAllocate);
         });
 
         do {
@@ -1550,7 +1544,7 @@ private:
     template <Bank bank>
     void emitSpillCodeAndEnqueueNewTmps()
     {
-        m_code.forAllTmps([&](Tmp tmp) {
+        m_code.forEachTmp<bank>([&](Tmp tmp) {
             TmpData& tmpData = m_map[tmp];
             if (tmpData.stage == Stage::Spilled && !tmpData.spillSlot)
                 tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
