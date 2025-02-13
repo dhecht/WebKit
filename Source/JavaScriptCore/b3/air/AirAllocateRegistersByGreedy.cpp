@@ -57,9 +57,12 @@ namespace Greedy {
 // Multiplier of 0 means split around clobbers at ever opportunity. The higher the multiplier,
 // the less often the split will be applied (i.e. treats splitting as more costly).
 constexpr float splitCostMultiplier = 0.0f;
+// Quickly filters out short ranges from live range splitting consideration. 
 constexpr size_t splitMinRangeSize = 8;
 
-static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
+static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
+static constexpr float fastTmpSpillCost = std::numeric_limits<float>::max();
+static_assert(unspillableCost > fastTmpSpillCost);
 
 // Phase constants used for the PhaseInsertionSet.
 constexpr unsigned spillStore = 0;
@@ -67,7 +70,10 @@ constexpr unsigned splitMoveTo = 1;
 constexpr unsigned splitMoveFrom = 2;
 constexpr unsigned spillLoad = 3;
 
-typedef Range<size_t> Interval;
+static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
+
+typedef size_t Point;
+typedef Range<Point> Interval;
 
 class LiveRange {
 public:
@@ -333,10 +339,6 @@ private:
     uint64_t m_priority { 0 };
 };
 
-static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
-static constexpr float fastTmpSpillCost = std::numeric_limits<float>::max();
-static_assert(unspillableCost > fastTmpSpillCost);
-
 class RegisterRanges {
 public:
     RegisterRanges() = default;
@@ -432,14 +434,14 @@ public:
     }
 
 private:
-    AllocatedIntervalSet::iterator findFirstIntervalEndingAfter(size_t pos)
+    AllocatedIntervalSet::iterator findFirstIntervalEndingAfter(Point point)
     {
-        Interval query(pos);
+        Interval query(point);
         // pos can be 0, yet we can't express a non-empty interval with end==0, so instead of looking
         // for the first interval ending after pos we find the first interval ending at or after pos+1.
-        ASSERT(query.end() == pos + 1);
+        ASSERT(query.end() == point + 1);
         auto iter = m_allocations.lower_bound({ Tmp(), query });
-        ASSERT(iter == m_allocations.end() || iter->interval.end() > pos);
+        ASSERT(iter == m_allocations.end() || iter->interval.end() > point);
         return iter;
     }
 
@@ -512,8 +514,8 @@ public:
 
     GreedyAllocator(Code& code)
         : m_code(code)
-        , m_headIndex(code.size())
-        , m_tailIndicies(code.size())
+        , m_blockToHeadPoint(code.size())
+        , m_tailPoints(code.size())
         , m_map(code)
         , m_splitMetadata(1) // Sacrifice index 0.
         , m_regRanges(Reg::maxIndex() + 1)
@@ -559,96 +561,96 @@ private:
 
     void buildIndices()
     {
-        size_t headIndex = 0;
-        size_t tailIndex = 0;
+        Point headPosition = 0;
+        Point tailPosition = 0;
         for (size_t i = 0; i < m_code.size(); i++) {
             BasicBlock* block = m_code[i];
             if (!block) {
-                m_tailIndicies[i] = tailIndex;
+                m_tailPoints[i] = tailPosition;
                 continue;
             }
-            tailIndex = headIndex + 2 * block->size() - 1;
-            m_headIndex[block] = headIndex;
-            m_tailIndicies[i] = tailIndex;
-            headIndex += 2 * block->size();
+            tailPosition = headPosition + 2 * block->size() - 1;
+            m_blockToHeadPoint[block] = headPosition;
+            m_tailPoints[i] = tailPosition;
+            headPosition += 2 * block->size();
         }
     }
 
-    BasicBlock* findBlockContainingIndex(size_t index)
+    BasicBlock* findBlockContainingPoint(Point point)
     {
-        auto iter = std::lower_bound(m_tailIndicies.begin(), m_tailIndicies.end(), index);
-        ASSERT(iter != m_tailIndicies.end()); // Should ask only about legal instruction boundaries.
-        size_t blockIndex = std::distance(m_tailIndicies.begin(), iter);
+        auto iter = std::lower_bound(m_tailPoints.begin(), m_tailPoints.end(), point);
+        ASSERT(iter != m_tailPoints.end()); // Should ask only about legal instruction boundaries.
+        size_t blockIndex = std::distance(m_tailPoints.begin(), iter);
         BasicBlock* block = m_code[blockIndex];
-        ASSERT(indexOfHead(block) <= index && index <= indexOfTail(block));
+        ASSERT(positionOfHead(block) <= point && point <= positionOfTail(block));
         return block;
     }
 
-    size_t indexOfHead(BasicBlock* block)
+    Point positionOfHead(BasicBlock* block)
     {
-        return m_headIndex[block];
+        return m_blockToHeadPoint[block];
     }
 
-    size_t indexOfTail(BasicBlock* block)
+    Point positionOfTail(BasicBlock* block)
     {
-        return indexOfHead(block) + block->size() * 2 - 1;
+        return positionOfHead(block) + block->size() * 2 - 1;
     }
 
-    static size_t instIndex(size_t indexOfHead, size_t index)
+    static size_t instIndex(Point positionOfHead, Point point)
     {
-        return (index - indexOfHead) / 2;
+        return (point - positionOfHead) / 2;
     }
 
-    static size_t indexOfEarly(Interval interval)
+    static Point positionOfEarly(Interval interval)
     {
-        return interval.begin() & ~static_cast<size_t>(1);
+        return interval.begin() & ~static_cast<Point>(1);
     }
 
-    static Interval earlyInterval(size_t indexOfEarly)
+    static Interval earlyInterval(Point positionOfEarly)
     {
-        ASSERT(!(indexOfEarly & 1));
-        return Interval(indexOfEarly);
+        ASSERT(!(positionOfEarly & 1));
+        return Interval(positionOfEarly);
     }
 
-    static Interval lateInterval(size_t indexOfEarly)
+    static Interval lateInterval(Point positionOfEarly)
     {
-        ASSERT(!(indexOfEarly & 1));
-        return Interval(indexOfEarly + 1);
+        ASSERT(!(positionOfEarly & 1));
+        return Interval(positionOfEarly + 1);
     }
 
-    static Interval earlyAndLateInterval(size_t indexOfEarly)
+    static Interval earlyAndLateInterval(Point positionOfEarly)
     {
-        return earlyInterval(indexOfEarly) | lateInterval(indexOfEarly);
+        return earlyInterval(positionOfEarly) | lateInterval(positionOfEarly);
     }
 
-    static Interval interval(size_t indexOfEarly, Arg::Timing timing)
+    static Interval interval(Point positionOfEarly, Arg::Timing timing)
     {
         switch (timing) {
         case Arg::OnlyEarly:
-            return earlyInterval(indexOfEarly);
+            return earlyInterval(positionOfEarly);
         case Arg::OnlyLate:
-            return lateInterval(indexOfEarly);
+            return lateInterval(positionOfEarly);
         case Arg::EarlyAndLate:
-            return earlyAndLateInterval(indexOfEarly);
+            return earlyAndLateInterval(positionOfEarly);
         }
         ASSERT_NOT_REACHED();
         return Interval();
     }
 
-    static Interval intervalForSpill(size_t indexOfEarly, Arg::Role role)
+    static Interval intervalForSpill(Point positionOfEarly, Arg::Role role)
     {
         Arg::Timing timing = Arg::timing(role);
         switch (timing) {
         case Arg::OnlyEarly:
             if (Arg::isAnyDef(role))
-                return earlyAndLateInterval(indexOfEarly); // We have a spill store after this insn.
-            return earlyInterval(indexOfEarly);
+                return earlyAndLateInterval(positionOfEarly); // We have a spill store after this insn.
+            return earlyInterval(positionOfEarly);
         case Arg::OnlyLate:
             if (Arg::isAnyUse(role))
-                return earlyAndLateInterval(indexOfEarly); // We had a spill load before this insn.
-            return lateInterval(indexOfEarly);
+                return earlyAndLateInterval(positionOfEarly); // We had a spill load before this insn.
+            return lateInterval(positionOfEarly);
         case Arg::EarlyAndLate:
-            return earlyAndLateInterval(indexOfEarly);
+            return earlyAndLateInterval(positionOfEarly);
         }
         ASSERT_NOT_REACHED();
         return Interval();
@@ -810,25 +812,25 @@ private:
             if (!block)
                 continue;
 
-            size_t indexOfHead = this->indexOfHead(block);
-            size_t indexOfTail = this->indexOfTail(block);
+            Point positionOfHead = this->positionOfHead(block);
+            Point positionOfTail = this->positionOfTail(block);
             if (verbose()) {
                 dataLog("At BB", pointerDump(block), "\n");
-                dataLog("  indexOfHead = ", indexOfHead, "\n");
-                dataLog("  indexOfTail = ", indexOfTail, "\n");
+                dataLog("  positionOfHead = ", positionOfHead, "\n");
+                dataLog("  positionOfTail = ", positionOfTail, "\n");
             }
 
             for (Tmp tmp : liveness.liveAtTail(block))
-                activeIntervals[tmp] |= Interval(indexOfTail); // FIXME: could just set interval start
+                activeIntervals[tmp] |= Interval(positionOfTail); // FIXME: could just set interval start
 
             if (blockAfter) {
                 for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
-                    if (activeIntervals[tmp].contains(indexOfTail))
+                    if (activeIntervals[tmp].contains(positionOfTail))
                         m_map[tmp].liveRange.crossBasicBlockBoundary();
                     else {
                         // If tmp was live at the head of the next block but no longer live, close
                         // the current interval.
-                        ASSERT(activeIntervals[tmp].begin() == this->indexOfHead(blockAfter));
+                        ASSERT(activeIntervals[tmp].begin() == this->positionOfHead(blockAfter));
                         closeInterval(tmp);
                     }
                 }
@@ -836,21 +838,21 @@ private:
 
             for (unsigned instIndex = block->size(); instIndex--;) {
                 Inst& inst = block->at(instIndex);
-                size_t indexOfEarly = indexOfHead + instIndex * 2;
+                Point positionOfEarly = positionOfHead + instIndex * 2;
 
                 inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
                     auto& interval = activeIntervals[tmp];
                     if (Arg::isLateUse(role))
-                        interval |= lateInterval(indexOfEarly);
+                        interval |= lateInterval(positionOfEarly);
                     if (Arg::isLateDef(role)) {
-                        interval |= lateInterval(indexOfEarly);
+                        interval |= lateInterval(positionOfEarly);
                         closeInterval(tmp);
                         pruneAffinity(inst, tmp);
                     }
                     if (Arg::isEarlyUse(role))
-                        interval |= earlyInterval(indexOfEarly);
+                        interval |= earlyInterval(positionOfEarly);
                     if (Arg::isEarlyDef(role)) {
-                        interval |= earlyInterval(indexOfEarly);
+                        interval |= earlyInterval(positionOfEarly);
                         closeInterval(tmp);
                         pruneAffinity(inst, tmp);
                     }
@@ -865,23 +867,23 @@ private:
                     };
                     inst.extraClobberedRegs().forEachWithWidthAndPreserved(
                         [&](Reg reg, Width, PreservedWidth) {
-                            clobberReg(reg, lateInterval(indexOfEarly));
+                            clobberReg(reg, lateInterval(positionOfEarly));
                         });
                     inst.extraEarlyClobberedRegs().forEachWithWidthAndPreserved(
                         [&](Reg reg, Width, PreservedWidth) {
-                            clobberReg(reg, earlyInterval(indexOfEarly));
+                            clobberReg(reg, earlyInterval(positionOfEarly));
                         });
                 }
 
             }
             for (Tmp tmp : liveness.liveAtHead(block))
-                activeIntervals[tmp] |= Interval(indexOfHead);
+                activeIntervals[tmp] |= Interval(positionOfHead);
 
             blockAfter = block;
         }
         if (blockAfter) {
             for (Tmp tmp : liveness.liveAtHead(blockAfter)) {
-                ASSERT(activeIntervals[tmp].begin() == this->indexOfHead(blockAfter));
+                ASSERT(activeIntervals[tmp].begin() == this->positionOfHead(blockAfter));
                 closeInterval(tmp);
             }
         }
@@ -1390,8 +1392,8 @@ private:
                 [&](auto& conflict) -> IterationStatus {
                     if (conflict.tmp.isReg() && conflict.interval.distance() == 1) {
                         // Block freq * rare block penalty
-                        BasicBlock* block = findBlockContainingIndex(conflict.interval.begin());
-                        unsigned instIndex = this->instIndex(indexOfHead(block), conflict.interval.begin());
+                        BasicBlock* block = findBlockContainingPoint(conflict.interval.begin());
+                        unsigned instIndex = this->instIndex(positionOfHead(block), conflict.interval.begin());
                         Inst& inst = block->at(instIndex);
                         if (instUsesOrDefsTmp(inst, tmp)) {
                             // If the inst that clobbers regs also use/def the tmp trying to be split, then
@@ -1426,7 +1428,7 @@ private:
                 ASSERT(conflict.tmp.isReg() && conflict.interval.distance() == 1);
                 // Punched hole should always include the instructions late interval so the
                 // split tmp won't be modeled as conflicting with late defs.
-                Interval hole = conflict.interval | lateInterval(indexOfEarly(conflict.interval));
+                Interval hole = conflict.interval | lateInterval(positionOfEarly(conflict.interval));
                 ASSERT(hole.distance() == 1 || hole.distance() == 2);
                 holeRange.append(hole);
                 return IterationStatus::Continue;
@@ -1441,9 +1443,16 @@ private:
         // Create tmps to carry the value across register clobbering instructions. These tmps
         // might spill or be assigned another register.
         for (Interval hole : holeRange.intervals()) {
-            BasicBlock* block = findBlockContainingIndex(hole.begin());
+            BasicBlock* block = findBlockContainingPoint(hole.begin());
             float freq = 2 * adjustedBlockFrequency(block);
-            ASSERT(hole.begin() > indexOfHead(block)); // padInterference() ensures this
+            ASSERT(hole.begin() > positionOfHead(block)); // padInterference() ensures this
+            // Model gapTmp interference with any other tmp split at this location by starting
+            // the gapTmp's range one position before the hole. Otherwise, the same register 
+            // may be chosen for the gapTmp and another splitTmp, which wouldn't be valid
+            // since there could be a cycle among the set of fixup Move instructions.
+            // An alternative would be to use the Shuffle opcode (which can handle that
+            // rotation of register assignments) but that would trigger an extra liveness
+            // analysis (see lowerAfterRegAlloc()), and that's unlikely to be worth it.
             Interval gapInterval = hole | Interval(hole.begin() - 1);
             Tmp gapTmp = newTmp(tmp, freq, gapInterval);
             metadata.gapTmps.append(gapTmp);
@@ -1473,11 +1482,11 @@ private:
 
         dataLogLnIf(verbose(), "Spilled ", tmp);
         if (tmpData.splitMetadataIndex) {
+            // Splitting didn't prevent originalTmp from spilling after all, so no point assigning
+            // registers or stack slots to the gap tmps for this split.
             dataLogLnIf(verbose(), "   evicting tmps created during split");
             auto& metadata = m_splitMetadata[tmpData.splitMetadataIndex];
             ASSERT(metadata.originalTmp == tmp);
-            // Splitting didn't prevent originalTmp from spilling after all, so no point assigning
-            // registers or stack slots to the gap tmps for this split.
             for (Tmp gapTmp : metadata.gapTmps) {
                 Reg reg = m_map[gapTmp].assigned;
                 if (reg)
@@ -1485,10 +1494,8 @@ private:
                 m_map[gapTmp].stage = Stage::Replaced;
             }
         }
-        // Batch generating spill tmps so that we can limit traversals of the code without
-        // needing to keep track of each tmp's use/defs.
-        // FIXME: revisit if live range splitting needs that info anyway.
-        // FIXME: this might not be the best if e.g. an unspillable forces a loop tmp to be spilled.
+        // Batch the generation of spill/fill tmps so that we can limit traversals of the code while
+        // not tracking each tmp's use/defs explicitly.
         m_didSpill = true;
         tmpData.validate();
     }
@@ -1524,7 +1531,6 @@ private:
         return move;
     }
 
-    // FIXME: merge with linear scan emitSpillCode().
     template <Bank bank>
     void emitSpillCodeAndEnqueueNewTmps()
     {
@@ -1533,12 +1539,11 @@ private:
             if (tmpData.stage == Stage::Spilled && !tmpData.spillSlot)
                 tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
         });
-        // FIXME: this is too inefficient to do for each spilled tmp, one at a time.
         for (BasicBlock* block : m_code) {
-            size_t indexOfHead = this->indexOfHead(block);
+            Point positionOfHead = this->positionOfHead(block);
             for (unsigned instIndex = 0; instIndex < block->size(); ++instIndex) {
                 Inst& inst = block->at(instIndex);
-                unsigned indexOfEarly = indexOfHead + instIndex * 2;
+                unsigned indexOfEarly = positionOfHead + instIndex * 2;
 
                 // The TmpWidth analysis will say that a Move only stores 32 bits into the destination,
                 // if the source only had 32 bits worth of non-zero bits. Same for the source: it will
@@ -1694,23 +1699,22 @@ private:
             if (!metadata.originalTmp)
                 continue;
             if (spillSlot(metadata.originalTmp))
-                continue; // If spilled, better to not split after all
+                continue; // If spilled, better to not split after all. See spill().
             ASSERT(assignedReg(metadata.originalTmp));
-            // Emit moves to and from each tmp (or stack stot) that fills the split gaps.
+            // Emit moves to and from the gapTmps (or stack stot) that fill the split holes.
             for (Tmp gapTmp : metadata.gapTmps) {
                 TmpData& gapData = m_map[gapTmp];
                 for (auto& interval : gapData.liveRange.intervals()) {
                     ASSERT(interval.distance() == 2);
-                    size_t lastIndex = interval.end() - 1;
-                    BasicBlock* block = findBlockContainingIndex(lastIndex);
-                    unsigned instIndex = this->instIndex(indexOfHead(block), lastIndex);
+                    Point lastPoint = interval.end() - 1;
+                    BasicBlock* block = findBlockContainingPoint(lastPoint);
+                    unsigned instIndex = this->instIndex(positionOfHead(block), lastPoint);
                     Inst& inst = block->at(instIndex);
 
                     Arg arg = gapTmp;
                     StackSlot* spilled = spillSlot(gapTmp);
                     if (spilled)
                         arg = Arg::stack(spilled);
-                    // XXX what to use for origin?
                     Opcode move = moveOpcode(gapTmp);
                     m_insertionSets[block].insert(instIndex, splitMoveFrom, move, inst.origin, metadata.originalTmp, arg);
                     m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, inst.origin, arg, metadata.originalTmp);
@@ -1723,7 +1727,6 @@ private:
             m_insertionSets[block].execute(block);
     }
 
-    // FIXME: combine with graph coloring version?
     bool mayBeCoalescable(Inst& inst)
     {
         switch (inst.kind.opcode) {
@@ -1771,9 +1774,7 @@ private:
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
                 bool mayBeCoalescable = this->mayBeCoalescable(inst);
-
                 dataLogLnIf(verbose(), "At: ", inst, mayBeCoalescable ? " [coalescable]" : "");
-                ASSERT(inst.isValidForm());
 
                 if constexpr (isX86_64()) {
                     // Move32 is cheaper if we know that it's equivalent to a Move in x86_64. It's
@@ -1797,7 +1798,6 @@ private:
                 inst.forEachTmpFast([&](Tmp& tmp) {
                     if (tmp.isReg())
                         return;
-
                     Reg reg = assignedReg(tmp);
                     if (!reg) {
                         dataLog("Failed to allocate reg for: ", tmp, "\n");
@@ -1845,8 +1845,8 @@ private:
     Vector<Reg> m_allowedRegistersInPriorityOrder[numBanks];
     ScalarRegisterSet m_allAllowedRegisters;
     RegisterSet m_allAllowedRegistersWholeWidth;
-    IndexMap<BasicBlock*, size_t> m_headIndex;
-    Vector<size_t> m_tailIndicies;
+    IndexMap<BasicBlock*, Point> m_blockToHeadPoint;
+    Vector<Point> m_tailPoints;
     TmpMap<TmpData> m_map;
     Vector<SplitMetadata> m_splitMetadata;
     IndexMap<Reg, RegisterRanges> m_regRanges;
@@ -1858,7 +1858,7 @@ private:
     bool m_didSpill { false };
 };
 
-} // anonymous namespace
+} // namespace JSC::B3::Air::Greedy
 
 void allocateRegistersByGreedy(Code& code)
 {
