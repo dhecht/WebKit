@@ -1258,7 +1258,6 @@ private:
         return false;
     }
 
-    // FIXME: need some mechanism to avoid infinite eviction loops. (LLVM uses "Cascade").
     template <Bank bank>
     bool tryEvict(Tmp tmp, TmpData& tmpData)
     {
@@ -1267,29 +1266,29 @@ private:
 
         Reg bestEvictReg;
         float minSpillCost = unspillableCost;
+        BitVector visited(m_code.numTmps(bank));
         LiveRange& liveRange = tmpData.liveRange;
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             float conflictsSpillCost = 0.0f;
-            // TODO: maybe use IndexSparseSet instead and hoist construction (but that takes wrong type).
-            // Or add a way to reset IndexSet and hoist construction.
-            IndexSet<Tmp::Indexed<bank>> visited;
+            visited.clearAll();
             m_regRanges[r].forEachConflict(liveRange,
-                [&] (auto& conflict) -> IterationStatus {
+                [&](auto& conflict) -> IterationStatus {
                     if (conflict.tmp.isReg()) {
-                        // Conflicts with a register clobber, cannot evict clobbers.
+                        // Conflicts with a fixed register use/def, cannot evict.
                         conflictsSpillCost = unspillableCost;
                         return IterationStatus::Done;
                     }
-                    if (visited.contains(conflict.tmp))
+                    unsigned conflictTmpIndex = conflict.tmp.tmpIndex(bank);
+                    if (visited.contains(conflictTmpIndex))
                         return IterationStatus::Continue;
-                    visited.add(conflict.tmp);
+                    visited.quickSet(conflictTmpIndex);
                     auto cost = m_map[conflict.tmp].spillCost;
                     if (cost == unspillableCost) {
                         conflictsSpillCost = unspillableCost;
                         return IterationStatus::Done;
                     }
                     conflictsSpillCost += cost;
-                    return IterationStatus::Continue;
+                    return conflictsSpillCost >= minSpillCost ? IterationStatus::Done : IterationStatus::Continue;
             });
             if (conflictsSpillCost < minSpillCost) {
                 minSpillCost = conflictsSpillCost;
