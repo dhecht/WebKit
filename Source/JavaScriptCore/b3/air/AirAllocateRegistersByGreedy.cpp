@@ -45,14 +45,16 @@
 #include <wtf/PriorityQueue.h>
 #include <wtf/Range.h>
 
-using WTF::Range;
-
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC { namespace B3 { namespace Air {
 
-// FIXME: anonymous namespace (combines with LinearScan due to unified sources)
 namespace Greedy {
+
+// Experiments
+constexpr bool eagerGroups = true;
+constexpr bool eagerGroupsSplitFully = false;
+constexpr bool eagerGroupsExhaustiveSearch = false;
 
 // Multiplier of 0 means split around clobbers at ever opportunity. The higher the multiplier,
 // the less often the split will be applied (i.e. treats splitting as more costly).
@@ -60,11 +62,12 @@ constexpr float splitCostMultiplier = 0.0f;
 // Quickly filters out short ranges from live range splitting consideration. 
 constexpr size_t splitMinRangeSize = 8;
 
-static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
-static constexpr float fastTmpSpillCost = std::numeric_limits<float>::max();
+constexpr float unspillableCost = std::numeric_limits<float>::infinity();
+constexpr float fastTmpSpillCost = std::numeric_limits<float>::max();
 static_assert(unspillableCost > fastTmpSpillCost);
 
-// Phase constants used for the PhaseInsertionSet.
+// Phase constants used for the PhaseInsertionSet. Ensures that the fixup and spill/fill instructions
+// inserted in a particular gap ends up in the correct order.
 constexpr unsigned spillStore = 0;
 constexpr unsigned splitMoveTo = 1;
 constexpr unsigned splitMoveFrom = 2;
@@ -72,8 +75,57 @@ constexpr unsigned spillLoad = 3;
 
 static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 
+// Terminology / core data-structures:
+//
+// Point: a position within the IR stream. There are two points associated with each
+// instruction: early and late. The early point for an instruction occurs immediately
+// before the instruction and the late occurs immediately following. Early use/defs
+// for that instruction are modeled as occurring at the early point whereas late use/defs
+// are modeled as occurring at the late point. The late point for an instruction and 
+// early point for the subsequent instruction are distinct in order to avoid false
+// conflicts, e.g. when a late use is followed by an early def.
+//
+// Interval: contiguous set of points, represented by a half open interval [begin, end).
+//
+// LiveRange: a set of intervals, usually used to model the liveness of a particular Tmp.
+// In this implementation, Intervals of a LiveRange must be non-overlapping and
+// non-contigous (if contigous, they should have been merged), and stored in sorted order.
+//
+// RegisterRange: a set of intervals, usually used to model assignments to a particular
+// register at each Point. Each Interval of a RegisterRange is associated with a single
+// Tmp, which may be a register Tmp (to represent fixed register lifetime and clobbers) or
+// a Tmp that is currently assigned to this register. This structure models which Tmp occupies
+// the register at each Point. Tmps and their associated Intervals can be assigned and 
+// evicted to/from the RegisterRange as the register allocation algorithm progresses.
+//
+// Algorithm:
+//
+// 1. Initialization:
+//   a. Define where Points are located in the IR.
+//   b. Run liveness analysis and build a LiveRange for each Tmp (including fixed registers).
+//   c. Run analysis to determine the cost to spill each Tmp.
+//   d. Build metadata related to Tmp coalescing. Eagerly group Tmps that can be coalesced.
+// 2. Register allocation:
+//   a. Process each Tmp in order of priority. Priority is mostly related to the "stage" of the
+//      Tmp, whether a Tmp has a preferred register, and the size of a Tmp's LiveRange. The idea
+//      is to fit the most constrained Tmps first, and let the smaller and less constrained ranges
+//      fit into the remaining gaps.
+//   b. Each Tmp is driven through a state machine (see Stage enum), where the further a Tmp
+//      progresses, the more aggressive we try to fit it somewhere.
+//     - First, simply try to find space where the LiveRange can fit in a RegisterRange.
+//     - If that's not successful, we may evict LiveRanges in favor of a LiveRange with higher
+//       spill cost. The evicted LiveRanges will requeued for further processing.
+//     - If that's not successful, we may split up eagerly coalesced Tmps and process each
+//       subgroup individually. We also try other forms of splitting LiveRanges, which will
+//       produce new Tmps/LiveRanges, some of which may be assignable to registers.
+//     - Finally, if all else fails, the Tmp is spilled and new Tmps for the spill/fill fixups
+//       are queued for processing.
+// 3. Finalization: fixup IR code is inserted to handle Tmps' split ranges and spills.
+//
+// Note that stack slots are allocated during a subsequent compiler phase.
+
 typedef size_t Point;
-typedef Range<Point> Interval;
+typedef WTF::Range<Point> Interval;
 
 class LiveRange {
 public:
@@ -251,7 +303,7 @@ public:
 
 private:
     Deque<Interval> m_intervals;
-    size_t m_size { 0 };
+    size_t m_size { 0 }; // Sum of the distances over m_intervals
     bool crossesBasicBlockBoundary { false };
 };
 
@@ -270,6 +322,7 @@ enum class Stage {
 
 class TmpPriority {
 private:
+    // Priority is encoded into a 64-bit unsigned integer for fast comparison.
     static constexpr size_t stageBits = 3;
     static_assert(static_cast<uint64_t>(Stage::MaxInQueue) < (1ULL << stageBits));
     static constexpr size_t stageShift = 64 - stageBits;
@@ -315,7 +368,6 @@ public:
 
     Tmp tmp() { return m_tmp; }
 
-    // XXX remove
     Stage stage() const
     {
         const uint64_t mask = (1 << stageBits) - 1;
@@ -339,9 +391,9 @@ private:
     uint64_t m_priority { 0 };
 };
 
-class RegisterRanges {
+class RegisterRange {
 public:
-    RegisterRanges() = default;
+    RegisterRange() = default;
 
     struct AllocatedInterval {
         Tmp tmp;
@@ -387,6 +439,11 @@ public:
         return hasConflict;
     }
 
+    // func is called with each (Tmp, Interval) pair (i.e. AllocatedInterval) of this
+    // RegisterRange that overlaps with the given LiveRange 'range'. 
+    //
+    // func is allowed to modify this RegisterRange, e.g. by calling evict().
+    // func must not modify 'range' for the duration of this forEachConflict invocation.
     template<typename Func>
     void forEachConflict(const LiveRange& range, const Func& func)
     {
@@ -404,7 +461,7 @@ public:
                 if (conflictIter == m_allocations.end())
                     return; // End of 'm_allocations', so no more potential conflicts
                 if (rangeIter->end() <= conflictIter->interval.begin()) {
-                    // No more conflicts of this 'range' interval. Move on to the next interval in 'range'.
+                    // No more conflicts with this 'range' interval. Move on to the next interval in 'range'.
                     if (++rangeIter == rangeEnd)
                         return; // End of 'range', so no more potential conflicts
                     // Start searching for conflicts of the next 'range' interval.
@@ -448,17 +505,18 @@ private:
     AllocatedIntervalSet m_allocations;
 };
 
-struct CoalescableWith {
-    void dump(PrintStream& out) const
-    {
-        out.print("(", tmp, ", ", weight, ")");
-    }
-
-    Tmp tmp;
-    float weight;
-};
-
+// Auxillary register allocator data per Tmp.
 struct TmpData {
+    struct CoalescableWith {
+        void dump(PrintStream& out) const
+        {
+            out.print("(", tmp, ", ", weight, ")");
+        }
+
+        Tmp tmp;
+        float weight;
+    };
+
     void dump(PrintStream& out) const
     {
         out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
@@ -484,19 +542,21 @@ struct TmpData {
         ASSERT_IMPLIES(coalescables.size(), !isGroup()); // Only bottom-most should have coalescables
     }
 
+    Stage stage { Stage::New };
     LiveRange liveRange;
     float spillCost { 0.0f };
     Reg preferredReg;
     Vector<CoalescableWith> coalescables;
     Tmp parentGroup;
     Tmp subGroup0, subGroup1;
+    size_t splitMetadataIndex { 0 };
 
-    Stage stage { Stage::New };
     Reg assigned;
     StackSlot* spillSlot { nullptr };
-    size_t splitMetadataIndex { 0 };
 };
 
+// SplitMetadata tracks a Tmp that is split and the new Tmps that are used to carry the value 
+// across the "gaps".
 struct SplitMetadata {
     void dump(PrintStream& out) const
     {
@@ -509,9 +569,6 @@ struct SplitMetadata {
 
 class GreedyAllocator {
 public:
-    static constexpr bool eagerGroups = true;
-    static constexpr bool eagerGroupsSplitFully = false;
-
     GreedyAllocator(Code& code)
         : m_code(code)
         , m_blockToHeadPoint(code.size())
@@ -530,7 +587,7 @@ public:
         padInterference(m_code);
         buildRegisterSets();
         buildIndices();
-        buildIntervals();
+        buildLiveRanges();
         initSpillCosts<GP>();
         initSpillCosts<FP>();
         finalizeGroups<GP>();
@@ -569,6 +626,7 @@ private:
                 m_tailPoints[i] = tailPosition;
                 continue;
             }
+            // Two points per instruction: early and late.
             tailPosition = headPosition + 2 * block->size() - 1;
             m_blockToHeadPoint[block] = headPosition;
             m_tailPoints[i] = tailPosition;
@@ -681,6 +739,8 @@ private:
         return freq;
     }
 
+    // Debug code to verify that the results of register allocation and finalization fixup is valid.
+    // That is, no two Tmps simultaneously alive share the same register (unless they were coalesced).
     template<Bank bank>
     void validateAssignments()
     {
@@ -728,7 +788,7 @@ private:
         }
     }
 
-    void buildIntervals()
+    void buildLiveRanges()
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildIntervals"_s);
         UnifiedTmpLiveness liveness(m_code);
@@ -758,13 +818,13 @@ private:
         auto addMaybeCoalescable = [&](Tmp a, Tmp b, BasicBlock* block) {
             TmpData& tmpData = m_map[a];
             float freq = adjustedBlockFrequency(block);
-            for (CoalescableWith& with : tmpData.coalescables) {
+            for (auto& with : tmpData.coalescables) {
                 if (with.tmp == b) {
                     with.weight += freq;
                     return;
                 }
             }
-            tmpData.coalescables.append(CoalescableWith{ b, freq });
+            tmpData.coalescables.append({ b, freq });
         };
 
         auto coalescableMoveSrc = [&](Inst& inst) {
@@ -779,10 +839,10 @@ private:
                 return;
             Tmp movSrc = coalescableMoveSrc(inst);
             dataLogLnIf(verbose(), "Checking affinity ", inst, " def=", def, " movSrc=", movSrc);
-            defData.coalescables.removeAllMatching([&](CoalescableWith& with) {
+            defData.coalescables.removeAllMatching([&](TmpData::CoalescableWith& with) {
                 if (with.tmp != movSrc && activeIntervals[with.tmp]) {
                     dataLogLnIf(verbose(), "Pruning affinity ", def, " ", with.tmp);
-                    m_map[with.tmp].coalescables.removeAllMatching([def](CoalescableWith& with) {
+                    m_map[with.tmp].coalescables.removeAllMatching([def](TmpData::CoalescableWith& with) {
                         return with.tmp == def;
                     });
                     return true;
@@ -942,6 +1002,8 @@ private:
     template <Bank bank>
     void finalizeGroups()
     {
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::finalizeGroups"_s);
+
         struct Move {
             Tmp tmp0, tmp1;
             float weight;
@@ -957,7 +1019,7 @@ private:
             ASSERT(!tmp.isReg());
             TmpData& data = m_map[tmp];
             std::sort(data.coalescables.begin(), data.coalescables.end(),
-                [this] (CoalescableWith& a, CoalescableWith& b) -> bool {
+                [this] (const auto& a, const auto& b) -> bool {
                     if (a.weight != b.weight)
                         return a.weight > b.weight;
                     // Favor coalescing shorter live ranges.
@@ -971,7 +1033,7 @@ private:
             if (!eagerGroups)
                 return;
 
-            for (CoalescableWith& with : m_map[tmp].coalescables) {
+            for (auto& with : m_map[tmp].coalescables) {
                 if (tmp.tmpIndex(bank) < with.tmp.tmpIndex(bank))
                     moves.append({ tmp, with.tmp, with.weight });
             }
@@ -1138,6 +1200,8 @@ private:
     template <Bank bank>
     void allocateRegisters()
     {
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::allocateRegisters"_s);
+
         for (Reg reg : m_allowedRegistersInPriorityOrder[bank])
             assign(Tmp(reg), m_map[Tmp(reg)], reg);
 
@@ -1215,7 +1279,7 @@ private:
 
         auto tryAllocateToReg = [&](Reg r) {
             LiveRange& liveRange = tmpData.liveRange;
-            RegisterRanges& regRanges = m_regRanges[r];
+            RegisterRange& regRanges = m_regRanges[r];
             if (!regRanges.hasConflict(liveRange)) {
                 assign(tmp, tmpData, r);
                 return true;
@@ -1224,35 +1288,34 @@ private:
         };
 
         ScalarRegisterSet alreadyAttempted;
-        // FIXME: this will check coalescables within the group, which is wasteful and common.
-        // But without it, we won't try to coalescables between partially split groups.
-#if 0
-        IterationStatus status = forEachTmpInGroup(tmp, [&](Tmp member) {
-            for (auto& with : m_map[member].coalescables) {
-                Reg r = assignedReg(with.other);
+        if (eagerGroupsExhaustiveSearch) {
+            // FIXME: this will check coalescables within the group, which is wasteful and common.
+            // But without doing this, we won't try to coalescables between partially split groups.
+            IterationStatus status = forEachTmpInGroup(tmp, [&](Tmp member) {
+                for (auto& with : m_map[member].coalescables) {
+                    Reg r = assignedReg(with.tmp);
+                    if (r) {
+                        if (tryAllocateToReg(r))
+                            return IterationStatus::Done;
+                        alreadyAttempted.add(r, IgnoreVectors);
+                    }
+                }
+                return IterationStatus::Continue;
+            });
+            if (status == IterationStatus::Done) {
+                ASSERT(tmpData.assigned);
+                return true;
+            }
+        } else {
+            for (auto& with : tmpData.coalescables) {
+                Reg r = m_map[with.tmp].assigned;
                 if (r) {
                     if (tryAllocateToReg(r))
-                        return IterationStatus::Done;
+                        return true;
                     alreadyAttempted.add(r, IgnoreVectors);
                 }
             }
-            return IterationStatus::Continue;
-        });
-        if (status == IterationStatus::Done) {
-            ASSERT(tmpData.assigned);
-            return true;
         }
-#else
-        for (auto& with : tmpData.coalescables) {
-            Reg r = m_map[with.tmp].assigned;
-            if (r) {
-                if (tryAllocateToReg(r))
-                    return true;
-                alreadyAttempted.add(r, IgnoreVectors);
-            }
-        }
-
-#endif
         ASSERT(!tmpData.assigned);
 
         if (tmpData.preferredReg) {
@@ -1585,8 +1648,6 @@ private:
                             return;
                         bool needScratchIfSpilledInPlace = false;
                         if (!inst.admitsStack(arg)) {
-                            if (false) // XXX
-                                dataLog("Have an inst that won't admit stack: ", inst, "\n");
                             switch (inst.kind.opcode) {
                             case Move:
                             case MoveDouble:
@@ -1648,7 +1709,6 @@ private:
                 
                 if (needScratch) {
                     ASSERT(scratchForTmp != Tmp());
-                    // XXX does this need to be EarlyAndLate? Does it matter?
                     Tmp tmp = addSpillTmpWithInterval(scratchForTmp, intervalForSpill(indexOfEarly, Arg::Scratch));
                     inst.args.append(tmp);
                     RELEASE_ASSERT(inst.args.size() == 3);
@@ -1815,29 +1875,6 @@ private:
                     }
                     tmp = Tmp(reg);
                 });
-                if (!inst.isValidForm()) {
-                    dataLogLn("--: ", inst);
-                    if (inst.kind.opcode == Patch) {
-                        dataLogLn("early clobbers=", inst.extraEarlyClobberedRegs());
-                        dataLogLn("clobbers=", inst.extraClobberedRegs());
-                    }
-                    auto clobberedEarly = inst.extraEarlyClobberedRegs().filter(RegisterSetBuilder::allScalarRegisters()).buildAndValidate();
-                    auto clobberedLate = inst.extraClobberedRegs().filter(RegisterSetBuilder::allScalarRegisters()).buildAndValidate();
-                    inst.forEachTmp(
-                        [&] (Tmp& tmp, Arg::Role role, Bank, Width) {
-                            if (!tmp.isReg())
-                                return;
-                            if (Arg::isLateDef(role) || Arg::isLateUse(role)) {
-                                if (clobberedLate.contains(tmp.reg(), IgnoreVectors)) {
-                                    dataLogLn("conflict late def/use: ", tmp);
-                                }
-                            } else {
-                                if (clobberedEarly.contains(tmp.reg(), IgnoreVectors)) {
-                                    dataLogLn("conflict early def/use: ", tmp);
-                                }
-                            }
-                        });
-                }
                 ASSERT(inst.isValidForm());
 
                 if (mayBeCoalescable && inst.args[0].isTmp() && inst.args[1].isTmp() 
@@ -1859,7 +1896,7 @@ private:
     Vector<Point> m_tailPoints;
     TmpMap<TmpData> m_map;
     Vector<SplitMetadata> m_splitMetadata;
-    IndexMap<Reg, RegisterRanges> m_regRanges;
+    IndexMap<Reg, RegisterRange> m_regRanges;
     PriorityQueue<TmpPriority, TmpPriority::isHigherPriority> m_queue;
     IndexMap<BasicBlock*, PhaseInsertionSet> m_insertionSets;
     BlockWorklist m_fastBlocks;
