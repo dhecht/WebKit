@@ -34,19 +34,7 @@ namespace JSC { namespace B3 { namespace Air {
 
 class Code;
 
-// FIXME comment
-// This implements the Poletto and Sarkar register allocator called "linear scan":
-// http://dl.acm.org/citation.cfm?id=330250
-//
-// This is not Air's primary register allocator. We use it only when running at optLevel<2.
-// That's not the default level. This register allocator is optimized primarily for running
-// quickly. It's expected that improvements to this register allocator should focus on improving
-// its execution time without much regard for the quality of generated code. If you want good
-// code, use graph coloring.
-//
-// For Air's primary register allocator, see AirAllocateRegistersByGraphColoring.h|cpp.
-//
-// This also does stack allocation as an afterthought. It does not do any spill coalescing.
+// Implementation of a register allocator inspired by LLVM's "Greedy" Register Allocator.
 void allocateRegistersByGreedy(Code&);
 
 } } } // namespace JSC::B3::Air
