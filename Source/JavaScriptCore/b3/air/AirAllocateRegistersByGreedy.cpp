@@ -1279,7 +1279,7 @@ private:
                         return IterationStatus::Done;
                     }
                     unsigned conflictTmpIndex = conflict.tmp.tmpIndex(bank);
-                    if (visited.contains(conflictTmpIndex))
+                    if (visited.quickGet(conflictTmpIndex))
                         return IterationStatus::Continue;
                     visited.quickSet(conflictTmpIndex);
                     auto cost = m_map[conflict.tmp].spillCost;
