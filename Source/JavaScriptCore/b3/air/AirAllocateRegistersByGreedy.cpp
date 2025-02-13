@@ -448,7 +448,7 @@ private:
     AllocatedIntervalSet m_allocations;
 };
 
-struct AffinityWith {
+struct CoalescableWith {
     void dump(PrintStream& out) const
     {
         out.print("(", tmp, ", ", weight, ")");
@@ -462,7 +462,7 @@ struct TmpData {
     void dump(PrintStream& out) const
     {
         out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
-            ", affinity = ", listDump(affinity), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
+            ", coalescables = ", listDump(coalescables), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
             ", spillCost = ",spillCost, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), ", splitMetadataIndex = ", splitMetadataIndex, "}");
     }
 
@@ -481,13 +481,13 @@ struct TmpData {
         ASSERT_IMPLIES(spillSlot, !isGroup()); // Should have been split
         ASSERT_IMPLIES(!spillCost, !liveRange.size());
         ASSERT_IMPLIES(assigned, !parentGroup); // Only top-most should be assigned
-        ASSERT_IMPLIES(affinity.size(), !isGroup()); // Only bottom-most should have affinity
+        ASSERT_IMPLIES(coalescables.size(), !isGroup()); // Only bottom-most should have coalescables
     }
 
     LiveRange liveRange;
     float spillCost { 0.0f };
     Reg preferredReg;
-    Vector<AffinityWith> affinity;
+    Vector<CoalescableWith> coalescables;
     Tmp parentGroup;
     Tmp subGroup0, subGroup1;
 
@@ -533,8 +533,8 @@ public:
         buildIntervals();
         initSpillCosts<GP>();
         initSpillCosts<FP>();
-        finalizeAffinity<GP>();
-        finalizeAffinity<FP>();
+        finalizeGroups<GP>();
+        finalizeGroups<FP>();
 
         allocateRegisters<GP>();
         allocateRegisters<FP>();
@@ -743,32 +743,46 @@ private:
             }
         }
 
-        auto coalescableMoveSrc = [&](Inst& inst) {
-            return mayBeCoalescable(inst) ? inst.args[0].tmp() : Tmp();
-        };
-
-        auto addAffinity = [&](Tmp a, Tmp b, BasicBlock* block) {
+        // addMaybeCoalescable is used during the first pass to collect all potentially
+        // coalescables pairs. i.e. pairs of Tmps 'a' and 'b' such that there exists a
+        // 'Move a, b' instruction. These pairs will be pruned after liveness analysis
+        // based on conflicting defs. We do this rather than simply requiring that the
+        // LiveRanges of coalescable tmps do not overlap so that we can handle Tmp copies, e.g.:
+        //
+        //   Move a, b
+        //   Use a
+        //   Use b
+        //
+        // The LiveRanges of a and b overlap, but the move is still coalescable (unless there
+        // is a non-coalescable-move def of 'a' or 'b' during the lifetime of the other).
+        auto addMaybeCoalescable = [&](Tmp a, Tmp b, BasicBlock* block) {
             TmpData& tmpData = m_map[a];
             float freq = adjustedBlockFrequency(block);
-            for (AffinityWith& with : tmpData.affinity) {
+            for (CoalescableWith& with : tmpData.coalescables) {
                 if (with.tmp == b) {
                     with.weight += freq;
                     return;
                 }
             }
-            tmpData.affinity.append(AffinityWith{ b, freq });
+            tmpData.coalescables.append(CoalescableWith{ b, freq });
         };
 
-        auto pruneAffinity = [&](Inst& inst, Tmp def) {
+        auto coalescableMoveSrc = [&](Inst& inst) {
+            return mayBeCoalescable(inst) ? inst.args[0].tmp() : Tmp();
+        };
+
+        // Remove def from any coalescable pair of a live tmp. We now know from liveness analysis
+        // that these pairs are not coalescable.
+        auto pruneCoalescable = [&](Inst& inst, Tmp def) {
             TmpData& defData = m_map[def];
-            if (!defData.affinity.size())
+            if (!defData.coalescables.size())
                 return;
             Tmp movSrc = coalescableMoveSrc(inst);
             dataLogLnIf(verbose(), "Checking affinity ", inst, " def=", def, " movSrc=", movSrc);
-            defData.affinity.removeAllMatching([&](AffinityWith& with) {
+            defData.coalescables.removeAllMatching([&](CoalescableWith& with) {
                 if (with.tmp != movSrc && activeIntervals[with.tmp]) {
                     dataLogLnIf(verbose(), "Pruning affinity ", def, " ", with.tmp);
-                    m_map[with.tmp].affinity.removeAllMatching([def](AffinityWith& with) {
+                    m_map[with.tmp].coalescables.removeAllMatching([def](CoalescableWith& with) {
                         return with.tmp == def;
                     });
                     return true;
@@ -783,6 +797,7 @@ private:
             activeIntervals[tmp] = Interval();
         };
 
+        // First pass: collect all the potential coalescable pairs of Tmps.
         for (BasicBlock* block : m_code) {
             if (!block)
                 continue;
@@ -799,13 +814,15 @@ private:
                         }
                     } else {
                         ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
-                        addAffinity(inst.args[0].tmp(), inst.args[1].tmp(), block);
-                        addAffinity(inst.args[1].tmp(), inst.args[0].tmp(), block);
+                        addMaybeCoalescable(inst.args[0].tmp(), inst.args[1].tmp(), block);
+                        addMaybeCoalescable(inst.args[1].tmp(), inst.args[0].tmp(), block);
                     }
                 }
             }
         }
 
+        // Second pass: Run liveness analysis and build the LiveRange for each Tmp. Also,
+        // prune conflicts from the coalescables.
         BasicBlock* blockAfter = nullptr;
         for (size_t blockIndex = m_code.size(); blockIndex--;) {
             BasicBlock* block = m_code[blockIndex];
@@ -847,14 +864,14 @@ private:
                     if (Arg::isLateDef(role)) {
                         interval |= lateInterval(positionOfEarly);
                         closeInterval(tmp);
-                        pruneAffinity(inst, tmp);
+                        pruneCoalescable(inst, tmp);
                     }
                     if (Arg::isEarlyUse(role))
                         interval |= earlyInterval(positionOfEarly);
                     if (Arg::isEarlyDef(role)) {
                         interval |= earlyInterval(positionOfEarly);
                         closeInterval(tmp);
-                        pruneAffinity(inst, tmp);
+                        pruneCoalescable(inst, tmp);
                     }
                 });
                 if (inst.kind.opcode == Patch) {
@@ -923,7 +940,7 @@ private:
     }
 
     template <Bank bank>
-    void finalizeAffinity()
+    void finalizeGroups()
     {
         struct Move {
             Tmp tmp0, tmp1;
@@ -941,8 +958,8 @@ private:
                 return;
 
             TmpData& data = m_map[tmp];
-            std::sort(data.affinity.begin(), data.affinity.end(),
-                [this] (AffinityWith& a, AffinityWith& b) -> bool {
+            std::sort(data.coalescables.begin(), data.coalescables.end(),
+                [this] (CoalescableWith& a, CoalescableWith& b) -> bool {
                     if (a.weight != b.weight)
                         return a.weight > b.weight;
                     // Favor coalescing shorter live ranges.
@@ -956,7 +973,7 @@ private:
             if (!eagerGroups)
                 return;
 
-            for (AffinityWith& with : m_map[tmp].affinity) {
+            for (CoalescableWith& with : m_map[tmp].coalescables) {
                 if (tmp.tmpIndex(bank) < with.tmp.tmpIndex(bank))
                     moves.append({ tmp, with.tmp, with.weight });
             }
@@ -983,7 +1000,7 @@ private:
                     ASSERT(!conflicts);
                     ASSERT(tmp0 != tmp1);
                     TmpData& data1 = m_map[tmp1];
-                    if (!data0.affinity.containsIf([tmp1](auto& with) { return with.tmp == tmp1; })
+                    if (!data0.coalescables.containsIf([tmp1](auto& with) { return with.tmp == tmp1; })
                         && data0.liveRange.overlaps(data1.liveRange)) {
                         conflicts = true;
                         return IterationStatus::Done;
@@ -1118,7 +1135,7 @@ private:
         if (tmpData.liveRange.isLocal())
             rangeSizeOrStart = tmpData.liveRange.intervals().first().begin();
 
-        m_queue.enqueue({ tmp, stage, rangeSizeOrStart, tmpData.preferredReg || tmpData.affinity.size(), !tmpData.liveRange.isLocal() });
+        m_queue.enqueue({ tmp, stage, rangeSizeOrStart, tmpData.preferredReg || tmpData.coalescables.size(), !tmpData.liveRange.isLocal() });
         dataLogLnIf(verbose(), "Enqueued (", stage, ") ", tmp);
     }
 
@@ -1213,11 +1230,11 @@ private:
         };
 
         ScalarRegisterSet alreadyAttempted;
-        // FIXME: this will check affinities within the group, which is wasteful and common.
-        // But without it, we won't try to affinitize between partially split groups.
+        // FIXME: this will check coalescables within the group, which is wasteful and common.
+        // But without it, we won't try to coalescables between partially split groups.
 #if 0
         IterationStatus status = forEachTmpInGroup(tmp, [&](Tmp member) {
-            for (auto& with : m_map[member].affinity) {
+            for (auto& with : m_map[member].coalescables) {
                 Reg r = assignedReg(with.other);
                 if (r) {
                     if (tryAllocateToReg(r))
@@ -1232,7 +1249,7 @@ private:
             return true;
         }
 #else
-        for (auto& with : tmpData.affinity) {
+        for (auto& with : tmpData.coalescables) {
             Reg r = m_map[with.tmp].assigned;
             if (r) {
                 if (tryAllocateToReg(r))
