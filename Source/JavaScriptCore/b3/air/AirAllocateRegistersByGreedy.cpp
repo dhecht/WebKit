@@ -452,7 +452,7 @@ public:
 
         if (rangeIter == rangeEnd)
             return;
-        auto nextSearch = rangeIter->begin();
+        Point nextSearch = rangeIter->begin();
 
         while (true) {
             AllocatedInterval conflict;
