@@ -790,7 +790,7 @@ private:
 
     void buildLiveRanges()
     {
-        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildIntervals"_s);
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildLiveRanges"_s);
         UnifiedTmpLiveness liveness(m_code);
         TmpMap<Interval> activeIntervals(m_code);
 
@@ -1128,6 +1128,8 @@ private:
     template<Bank bank>
     void initSpillCosts()
     {
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::initSpillCosts"_s);
+
         for (Reg reg : m_allowedRegistersInPriorityOrder[bank])
             m_map[Tmp(reg)].spillCost = unspillableCost;
 
@@ -1770,6 +1772,8 @@ private:
 
     void insertFixupCode()
     {
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::finalizeGroups"_s);
+
         for (auto& metadata : m_splitMetadata) {
             if (!metadata.originalTmp)
                 continue;
@@ -1836,6 +1840,8 @@ private:
 
     void assignRegisters()
     {
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::finalizeGroups"_s);
+
         if (verbose()) {
             dataLog("About to assign registers. State of all tmps:\n");
             m_code.forEachTmp(
