@@ -1772,7 +1772,7 @@ private:
 
     void insertFixupCode()
     {
-        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::finalizeGroups"_s);
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::insertFixupCode"_s);
 
         for (auto& metadata : m_splitMetadata) {
             if (!metadata.originalTmp)
@@ -1840,7 +1840,7 @@ private:
 
     void assignRegisters()
     {
-        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::finalizeGroups"_s);
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::assignRegisters"_s);
 
         if (verbose()) {
             dataLog("About to assign registers. State of all tmps:\n");
