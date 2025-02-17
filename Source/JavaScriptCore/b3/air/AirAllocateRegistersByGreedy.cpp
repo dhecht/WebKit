@@ -1499,7 +1499,7 @@ private:
         ASSERT(tmpData.spillCost != unspillableCost); // Should have evicted.
         if (minSplitCost >= unspillableCost)
             return false; // Other conflicts exist, so splitting is not productive
-        if (minSplitCost * splitCostMultiplier >= tmpData.spillCost)
+        if (minSplitCost * Options::airGreedyRegAllocSplitMultiplier() >= tmpData.spillCost)
             return false; // Better to spill than to split
 
         LiveRange holeRange;
@@ -1538,7 +1538,7 @@ private:
             metadata.gapTmps.append(gapTmp);
             setStageAndEnqueue(gapTmp, m_map[gapTmp], Stage::TryAllocate);
         }
-        dataLogLnIf(verbose(), "Split (clobbers): reg = ", bestSplitReg, " splitCost = ", minSplitCost, " split tmp = ", metadata);
+        dataLogLnIf(verbose(), "Split (clobbers): reg = ", bestSplitReg, " spillCost = ", m_map[tmp].spillCost, " splitCost = ", minSplitCost, " split tmp = ", metadata);
         m_splitMetadata.append(WTFMove(metadata));
         return true;
     }
