@@ -1089,8 +1089,12 @@ private:
             m_tmpWidth.setWidths(group, useWidth, defWidth);
         };
 
+        static unsigned numGroups = 0;
         for (Move& move : moves) {
             dataLogLnIf(verbose(), "Processing move: ", move);
+            if (numGroups > Options::airGreedyRegAllocEagerGroupLimit())
+                break;
+
             Tmp grp0 = groupForTmp(move.tmp0);
             Tmp grp1 = groupForTmp(move.tmp1);
             if (grp0 == grp1) {
@@ -1106,7 +1110,9 @@ private:
                 addSubGroup(newGrp, newGrpData, newGrpData.subGroup1, grp1);
                 newGrpData.validate();
                 m_map.append(newGrp, newGrpData);
-                dataLogLnIf(verbose(), "Created group ", newGrp, ": ", m_map[newGrp]);
+                dataLogLnIf(verbose(), "Created group ", newGrp, ": ", m_map[newGrp], " | ", numGroups);
+
+                numGroups++;
             }
         }
         if (verbose()) {
