@@ -897,6 +897,7 @@ private:
         // Second pass: Run liveness analysis and build the LiveRange for each Tmp. Also,
         // prune conflicts from the coalescables.
         BasicBlock* blockAfter = nullptr;
+        Vector<Tmp, 8> earlyUses, earlyDefs, lateUses, lateDefs;
         for (size_t blockIndex = m_code.size(); blockIndex--;) {
             BasicBlock* block = m_code[blockIndex];
             if (!block)
@@ -930,28 +931,34 @@ private:
                 Inst& inst = block->at(instIndex);
                 Point positionOfEarly = positionOfHead + instIndex * 2;
 
+                lateUses.shrink(0);
+                lateDefs.shrink(0);
+                earlyUses.shrink(0);
+                earlyDefs.shrink(0);
                 inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
                     if (Arg::isLateUse(role))
-                        activeIntervals[tmp] |= lateInterval(positionOfEarly);
-                });
-                inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
-                    if (Arg::isLateDef(role)) {
-                        activeIntervals[tmp] |= lateInterval(positionOfEarly);
-                        closeInterval(tmp);
-                        pruneCoalescable(inst, tmp, positionOfEarly + 1);
-                    }
-                });
-                inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
+                        lateUses.append(tmp);
+                    if (Arg::isLateDef(role))
+                        lateDefs.append(tmp);
                     if (Arg::isEarlyUse(role))
-                        activeIntervals[tmp] |= earlyInterval(positionOfEarly);
+                        earlyUses.append(tmp);
+                    if (Arg::isEarlyDef(role))
+                        earlyDefs.append(tmp);
                 });
-                inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
-                    if (Arg::isEarlyDef(role)) {
-                        activeIntervals[tmp] |= earlyInterval(positionOfEarly);
-                        closeInterval(tmp);
-                        pruneCoalescable(inst, tmp, positionOfEarly);
-                    }
-                });
+                for (Tmp tmp : lateUses)
+                    activeIntervals[tmp] |= lateInterval(positionOfEarly);
+                for (Tmp tmp : lateDefs) {
+                    activeIntervals[tmp] |= lateInterval(positionOfEarly);
+                    closeInterval(tmp);
+                    pruneCoalescable(inst, tmp, positionOfEarly + 1);
+                }
+                for (Tmp tmp : earlyUses)
+                    activeIntervals[tmp] |= earlyInterval(positionOfEarly);
+                for (Tmp tmp : earlyDefs) {
+                    activeIntervals[tmp] |= earlyInterval(positionOfEarly);
+                    closeInterval(tmp);
+                    pruneCoalescable(inst, tmp, positionOfEarly);
+                }
                 if (inst.kind.opcode == Patch) {
                     auto clobberReg = [&](Reg reg, Interval interval) {
                         Tmp tmp = Tmp(reg);
