@@ -832,12 +832,9 @@ private:
         };
 
         auto isLiveAt = [&](Tmp tmp, Point point) {
-            // If activeIntervals is not bottom, then tmp is definately alive across this point.
-            if (activeIntervals[tmp]) {
-                ASSERT(activeIntervals[tmp].contains(point));
+            if (activeIntervals[tmp])
                 return true;
-            }
-            // Tmp may have been def'ed at point; check the latest closed interval.
+            // Tmp may have been def'ed at point, closing the interval.
             auto& intervals = m_map[tmp].liveRange.intervals();
             if (intervals.isEmpty())
                 return false;
