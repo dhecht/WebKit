@@ -831,16 +831,29 @@ private:
             return mayBeCoalescable(inst) ? inst.args[0].tmp() : Tmp();
         };
 
+        auto isLiveAt = [&](Tmp tmp, Point point) {
+            // If activeIntervals is not bottom, then tmp is definately alive across this point.
+            if (activeIntervals[tmp]) {
+                ASSERT(activeIntervals[tmp].contains(point));
+                return true;
+            }
+            // Tmp may have been def'ed at point; check the latest closed interval.
+            auto& intervals = m_map[tmp].liveRange.intervals();
+            if (intervals.isEmpty())
+                return false;
+            return intervals.first().contains(point);
+        };
+
         // Remove def from any coalescable pair of a live tmp. We now know from liveness analysis
         // that these pairs are not coalescable.
-        auto pruneCoalescable = [&](Inst& inst, Tmp def) {
+        auto pruneCoalescable = [&](Inst& inst, Tmp def, Point point) {
             TmpData& defData = m_map[def];
             if (!defData.coalescables.size())
                 return;
             Tmp movSrc = coalescableMoveSrc(inst);
             dataLogLnIf(verbose(), "Checking affinity ", inst, " def=", def, " movSrc=", movSrc);
             defData.coalescables.removeAllMatching([&](TmpData::CoalescableWith& with) {
-                if (with.tmp != movSrc && activeIntervals[with.tmp]) {
+                if (with.tmp != movSrc && isLiveAt(with.tmp, point)) {
                     dataLogLnIf(verbose(), "Pruning affinity ", def, " ", with.tmp);
                     m_map[with.tmp].coalescables.removeAllMatching([def](TmpData::CoalescableWith& with) {
                         return with.tmp == def;
@@ -918,29 +931,25 @@ private:
                 Point positionOfEarly = positionOfHead + instIndex * 2;
 
                 inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
-                    auto& interval = activeIntervals[tmp];
                     if (Arg::isLateUse(role))
-                        interval |= lateInterval(positionOfEarly);
+                        activeIntervals[tmp] |= lateInterval(positionOfEarly);
                 });
                 inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
-                    auto& interval = activeIntervals[tmp];
                     if (Arg::isLateDef(role)) {
-                        interval |= lateInterval(positionOfEarly);
+                        activeIntervals[tmp] |= lateInterval(positionOfEarly);
                         closeInterval(tmp);
-                        pruneCoalescable(inst, tmp);
+                        pruneCoalescable(inst, tmp, positionOfEarly + 1);
                     }
                 });
                 inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
-                    auto& interval = activeIntervals[tmp];
                     if (Arg::isEarlyUse(role))
-                        interval |= earlyInterval(positionOfEarly);
+                        activeIntervals[tmp] |= earlyInterval(positionOfEarly);
                 });
                 inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
-                    auto& interval = activeIntervals[tmp];
                     if (Arg::isEarlyDef(role)) {
-                        interval |= earlyInterval(positionOfEarly);
+                        activeIntervals[tmp] |= earlyInterval(positionOfEarly);
                         closeInterval(tmp);
-                        pruneCoalescable(inst, tmp);
+                        pruneCoalescable(inst, tmp, positionOfEarly);
                     }
                 });
                 if (inst.kind.opcode == Patch) {
