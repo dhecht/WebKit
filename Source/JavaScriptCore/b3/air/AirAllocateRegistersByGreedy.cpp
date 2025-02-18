@@ -816,6 +816,8 @@ private:
         // The LiveRanges of a and b overlap, but the move is still coalescable (unless there
         // is a non-coalescable-move def of 'a' or 'b' during the lifetime of the other).
         auto addMaybeCoalescable = [&](Tmp a, Tmp b, BasicBlock* block) {
+            if (a == b)
+                return;
             TmpData& tmpData = m_map[a];
             float freq = adjustedBlockFrequency(block);
             for (auto& with : tmpData.coalescables) {
