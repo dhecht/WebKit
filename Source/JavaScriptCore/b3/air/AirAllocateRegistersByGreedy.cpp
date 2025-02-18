@@ -921,13 +921,22 @@ private:
                     auto& interval = activeIntervals[tmp];
                     if (Arg::isLateUse(role))
                         interval |= lateInterval(positionOfEarly);
+                });
+                inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
+                    auto& interval = activeIntervals[tmp];
                     if (Arg::isLateDef(role)) {
                         interval |= lateInterval(positionOfEarly);
                         closeInterval(tmp);
                         pruneCoalescable(inst, tmp);
                     }
+                });
+                inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
+                    auto& interval = activeIntervals[tmp];
                     if (Arg::isEarlyUse(role))
                         interval |= earlyInterval(positionOfEarly);
+                });
+                inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank, Width) {
+                    auto& interval = activeIntervals[tmp];
                     if (Arg::isEarlyDef(role)) {
                         interval |= earlyInterval(positionOfEarly);
                         closeInterval(tmp);
