@@ -747,7 +747,41 @@ private:
             return;
 
         bool anyFailures = false;
-        auto checkConflicts = [&](BasicBlock* block, const typename TmpLiveness<bank>::LocalCalc& localCalc) {
+
+        auto fail = [&](BasicBlock* block, Tmp a, Tmp b) {
+            dataLogLn("AIR GREEDY REGISTER ALLOCATION VALIDATION FAILURE");
+            dataLogLn("   In BB", *block);
+            dataLogLn("     tmp = ", a, " : ", m_map[a]);
+            dataLogLn("     tmp = ", b, " : ", m_map[b]);
+            anyFailures = true;
+        };
+
+        // Returns the scratch Tmp iff inst is a 'Move spill-spill-with-scratch' instruction.
+        auto spillMoveScratch = [&](Inst* inst) {
+            if (!inst)
+                return Tmp();
+            switch (inst->kind.opcode) {
+                case Move:
+                case Move32:
+                case MoveDouble:
+                case MoveFloat:
+                    break;
+                default:
+                    return Tmp();
+            }
+            if (inst->args.size() == 2)
+                return Tmp();
+            RELEASE_ASSERT(inst->args.size() == 3);
+            RELEASE_ASSERT(inst->args[0].isStack() && inst->args[0].stackSlot()->kind() == StackSlotKind::Spill);
+            RELEASE_ASSERT(inst->args[1].isStack() && inst->args[1].stackSlot()->kind() == StackSlotKind::Spill);
+            RELEASE_ASSERT(inst->args[2].isTmp());
+            Tmp scratch = inst->args[2].tmp();
+            RELEASE_ASSERT(m_map[scratch].liveRange.intervals().size() == 1);
+            RELEASE_ASSERT(m_map[scratch].liveRange.intervals().first().distance() == 2);
+            return scratch;
+        };
+
+        auto checkConflicts = [&](BasicBlock* block, size_t instIndex, const typename TmpLiveness<bank>::LocalCalc& localCalc) {
             for (Tmp a : localCalc.live()) {
                 Tmp aGrp = groupForTmp(a);
                 Reg aReg = assignedReg(a);
@@ -755,17 +789,29 @@ private:
                     continue;
                 for (Tmp b : localCalc.live()) {
                     Tmp bGrp = groupForTmp(b);
-                    if (aGrp == bGrp || bGrp)
-                        continue;
                     Reg bReg = assignedReg(b);
-                    if (!bReg)
-                        continue;
-                    if (aReg == bReg) {
-                        dataLogLn("AIR GREEDY REGISTER ALLOCATION VALIDATION FAILURE");
-                        dataLogLn("   In BB", *block);
-                        dataLogLn("     tmp = ", a, " : ", m_map[a]);
-                        dataLogLn("     tmp = ", b, " : ", m_map[b]);
-                        anyFailures = true;
+                    if (aGrp == bGrp) {
+                        // Coalesced a & b so they better have the same register.
+                        if (aReg != bReg)
+                            fail(block, a, b);
+                    } else {
+                        // a & b interfere so b must either have been spilled or assigned a different register.
+                        if (!bReg)
+                            continue;
+                        // The LocalCalc treats late-use of the prev inst and early-def of the next inst as occuring
+                        // simulatenously, and thus will incorrect say that the scratch tmps of back-to-back
+                        // Move spill-spill instructions interfere, but they do not. Note that other cases of 
+                        // late-use-or-def and early-def false interference that exist in the IR prior to register
+                        // allocation are dealt with by padding with Nop; see padInterference(). But since this is just
+                        // validation code, handle this case specially rather than inserting Nops.
+                        Inst* prevInst = block->get(instIndex);
+                        Inst* nextInst = block->get(instIndex + 1);
+                        Tmp prevScratch = spillMoveScratch(prevInst);
+                        Tmp nextScratch = spillMoveScratch(nextInst);
+                        if ((prevScratch == a && nextScratch == b) || (prevScratch == b && nextScratch == a))
+                            continue;
+                        if (aReg == bReg)
+                            fail(block, a, b);
                     }
                 }
             }
@@ -775,10 +821,10 @@ private:
         for (BasicBlock* block : m_code) {
             typename TmpLiveness<bank>::LocalCalc localCalc(liveness, block);
             for (unsigned instIndex = block->size(); instIndex--;) {
-                checkConflicts(block, localCalc);
+                checkConflicts(block, instIndex, localCalc);
                 localCalc.execute(instIndex);
             }
-            checkConflicts(block, localCalc);
+            checkConflicts(block, 0, localCalc);
         }
         if (anyFailures) {
             dataLogLn("IR:");
