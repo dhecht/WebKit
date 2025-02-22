@@ -542,6 +542,7 @@ struct TmpData {
     Stage stage { Stage::New };
     LiveRange liveRange;
     float spillCost { 0.0f };
+    float unmodifiedSpillCost { 0.0f };
     Reg preferredReg;
     Vector<CoalescableWith> coalescables;
     Tmp parentGroup;
@@ -1101,7 +1102,8 @@ private:
             subGroupData.stage = Stage::Coalesced;
 
             groupData.liveRange = LiveRange::merge(groupData.liveRange, subGroupData.liveRange);
-            groupData.spillCost += subGroupData.spillCost;
+            groupData.unmodifiedSpillCost += subGroupData.unmodifiedSpillCost;
+            groupData.spillCost = groupData.unmodifiedSpillCost;
             if (!groupData.preferredReg)
                 groupData.preferredReg = subGroupData.preferredReg;
 
@@ -1161,16 +1163,16 @@ private:
             ASSERT(!tmp.isReg());
             TmpData& tmpData = m_map[tmp];
             ASSERT(tmpData.spillCost == 0.0f);
-            if (tmpData.liveRange.intervals().size() == 1 && tmpData.liveRange.size() <= pointsPerInst) {
-                dataLogLnIf(verbose(), "Unspillable due to short range: ", tmp);
-                tmpData.spillCost = unspillableCost;
-                return;
-            }
             auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
             float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
             if (bank == GP && m_useCounts.isConstDef<GP>(index))
                 spillCost /= 2; // Can rematerialize rather than spill in many cases.
-            tmpData.spillCost = spillCost;
+            tmpData.unmodifiedSpillCost = spillCost;
+            if (tmpData.liveRange.intervals().size() == 1 && tmpData.liveRange.size() <= pointsPerInst) {
+                dataLogLnIf(verbose(), "Unspillable due to short range: ", tmp);
+                tmpData.spillCost = unspillableCost;
+            } else 
+                tmpData.spillCost = spillCost;
         });
         m_code.forEachFastTmp([&](Tmp tmp) {
             if (tmp.bank() != bank)
@@ -1190,6 +1192,7 @@ private:
         m_map.append(tmp, TmpData());
         TmpData& tmpData = m_map[tmp];
         tmpData.liveRange.prepend(interval);
+        tmpData.unmodifiedSpillCost = spillCost;
         tmpData.spillCost = spillCost;
         tmpData.validate();
         return tmp;
