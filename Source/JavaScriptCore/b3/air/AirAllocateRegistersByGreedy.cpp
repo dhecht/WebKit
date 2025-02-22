@@ -315,6 +315,7 @@ enum class Stage {
     Coalesced,
     Spilled,
     Replaced,
+    SplitGroup,
 };
 
 class TmpPriority {
@@ -518,7 +519,7 @@ struct TmpData {
     {
         out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
             ", coalescables = ", listDump(coalescables), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
-            ", spillCost = ", spillCost, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), ", splitMetadataIndex = ", splitMetadataIndex, "}");
+            ", spillCost = ", spillCost, ", assigned = ", assigned, ", groupSpillSlot = ", pointerDump(groupSpillSlot), ", splitMetadataIndex = ", splitMetadataIndex, "}");
     }
 
     bool isGroup()
@@ -529,13 +530,9 @@ struct TmpData {
 
     void validate()
     {
-        ASSERT(!(spillSlot && assigned));
         ASSERT(!!assigned == (stage == Stage::Assigned));
-        ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled);
-        ASSERT_IMPLIES(spillSlot, spillCost != unspillableCost);
-        ASSERT_IMPLIES(spillSlot, !isGroup()); // Should have been split
+        ASSERT_IMPLIES(groupSpillSlot, !parentGroup); // Only the group root should have a spill slot.
         ASSERT_IMPLIES(!spillCost, !liveRange.size());
-        ASSERT_IMPLIES(assigned, !parentGroup); // Only top-most should be assigned
         ASSERT_IMPLIES(coalescables.size(), !isGroup()); // Only bottom-most should have coalescables
     }
 
@@ -549,8 +546,8 @@ struct TmpData {
     Tmp subGroup0, subGroup1;
     size_t splitMetadataIndex { 0 };
 
-    Reg assigned;
-    StackSlot* spillSlot { nullptr };
+    Reg assigned; // Set only for the final coalesced group's root.
+    StackSlot* groupSpillSlot { nullptr }; // Set only for the group's root
 };
 
 // SplitMetadata tracks a Tmp that is split and the new Tmps that are used to carry the value
@@ -715,21 +712,35 @@ private:
         return Interval();
     }
 
-    Tmp groupForTmp(Tmp tmp)
+    // Returns the root of the spill tree. All Tmps in the tree are known to not interfere and
+    // will share the same spill slot.
+    Tmp groupForSpill(Tmp tmp)
     {
         while (Tmp parent = m_map[tmp].parentGroup)
             tmp = parent;
         return tmp;
     }
 
-    Reg assignedReg(Tmp tmp)
+    // Returns the root of the coalesced Tmp tree. This will be a subtree of the spill tree.
+    // All nodes of this subtree are assigned the same register.
+    Tmp groupForReg(Tmp tmp)
     {
-        return m_map[groupForTmp(tmp)].assigned;
+        Tmp parent = m_map[tmp].parentGroup;
+        while (parent && m_map[parent].stage != Stage::SplitGroup) {
+            tmp = parent;
+            parent = m_map[tmp].parentGroup;
+        }
+        return tmp;
     }
 
-    StackSlot* spillSlot(Tmp tmp)
+    Reg assignedReg(Tmp tmp)
     {
-        return m_map[groupForTmp(tmp)].spillSlot;
+        return m_map[groupForReg(tmp)].assigned;
+    }
+
+    StackSlot*& spillSlot(Tmp tmp)
+    {
+        return m_map[groupForSpill(tmp)].groupSpillSlot;
     }
 
     float adjustedBlockFrequency(BasicBlock* block)
@@ -759,12 +770,12 @@ private:
 
         auto checkConflicts = [&](BasicBlock* block, const typename TmpLiveness<bank>::LocalCalc& localCalc) {
             for (Tmp a : localCalc.live()) {
-                Tmp aGrp = groupForTmp(a);
+                Tmp aGrp = groupForReg(a);
                 Reg aReg = assignedReg(a);
                 if (!aReg)
                     continue;
                 for (Tmp b : localCalc.live()) {
-                    Tmp bGrp = groupForTmp(b);
+                    Tmp bGrp = groupForReg(b);
                     Reg bReg = assignedReg(b);
                     if (aGrp == bGrp) {
                         // Coalesced a & b so they better have the same register.
@@ -1114,8 +1125,8 @@ private:
 
         for (Move& move : moves) {
             dataLogLnIf(verbose(), "Processing move: ", move);
-            Tmp group0 = groupForTmp(move.tmp0);
-            Tmp group1 = groupForTmp(move.tmp1);
+            Tmp group0 = groupForSpill(move.tmp0);
+            Tmp group1 = groupForSpill(move.tmp1);
             if (group0 == group1) {
                 dataLogLnIf(verbose(), "Already grouped transitively into ", group0);
                 continue;
@@ -1250,7 +1261,7 @@ private:
         ASSERT(!tmp.isReg());
         ASSERT(stage == Stage::Unspillable || stage == Stage::TryAllocate || stage == Stage::TrySplit || stage == Stage::Spill);
         ASSERT_IMPLIES(!tmpData.spillCost, !tmpData.liveRange.size());
-        ASSERT(!tmpData.parentGroup); // Group member should not be enquened
+        ASSERT(groupForReg(tmp) == tmp); // Only Tmp coalescing root should be enqueued
         ASSERT_IMPLIES(!eagerGroups, !tmpData.isGroup());
         tmpData.validate();
 
@@ -1321,16 +1332,11 @@ private:
                     continue;
                 case Stage::Unspillable:
                     // Unspillables must have been allocated during tryAllocate or tryEvict.
-                case Stage::New:
-                case Stage::Assigned:
-                case Stage::Spilled:
-                case Stage::Coalesced:
-                case Stage::Replaced:
+                default:
                     dataLogLn("Invalid stage tmp = ", tmp, " tmpData = ", tmpData);
                     // Tmps in these stages should not have been enqueued.
                     RELEASE_ASSERT_NOT_REACHED();
                 }
-                RELEASE_ASSERT_NOT_REACHED();
             }
             if (m_didSpill) {
                 emitSpillCodeAndEnqueueNewTmps<bank>();
@@ -1345,7 +1351,7 @@ private:
     {
         ASSERT(&m_map[tmp] == &tmpData);
         ASSERT(!assignedReg(tmp));
-        ASSERT(!tmpData.parentGroup);
+        ASSERT(groupForReg(tmp) == tmp);
 
         auto tryAllocateToReg = [&](Reg r) {
             LiveRange& liveRange = tmpData.liveRange;
@@ -1386,7 +1392,7 @@ private:
                 }
             }
         }
-        ASSERT(!tmpData.assigned);
+        ASSERT(!assignedReg(tmp));
 
         if (tmpData.preferredReg) {
             if (tryAllocateToReg(tmpData.preferredReg))
@@ -1473,6 +1479,7 @@ private:
     {
         m_regRanges[reg].add(tmp, tmpData.liveRange);
         ASSERT(tmpData.stage != Stage::Assigned && tmpData.stage != Stage::Spilled);
+        ASSERT(groupForReg(tmp) == tmp);
         tmpData.stage = Stage::Assigned;
         tmpData.assigned = reg;
         dataLogLnIf(verbose(), "Assigned ", tmp, " to ", reg);
@@ -1484,6 +1491,7 @@ private:
         ASSERT(tmpData.stage == Stage::Assigned);
         ASSERT(tmpData.spillCost != unspillableCost);
         ASSERT(tmpData.assigned == reg);
+        ASSERT(groupForReg(tmp) == tmp);
         m_regRanges[reg].evict(tmp, tmpData.liveRange);
         tmpData.stage = Stage::New;
         tmpData.assigned = Reg();
@@ -1505,20 +1513,9 @@ private:
         if (!tmpData.isGroup())
             return false;
         ASSERT(eagerGroups);
-        auto enqueueSubgroup = [&](Tmp subGrp) {
-            m_map[subGrp].parentGroup = Tmp();
-            setStageAndEnqueue(subGrp, m_map[subGrp], Stage::TryAllocate);
-        };
-        if (eagerGroupsSplitFully) {
-            forEachTmpInGroup(tmp, [&](Tmp member) {
-                enqueueSubgroup(member);
-                return IterationStatus::Continue;
-            });
-        } else {
-            enqueueSubgroup(tmpData.subGroup0);
-            enqueueSubgroup(tmpData.subGroup1);
-        }
-        tmpData.stage = Stage::Replaced;
+        tmpData.stage = Stage::SplitGroup;
+        setStageAndEnqueue(tmpData.subGroup0, m_map[tmpData.subGroup0], Stage::TryAllocate);
+        setStageAndEnqueue(tmpData.subGroup1, m_map[tmpData.subGroup1], Stage::TryAllocate);
         dataLogLnIf(verbose(), "Split (group) ", tmp);
         tmpData.validate();
         return true;
@@ -1638,6 +1635,7 @@ private:
         RELEASE_ASSERT(tmpData.spillCost != unspillableCost);
         ASSERT(tmpData.assigned == Reg());
         ASSERT(!tmpData.isGroup()); // Should have been split
+        ASSERT(groupForReg(tmp) == tmp); // Should have been split fully
         tmpData.stage = Stage::Spilled;
 
         dataLogLnIf(verbose(), "Spilled ", tmp);
@@ -1696,8 +1694,8 @@ private:
     {
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             TmpData& tmpData = m_map[tmp];
-            if (tmpData.stage == Stage::Spilled && !tmpData.spillSlot)
-                tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
+            if (tmpData.stage == Stage::Spilled && !spillSlot(tmp))
+                spillSlot(tmp) = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
         });
         for (BasicBlock* block : m_code) {
             Point positionOfHead = this->positionOfHead(block);
