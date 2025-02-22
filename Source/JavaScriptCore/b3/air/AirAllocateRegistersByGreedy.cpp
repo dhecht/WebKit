@@ -1438,8 +1438,10 @@ private:
                 dataLogLn(inst);
                 dataLogLn("Intervals:");
                 dumpTmpData();
-                dataLog("RegRanges:");
+                dataLogLn("RegRanges:");
                 dumpRegRanges(tmp.bank());
+                dataLogLn("IR:");
+                dataLogLn(m_code);
             }
             RELEASE_ASSERT(evictSpillCost(tmp) != unspillableCost);
             return false;
