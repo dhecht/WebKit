@@ -1170,18 +1170,24 @@ private:
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             ASSERT(tmp.bank() == bank);
             ASSERT(!tmp.isReg());
+            TmpData& tmpData = m_map[tmp];
+            ASSERT(tmpData.spillCost == 0.0f);
+            if (tmpData.liveRange.intervals().size() == 1 && tmpData.liveRange.size() <= pointsPerInst) {
+                dataLogLnIf(verbose(), "Unspillable due to short range: ", tmp);
+                tmpData.spillCost = unspillableCost;
+                return;
+            }
             auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
             float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
             if (bank == GP && m_useCounts.isConstDef<GP>(index))
                 spillCost /= 2; // Can rematerialize rather than spill in many cases.
-            ASSERT(m_map[tmp].spillCost == 0.0f);
-            m_map[tmp].spillCost = spillCost;
+            tmpData.spillCost = spillCost;
         });
         m_code.forEachFastTmp([&](Tmp tmp) {
             if (tmp.bank() != bank)
                 return;
             m_map[tmp].spillCost = fastTmpSpillCost;
-            dataLogLnIf(verbose(), "FastTmp: ", tmp);
+            dataLogLnIf(verbose(), "Unspillable due to fastTmp: ", tmp);
         });
     }
 
