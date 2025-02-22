@@ -1005,18 +1005,7 @@ private:
 #endif
         if (verbose()) {
             dataLog("Intervals:\n");
-            auto dumpRegTmpData = [&](Reg r) {
-                TmpData& tmpData = m_map[Tmp(r)];
-                if (tmpData.liveRange.size())
-                    dataLog("    ", r, ": ", m_map[Tmp(r)], "\n");
-            };
-            for (Reg r : m_allowedRegistersInPriorityOrder[GP])
-                dumpRegTmpData(r);
-            for (Reg r : m_allowedRegistersInPriorityOrder[FP])
-                dumpRegTmpData(r);
-            m_code.forEachTmp([&](Tmp tmp) {
-                dataLog("    ", tmp, ": ", m_map[tmp], "\n");
-            });
+            dumpTmpData();
         }
     }
 
@@ -1220,6 +1209,21 @@ private:
             dataLogLn("   regRanges[", r, "]: ", m_regRanges[r]);
     }
 
+    void dumpTmpData() {
+        auto dumpRegTmpData = [&](Reg r) {
+            TmpData& tmpData = m_map[Tmp(r)];
+            if (tmpData.liveRange.size())
+                dataLog("    ", r, ": ", m_map[Tmp(r)], "\n");
+        };
+        for (Reg r : m_allowedRegistersInPriorityOrder[GP])
+            dumpRegTmpData(r);
+        for (Reg r : m_allowedRegistersInPriorityOrder[FP])
+            dumpRegTmpData(r);
+        m_code.forEachTmp([&](Tmp tmp) {
+            dataLog("    ", tmp, ": ", m_map[tmp], "\n");
+        });
+    }
+
     void setStageAndEnqueue(Tmp tmp, TmpData& tmpData, Stage stage)
     {
         ASSERT(!tmp.isReg());
@@ -1416,6 +1420,17 @@ private:
         }
         if (minSpillCost >= tmpData.spillCost) {
             // If 'tmp' was unspillable, we better have found at least one suitable register.
+            if (tmpData.spillCost == unspillableCost) {
+                dataLogLn("FAIL UNSPILLABLE: ", tmp, ": ", tmpData);
+                Point start = tmpData.liveRange.intervals().first().begin();
+                auto* block = findBlockContainingPoint(start);
+                Inst& inst = block->at(instIndex(positionOfHead(block), start));
+                dataLogLn(inst);
+                dataLogLn("Intervals:");
+                dumpTmpData();
+                dataLog("RegRanges:");
+                dumpRegRanges(tmp.bank());
+            }
             RELEASE_ASSERT(tmpData.spillCost != unspillableCost);
             return false;
         }
