@@ -881,8 +881,6 @@ private:
 
         // First pass: collect all the potential coalescable pairs of Tmps.
         for (BasicBlock* block : m_code) {
-            if (!block)
-                continue;
             for (Inst& inst : block->insts()) {
                 if (mayBeCoalescable(inst)) {
                     ASSERT(inst.args.size() == 2);
@@ -900,6 +898,7 @@ private:
                         addMaybeCoalescable(inst.args[1].tmp(), inst.args[0].tmp(), block);
                     }
                 }
+
             }
         }
 
@@ -1154,6 +1153,25 @@ private:
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::initSpillCosts"_s);
 
+        IndexSet<Tmp::AbsolutelyIndexed<bank>> cannotSpillInPlace;
+        for (BasicBlock* block : m_code) {
+            for (Inst& inst : block->insts()) {
+                inst.forEachArg([&](Arg& arg, Arg::Role, Bank, Width) {
+                    if (arg.isTmp() && arg.tmp().bank() != bank && inst.admitsStack(arg))
+                        return;
+                    // Arg cannot be spilled in-place.
+                    arg.forEachTmpFast([&](Tmp& tmp) {
+                        if (tmp.bank() != bank)
+                            return;
+                        if (!cannotSpillInPlace.contains(tmp)) {
+                            dataLogLnIf(verbose(), tmp, " cannot be spilled in-place: ", inst);
+                            cannotSpillInPlace.add(tmp);
+                        }
+                    });
+                });
+            }
+        }
+
         for (Reg reg : m_allowedRegistersInPriorityOrder[bank])
             m_map[Tmp(reg)].spillCost = unspillableCost;
 
@@ -1168,8 +1186,8 @@ private:
             if (bank == GP && m_useCounts.isConstDef<GP>(index))
                 spillCost /= 2; // Can rematerialize rather than spill in many cases.
             tmpData.unmodifiedSpillCost = spillCost;
-            if (tmpData.liveRange.intervals().size() == 1 && tmpData.liveRange.size() <= pointsPerInst) {
-                dataLogLnIf(verbose(), "Unspillable due to short range: ", tmp);
+            if (cannotSpillInPlace.contains(tmp) && tmpData.liveRange.intervals().size() == 1 && tmpData.liveRange.size() <= pointsPerInst) {
+                dataLogLnIf(verbose(), "Unspillable due to short range requiring register: ", tmp);
                 tmpData.spillCost = unspillableCost;
             } else 
                 tmpData.spillCost = spillCost;
