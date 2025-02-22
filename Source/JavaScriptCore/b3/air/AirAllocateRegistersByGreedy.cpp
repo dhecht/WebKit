@@ -1161,13 +1161,11 @@ private:
             ASSERT(!tmp.isReg());
             TmpData& tmpData = m_map[tmp];
             ASSERT(tmpData.spillCost == 0.0f);
-#if 0
             if (tmpData.liveRange.intervals().size() == 1 && tmpData.liveRange.size() <= pointsPerInst) {
                 dataLogLnIf(verbose(), "Unspillable due to short range: ", tmp);
                 tmpData.spillCost = unspillableCost;
                 return;
             }
-#endif
             auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
             float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
             if (bank == GP && m_useCounts.isConstDef<GP>(index))
@@ -1393,14 +1391,6 @@ private:
         float minSpillCost = unspillableCost;
         BitVector visited(m_code.numTmps(bank));
         LiveRange& liveRange = tmpData.liveRange;
-
-        auto evictSpillCost = [&](Tmp candidate) {
-            TmpData& candidateData = m_map[candidate];
-            if (candidateData.liveRange.intervals().size() == 1 && candidateData.liveRange.size() <= pointsPerInst)
-                return unspillableCost;
-            return candidateData.spillCost;
-        };
-
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             float conflictsSpillCost = 0.0f;
             visited.clearAll();
@@ -1415,7 +1405,7 @@ private:
                     if (visited.quickGet(conflictTmpIndex))
                         return IterationStatus::Continue;
                     visited.quickSet(conflictTmpIndex);
-                    auto cost = evictSpillCost(conflict.tmp);
+                    auto cost = m_map[conflict.tmp].spillCost;
                     if (cost == unspillableCost) {
                         conflictsSpillCost = unspillableCost;
                         return IterationStatus::Done;
@@ -1428,9 +1418,9 @@ private:
                 bestEvictReg = r;
             }
         }
-        if (minSpillCost >= evictSpillCost(tmp)) {
+        if (minSpillCost >= tmpData.spillCost) {
             // If 'tmp' was unspillable, we better have found at least one suitable register.
-            if (evictSpillCost(tmp) == unspillableCost) {
+            if (tmpData.spillCost == unspillableCost) {
                 dataLogLn("FAIL UNSPILLABLE: ", tmp, ": ", tmpData);
                 Point start = tmpData.liveRange.intervals().first().begin();
                 auto* block = findBlockContainingPoint(start);
@@ -1443,7 +1433,7 @@ private:
                 dataLogLn("IR:");
                 dataLogLn(m_code);
             }
-            RELEASE_ASSERT(evictSpillCost(tmp) != unspillableCost);
+            RELEASE_ASSERT(tmpData.spillCost != unspillableCost);
             return false;
         }
         // It's cheaper to spill all the already-assigned conflicting tmps, so evict them in favor of assigning 'tmp'.
