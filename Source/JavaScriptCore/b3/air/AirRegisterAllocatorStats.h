@@ -27,7 +27,7 @@
 
 #if ENABLE(B3_JIT)
 
-#include "b3/B3Bank.h"
+#include "B3Bank.h"
 #include <wtf/DataLog.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/PrintStream.h>
@@ -54,7 +54,8 @@ public:
 
     ~AirAllocateRegistersStats()
     {
-        dataLogLn("Register allocator stats for ", m_bank, " bank:", pointerDump(this));
+        if (Options::airDumpRegAllocStats())
+            dataLogLn("Register allocator stats for ", m_bank, " bank:", pointerDump(this));
     }
 
     void dump(PrintStream& out) const {
