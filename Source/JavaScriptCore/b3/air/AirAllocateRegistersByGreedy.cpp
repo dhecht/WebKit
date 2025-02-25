@@ -536,13 +536,19 @@ struct TmpData {
 
     float spillCost()
     {
-        return unspillable ? unspillableCost : useDefCost;
+        ASSERT(liveRange.size()); // 0-sized ranges shouldn't be allocated
+        if (unspillable)
+            return unspillableCost;
+        if (evictHeuristicDivideSize)
+            return useDefCost / liveRange.size();
+        return useDefCost;
     }
 
     void validate()
     {
         ASSERT(!(spillSlot && assigned));
         ASSERT(!!assigned == (stage == Stage::Assigned));
+        ASSERT(liveRange.intervals().isEmpty() == !liveRange.size());
         ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled);
         ASSERT_IMPLIES(spillSlot, spillCost() != unspillableCost);
         ASSERT_IMPLIES(spillSlot, !isGroup()); // Should have been split
@@ -1237,6 +1243,7 @@ private:
                 tmpData.unspillable = true;
                 m_stats[bank].numUnspillableTmps++;
             }
+            tmpData.validate();
         });
         m_code.forEachFastTmp([&](Tmp tmp) {
             if (tmp.bank() != bank)
@@ -1275,6 +1282,7 @@ private:
     void setStageAndEnqueue(Tmp tmp, TmpData& tmpData, Stage stage)
     {
         ASSERT(!tmp.isReg());
+        ASSERT(m_map[tmp].liveRange.size()); // 0-size ranges don't need a register and spillCost() depends on size() != 0
         ASSERT(stage == Stage::Unspillable || stage == Stage::TryAllocate || stage == Stage::TrySplit || stage == Stage::Spill);
         ASSERT(!tmpData.parentGroup); // Group member should not be enquened
         ASSERT_IMPLIES(!eagerGroups, !tmpData.isGroup());
@@ -1436,13 +1444,8 @@ private:
         ASSERT(&m_map[tmp] == &tmpData);
         ASSERT(tmp.bank() == bank);
 
-        // Eviction heuristic is based on two factors:
-        // - spill cost: the lower the spill cost, the cheaper it will be to spill, so better to evict.
-        // - range size: the larger the range size, the more likely it is to conflict with additional
-        //   ranges, and so it's better to evict a larger range.
-
-        float minSpillCost = unspillableCost;
         Reg bestEvictReg;
+        float minSpillCost = unspillableCost;
         BitVector visited(m_code.numTmps(bank));
         LiveRange& liveRange = tmpData.liveRange;
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
@@ -1464,8 +1467,6 @@ private:
                         conflictsSpillCost = unspillableCost;
                         return IterationStatus::Done;
                     }
-                    if (evictHeuristicDivideSize)
-                        cost /= m_map[conflict.tmp].liveRange.size();
                     conflictsSpillCost += cost;
                     return conflictsSpillCost >= minSpillCost ? IterationStatus::Done : IterationStatus::Continue;
             });
@@ -1474,10 +1475,7 @@ private:
                 bestEvictReg = r;
             }
         }
-        auto tmpCost = tmpData.spillCost();
-        if (evictHeuristicDivideSize)
-            tmpCost /= tmpData.liveRange.size();
-        if (minSpillCost >= tmpCost) {
+        if (minSpillCost >= tmpData.spillCost()) {
             // If 'tmp' was unspillable, we better have found at least one suitable register.
             RELEASE_ASSERT(tmpData.spillCost() != unspillableCost);
             return false;
