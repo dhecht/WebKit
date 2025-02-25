@@ -56,6 +56,7 @@ namespace Greedy {
 static constexpr bool eagerGroups = true;
 static constexpr bool eagerGroupsSplitFully = false;
 static constexpr bool eagerGroupsExhaustiveSearch = false;
+static constexpr bool evictHeuristicDivideSize = true;
 
 // Quickly filters out short ranges from live range splitting consideration.
 static constexpr size_t splitMinRangeSize = 8;
@@ -1435,8 +1436,13 @@ private:
         ASSERT(&m_map[tmp] == &tmpData);
         ASSERT(tmp.bank() == bank);
 
-        Reg bestEvictReg;
+        // Eviction heuristic is based on two factors:
+        // - spill cost: the lower the spill cost, the cheaper it will be to spill, so better to evict.
+        // - range size: the larger the range size, the more likely it is to conflict with additional
+        //   ranges, and so it's better to evict a larger range.
+
         float minSpillCost = unspillableCost;
+        Reg bestEvictReg;
         BitVector visited(m_code.numTmps(bank));
         LiveRange& liveRange = tmpData.liveRange;
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
@@ -1458,6 +1464,8 @@ private:
                         conflictsSpillCost = unspillableCost;
                         return IterationStatus::Done;
                     }
+                    if (evictHeuristicDivideSize)
+                        cost /= m_map[conflict.tmp].liveRange.size();
                     conflictsSpillCost += cost;
                     return conflictsSpillCost >= minSpillCost ? IterationStatus::Done : IterationStatus::Continue;
             });
@@ -1466,7 +1474,10 @@ private:
                 bestEvictReg = r;
             }
         }
-        if (minSpillCost >= tmpData.spillCost()) {
+        auto tmpCost = tmpData.spillCost();
+        if (evictHeuristicDivideSize)
+            tmpCost /= tmpData.liveRange.size();
+        if (minSpillCost >= tmpCost) {
             // If 'tmp' was unspillable, we better have found at least one suitable register.
             RELEASE_ASSERT(tmpData.spillCost() != unspillableCost);
             return false;
