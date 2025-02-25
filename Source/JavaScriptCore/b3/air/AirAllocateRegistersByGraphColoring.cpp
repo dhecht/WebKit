@@ -1789,10 +1789,16 @@ public:
     {
         padInterference(m_code);
 
+        m_stats[GP].numTmpsIn = m_code.numTmps(GP);
+        m_stats[FP].numTmpsIn = m_code.numTmps(FP);
+
         allocateOnBank<GP>();
         allocateOnBank<FP>();
 
         fixSpillsAfterTerminals(m_code);
+
+        m_stats[GP].numTmpsOut = m_code.numTmps(GP);
+        m_stats[FP].numTmpsOut = m_code.numTmps(FP);
     }
 
 private:
