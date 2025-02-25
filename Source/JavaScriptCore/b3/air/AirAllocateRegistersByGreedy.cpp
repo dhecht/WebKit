@@ -1447,30 +1447,13 @@ private:
         // - spill cost: the lower the spill cost, the cheaper it will be to spill, so better to evict.
         // - range size: the larger the range size, the more likely it is to conflict with additional
         //   ranges, and so it's better to evict a larger range.
-        auto betterToSpill = [](float newCost, size_t newSize, float oldCost, size_t oldSize) {
-            if (newCost == unspillableCost)
-                return false;
-            RELEASE_ASSERT(newSize != 0 && oldSize != 0);
-            switch (evictHeuristic) {
-            case EvictHeuristic::CostOnly:
-                return newCost < oldCost;
-            case EvictHeuristic::CostThenRangeSize:
-                return newCost < oldCost || (newCost == oldCost && newSize > oldSize);
-            case EvictHeuristic::CostAndRangeSize:
-                return newCost / newSize < oldCost / oldSize;
-            default:
-                RELEASE_ASSERT_NOT_REACHED();
-            }
-        };
 
         float minSpillCost = unspillableCost;
-        size_t bestSize = 1;
         Reg bestEvictReg;
         BitVector visited(m_code.numTmps(bank));
         LiveRange& liveRange = tmpData.liveRange;
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             float conflictsSpillCost = 0.0f;
-            size_t conflictsSize = 0;
             visited.clearAll();
             m_regRanges[r].forEachConflict(liveRange,
                 [&](auto& conflict) -> IterationStatus {
@@ -1488,19 +1471,17 @@ private:
                         conflictsSpillCost = unspillableCost;
                         return IterationStatus::Done;
                     }
+                    cost /= m_map[conflict.tmp].liveRange.size();
                     conflictsSpillCost += cost;
-                    conflictsSize += conflict.interval.distance();
-                    if (evictHeuristic != EvictHeuristic::CostAndRangeSize && conflictsSpillCost > minSpillCost)
-                        return IterationStatus::Done;
-                    return IterationStatus::Continue;
+                    return conflictsSpillCost > minSpillCost ? IterationStatus::Done : IterationStatus::Continue;
             });
-            if (betterToSpill(conflictsSpillCost, conflictsSize, minSpillCost, bestSize)) {
+            if (conflictsSpillCost < minSpillCost) {
                 minSpillCost = conflictsSpillCost;
-                bestSize = conflictsSize;
                 bestEvictReg = r;
             }
         }
-        if (betterToSpill(minSpillCost, bestSize, tmpData.spillCost(), tmpData.liveRange.size())) {
+        if (minSpillCost < tmpData.spillCost() / tmpData.liveRange.size()) {
+            //dataLogLn("XXX tmp=", tmp, " minSpillCost=", minSpillCost, " bestSize=", bestSize);
             // It's cheaper to spill all the already-assigned conflicting tmps, so evict them in favor of assigning 'tmp'.
             m_regRanges[bestEvictReg].forEachConflict(liveRange,
                 [&](auto& conflict) -> IterationStatus {
@@ -1514,7 +1495,7 @@ private:
         }
         // If 'tmp' was unspillable, we better have found at least one suitable register.
         if (tmpData.spillCost() == unspillableCost) {
-            dataLogLn("FAIL tmp=", tmp, " minSpillCost=", minSpillCost, " bestSize=", bestSize, " reg=", bestEvictReg);
+            //dataLogLn("FAIL tmp=", tmp, " minSpillCost=", minSpillCost, " bestSize=", bestSize, " reg=", bestEvictReg);
             dataLogLn(*this);
         }
         RELEASE_ASSERT(tmpData.spillCost() != unspillableCost);
