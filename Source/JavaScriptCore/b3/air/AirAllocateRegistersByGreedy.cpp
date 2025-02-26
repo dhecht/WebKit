@@ -56,7 +56,6 @@ namespace Greedy {
 static constexpr bool eagerGroups = true;
 static constexpr bool eagerGroupsSplitFully = false;
 static constexpr bool eagerGroupsExhaustiveSearch = false;
-static constexpr bool evictHeuristicDivideSize = true;
 
 // Quickly filters out short ranges from live range splitting consideration.
 static constexpr size_t splitMinRangeSize = 8;
@@ -539,9 +538,10 @@ struct TmpData {
         ASSERT(liveRange.size()); // 0-sized ranges shouldn't be allocated
         if (unspillable)
             return unspillableCost;
-        if (evictHeuristicDivideSize)
-            return useDefCost / liveRange.size();
-        return useDefCost;
+        // Spill cost increases with more use/def (adjusted for loops), while it decreases with larger
+        // ranges. Range size is a proxy for the number of conflicts a range is likely to have.
+        // For a given use/def cost, it's more profitable to spill ranges that likely have more conflicts.
+        return useDefCost / liveRange.size();
     }
 
     void validate()
