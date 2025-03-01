@@ -1,0 +1,167 @@
+@@ -509,7 +510,7 @@
+     {
+         out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
+             ", coalescables = ", listDump(coalescables), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
+-            ", spillCost = ", spillCost, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), ", splitMetadataIndex = ", splitMetadataIndex, "}");
++            ", spillCost = ", spillCost, ", assigned = ", assigned, ", groupSpillSlot = ", pointerDump(groupSpillSlot), ", splitMetadataIndex = ", splitMetadataIndex, "}");
+     }
+ 
+     bool isGroup()
+@@ -520,27 +521,24 @@
+ 
+     void validate()
+     {
+-        ASSERT(!(spillSlot && assigned));
+         ASSERT(!!assigned == (stage == Stage::Assigned));
+-        ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled);
+-        ASSERT_IMPLIES(spillSlot, spillCost != unspillableCost);
+-        ASSERT_IMPLIES(spillSlot, !isGroup()); // Should have been split
++        ASSERT_IMPLIES(groupSpillSlot, !parentGroup); // Only the group root should have a spill slot.
+         ASSERT_IMPLIES(!spillCost, !liveRange.size());
+-        ASSERT_IMPLIES(assigned, !parentGroup); // Only top-most should be assigned
+         ASSERT_IMPLIES(coalescables.size(), !isGroup()); // Only bottom-most should have coalescables
+     }
+ 
+     Stage stage { Stage::New };
+     LiveRange liveRange;
+     float spillCost { 0.0f };
++    float unmodifiedSpillCost { 0.0f };
+     Reg preferredReg;
+     Vector<CoalescableWith> coalescables;
+     Tmp parentGroup;
+     Tmp subGroup0, subGroup1;
+     size_t splitMetadataIndex { 0 };
+ 
+-    Reg assigned;
+-    StackSlot* spillSlot { nullptr };
++    Reg assigned; // Set only for the final coalesced group's root.
++    StackSlot* groupSpillSlot { nullptr }; // Set only for the group's root
+ };
+ 
+ // SplitMetadata tracks a Tmp that is split and the new Tmps that are used to carry the value
+@@ -996,18 +1007,7 @@
+ #endif
+         if (verbose()) {
+             dataLog("Intervals:\n");
+-            auto dumpRegTmpData = [&](Reg r) {
+-                TmpData& tmpData = m_map[Tmp(r)];
+-                if (tmpData.liveRange.size())
+-                    dataLog("    ", r, ": ", m_map[Tmp(r)], "\n");
+-            };
+-            for (Reg r : m_allowedRegistersInPriorityOrder[GP])
+-                dumpRegTmpData(r);
+-            for (Reg r : m_allowedRegistersInPriorityOrder[FP])
+-                dumpRegTmpData(r);
+-            m_code.forEachTmp([&](Tmp tmp) {
+-                dataLog("    ", tmp, ": ", m_map[tmp], "\n");
+-            });
++            dumpTmpData();
+         }
+     }
+ 
+@@ -1103,7 +1103,8 @@
+             subGroupData.stage = Stage::Coalesced;
+ 
+             groupData.liveRange = LiveRange::merge(groupData.liveRange, subGroupData.liveRange);
+-            groupData.spillCost += subGroupData.spillCost;
++            groupData.unmodifiedSpillCost += subGroupData.unmodifiedSpillCost;
++            groupData.spillCost = groupData.unmodifiedSpillCost;
+             if (!groupData.preferredReg)
+                 groupData.preferredReg = subGroupData.preferredReg;
+ 
+@@ -1180,18 +1200,24 @@
+         m_code.forEachTmp<bank>([&](Tmp tmp) {
+             ASSERT(tmp.bank() == bank);
+             ASSERT(!tmp.isReg());
++            TmpData& tmpData = m_map[tmp];
++            ASSERT(tmpData.spillCost == 0.0f);
+             auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
+             float spillCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
+             if (bank == GP && m_useCounts.isConstDef<GP>(index))
+                 spillCost /= 2; // Can rematerialize rather than spill in many cases.
+-            ASSERT(m_map[tmp].spillCost == 0.0f);
+-            m_map[tmp].spillCost = spillCost;
++            tmpData.unmodifiedSpillCost = spillCost;
++            if (cannotSpillInPlace.contains(tmp) && tmpData.liveRange.intervals().size() == 1 && tmpData.liveRange.size() <= pointsPerInst) {
++                dataLogLnIf(verbose(), "Unspillable due to short range requiring register: ", tmp);
++                tmpData.spillCost = unspillableCost;
++            } else 
++                tmpData.spillCost = spillCost;
+         });
+         m_code.forEachFastTmp([&](Tmp tmp) {
+             if (tmp.bank() != bank)
+                 return;
+             m_map[tmp].spillCost = fastTmpSpillCost;
+-            dataLogLnIf(verbose(), "FastTmp: ", tmp);
++            dataLogLnIf(verbose(), "Unspillable due to fastTmp: ", tmp);
+         });
+     }
+ 
+@@ -1205,6 +1231,7 @@
+         m_map.append(tmp, TmpData());
+         TmpData& tmpData = m_map[tmp];
+         tmpData.liveRange.prepend(interval);
++        tmpData.unmodifiedSpillCost = spillCost;
+         tmpData.spillCost = spillCost;
+         tmpData.validate();
+         return tmp;
+@@ -1224,12 +1251,27 @@
+             dataLogLn("   regRanges[", r, "]: ", m_regRanges[r]);
+     }
+ 
++    void dumpTmpData() {
++        auto dumpRegTmpData = [&](Reg r) {
++            TmpData& tmpData = m_map[Tmp(r)];
++            if (tmpData.liveRange.size())
++                dataLog("    ", r, ": ", m_map[Tmp(r)], "\n");
++        };
++        for (Reg r : m_allowedRegistersInPriorityOrder[GP])
++            dumpRegTmpData(r);
++        for (Reg r : m_allowedRegistersInPriorityOrder[FP])
++            dumpRegTmpData(r);
++        m_code.forEachTmp([&](Tmp tmp) {
++            dataLog("    ", tmp, ": ", m_map[tmp], "\n");
++        });
++    }
++
+     void setStageAndEnqueue(Tmp tmp, TmpData& tmpData, Stage stage)
+     {
+         ASSERT(!tmp.isReg());
+         ASSERT(stage == Stage::Unspillable || stage == Stage::TryAllocate || stage == Stage::TrySplit || stage == Stage::Spill);
+         ASSERT_IMPLIES(!tmpData.spillCost, !tmpData.liveRange.size());
+-        ASSERT(!tmpData.parentGroup); // Group member should not be enquened
++        ASSERT(groupForReg(tmp) == tmp); // Only Tmp coalescing root should be enqueued
+         ASSERT_IMPLIES(!eagerGroups, !tmpData.isGroup());
+         tmpData.validate();
+ 
+@@ -1467,6 +1504,19 @@
+         }
+         if (minSpillCost >= tmpData.spillCost) {
+             // If 'tmp' was unspillable, we better have found at least one suitable register.
++            if (tmpData.spillCost == unspillableCost) {
++                dataLogLn("FAIL UNSPILLABLE: ", tmp, ": ", tmpData);
++                Point start = tmpData.liveRange.intervals().first().begin();
++                auto* block = findBlockContainingPoint(start);
++                Inst& inst = block->at(instIndex(positionOfHead(block), start));
++                dataLogLn(inst);
++                dataLogLn("Intervals:");
++                dumpTmpData();
++                dataLogLn("RegRanges:");
++                dumpRegRanges(tmp.bank());
++                dataLogLn("IR:");
++                dataLogLn(m_code);
++            }
+             RELEASE_ASSERT(tmpData.spillCost != unspillableCost);
+             return false;
+         }
+@@ -1709,8 +1751,8 @@
+     {
+         m_code.forEachTmp<bank>([&](Tmp tmp) {
+             TmpData& tmpData = m_map[tmp];
+-            if (tmpData.stage == Stage::Spilled && !tmpData.spillSlot)
+-                tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
++            if (tmpData.stage == Stage::Spilled && !spillSlot(tmp))
++                spillSlot(tmp) = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
+         });
+         for (BasicBlock* block : m_code) {
+             Point positionOfHead = this->positionOfHead(block);

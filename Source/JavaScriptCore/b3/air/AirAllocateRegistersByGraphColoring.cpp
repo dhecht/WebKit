@@ -2015,8 +2015,10 @@ private:
                 });
 
                 if (mayBeCoalescable && inst.args[0].isTmp() && inst.args[1].isTmp()
-                    && inst.args[0].tmp() == inst.args[1].tmp())
+                    && inst.args[0].tmp() == inst.args[1].tmp()) {
+                    m_stats[bank].numCoalescedMoves++;
                     inst = Inst();
+                }
             }
 
             // Remove all the useless moves we created in this block.
