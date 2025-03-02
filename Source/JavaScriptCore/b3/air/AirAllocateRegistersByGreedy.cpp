@@ -769,6 +769,7 @@ private:
     // will share the same spill slot.
     Tmp groupForSpill(Tmp tmp)
     {
+        ASSERT(m_map[tmp].stage == Stage::Spilled);
         while (Tmp parent = m_map[tmp].parentGroup)
             tmp = parent;
         return tmp;
@@ -1172,8 +1173,8 @@ private:
 
         for (Move& move : moves) {
             dataLogLnIf(verbose(), "Processing move: ", move);
-            Tmp group0 = groupForSpill(move.tmp0);
-            Tmp group1 = groupForSpill(move.tmp1);
+            Tmp group0 = groupForReg(move.tmp0);
+            Tmp group1 = groupForReg(move.tmp1);
             if (group0 == group1) {
                 dataLogLnIf(verbose(), "Already grouped transitively into ", group0);
                 continue;
@@ -1852,17 +1853,16 @@ private:
                 inst.forEachTmp([&] (Tmp& tmp, Arg::Role role, Bank argBank, Width) {
                     if (tmp.isReg() || argBank != bank)
                         return;
-                    StackSlot* spilled = spillSlot(tmp);
-                    if (!spilled)
+                    if (m_map[tmp].stage != Stage::Spilled)
                         return;
-
+                    StackSlot* slot = spillSlot(tmp);
+                    ASSERT(slot);
                     Opcode move = moveOpcode(tmp);
                     auto oldTmp = tmp;
                     tmp = addSpillTmpWithInterval(tmp, intervalForSpill(indexOfEarly, role));
                     if (role == Arg::Scratch)
                         return;
-
-                    Arg arg = Arg::stack(spilled);
+                    Arg arg = Arg::stack(slot);
                     if (Arg::isAnyUse(role)) {
                         auto tryRematerialize = [&]() {
                             if constexpr (bank == GP) {
@@ -1906,7 +1906,7 @@ private:
         for (auto& metadata : m_splitMetadata) {
             if (!metadata.originalTmp)
                 continue;
-            if (spillSlot(metadata.originalTmp))
+            if (m_map[metadata.originalTmp].stage == Stage::Spilled)
                 continue; // If spilled, better to not split after all. See spill().
             ASSERT(assignedReg(metadata.originalTmp));
             // Emit moves to and from the gapTmps (or stack stot) that fill the split holes.
@@ -1920,9 +1920,11 @@ private:
                     Inst& inst = block->at(instIndex);
 
                     Arg arg = gapTmp;
-                    StackSlot* spilled = spillSlot(gapTmp);
-                    if (spilled)
-                        arg = Arg::stack(spilled);
+                    if (m_map[gapTmp].stage == Stage::Spilled) {
+                        StackSlot* slot = spillSlot(gapTmp);
+                        ASSERT(slot);
+                        arg = Arg::stack(slot);
+                    }
                     Opcode move = moveOpcode(gapTmp);
                     m_insertionSets[block].insert(instIndex, splitMoveFrom, move, inst.origin, metadata.originalTmp, arg);
                     m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, inst.origin, arg, metadata.originalTmp);
