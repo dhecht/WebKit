@@ -793,8 +793,11 @@ private:
         return m_map[groupForReg(tmp)].assigned;
     }
 
-    StackSlot*& spillSlot(Tmp tmp)
+    // If tmp was spilled, returns the stack slot a spilled tmp should use. Otherwise, returns nullptr.
+    StackSlot* spillSlot(Tmp tmp)
     {
+        if (m_map[tmp].stage != Stage::Spilled)
+            return nullptr;
         return m_map[groupForSpill(tmp)].groupSpillSlot;
     }
 
@@ -1724,9 +1727,9 @@ private:
     void emitSpillCodeAndEnqueueNewTmps()
     {
         m_code.forEachTmp<bank>([&](Tmp tmp) {
-            TmpData& tmpData = m_map[tmp];
-            if (tmpData.stage == Stage::Spilled && !spillSlot(tmp)) {
-                spillSlot(tmp) = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
+            if (m_map[tmp].stage == Stage::Spilled && !spillSlot(tmp)) {
+                m_map[groupForSpill(tmp)].groupSpillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
+                ASSERT(spillSlot(tmp));
                 m_stats[bank].numSpillStackSlots++;
             }
         });
@@ -1759,11 +1762,10 @@ private:
                             return;
                         if (argBank != bank)
                             return;
-                        if (m_map[arg.tmp()].stage != Stage::Spilled)
+                        StackSlot* spilled = spillSlot(arg.tmp());
+                        if (!spilled)
                             return;
                         ASSERT(!arg.tmp().isReg());
-                        StackSlot* spilled = spillSlot(arg.tmp());
-                        ASSERT(spilled);
                         bool needScratchIfSpilledInPlace = false;
                         if (!inst.admitsStack(arg)) {
                             switch (inst.kind.opcode) {
@@ -1853,16 +1855,15 @@ private:
                 inst.forEachTmp([&] (Tmp& tmp, Arg::Role role, Bank argBank, Width) {
                     if (tmp.isReg() || argBank != bank)
                         return;
-                    if (m_map[tmp].stage != Stage::Spilled)
+                    StackSlot* spilled = spillSlot(tmp);
+                    if (!spilled)
                         return;
-                    StackSlot* slot = spillSlot(tmp);
-                    ASSERT(slot);
                     Opcode move = moveOpcode(tmp);
                     auto oldTmp = tmp;
                     tmp = addSpillTmpWithInterval(tmp, intervalForSpill(indexOfEarly, role));
                     if (role == Arg::Scratch)
                         return;
-                    Arg arg = Arg::stack(slot);
+                    Arg arg = Arg::stack(spilled);
                     if (Arg::isAnyUse(role)) {
                         auto tryRematerialize = [&]() {
                             if constexpr (bank == GP) {
@@ -1920,11 +1921,9 @@ private:
                     Inst& inst = block->at(instIndex);
 
                     Arg arg = gapTmp;
-                    if (m_map[gapTmp].stage == Stage::Spilled) {
-                        StackSlot* slot = spillSlot(gapTmp);
-                        ASSERT(slot);
-                        arg = Arg::stack(slot);
-                    }
+                    StackSlot* spilled = spillSlot(gapTmp);
+                    if (spilled)
+                        arg = Arg::stack(spilled);
                     Opcode move = moveOpcode(gapTmp);
                     m_insertionSets[block].insert(instIndex, splitMoveFrom, move, inst.origin, metadata.originalTmp, arg);
                     m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, inst.origin, arg, metadata.originalTmp);
