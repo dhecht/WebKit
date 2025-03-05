@@ -51,8 +51,8 @@ namespace JSC { namespace B3 { namespace Air {
 
 namespace {
 
-static constexpr bool debug = false;
-static constexpr bool traceDebug = false;
+static constexpr bool debug = true;
+static constexpr bool traceDebug = true;
 static constexpr bool reportStats = false;
 static constexpr bool reportInterferenceGraphMemoryUse = false;
 
