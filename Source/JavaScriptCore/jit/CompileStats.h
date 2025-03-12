@@ -42,6 +42,10 @@ namespace JSC {
     macro(operationTriggerTierUpNowInLoop)                   \
     macro(operationTriggerOSREntryNow)                       \
     macro(tierUpCommonCompile)                               \
+    macro(baselineCompiles)                                  \
+    macro(dfgCompiles)                                       \
+    macro(unlikedDfgCompiles)                                \
+    macro(ftlCompiles)                                       \
 
 struct CompileStats {
 
@@ -50,12 +54,12 @@ struct CompileStats {
         static std::once_flag once;
         std::call_once(once, [] {
             atexit([]() {
-                dataLogLn(WTF::getCurrentProcessID(), ": DFGCompileStats: ", RawPointer(globalStats), pointerDump(globalStats));
+                dataLogLn(WTF::getCurrentProcessID(), ": CompileStats: ", RawPointer(globalStats), pointerDump(globalStats));
             });
             auto* stats = new CompileStats;
             WTF::storeStoreFence();
             globalStats = stats;
-            dataLogLn(WTF::getCurrentProcessID(), ": DFGCompileStats::ensure(): ", RawPointer(globalStats));
+            dataLogLn(WTF::getCurrentProcessID(), ": CompileStats::ensure(): ", RawPointer(globalStats));
         });
         return *globalStats;
     }

@@ -28,6 +28,7 @@
 
 #if ENABLE(JIT)
 
+#include "CompileStats.h"
 #include "DeferGCInlines.h"
 #include "HeapInlines.h"
 #include "JITSafepoint.h"
@@ -83,6 +84,23 @@ JITWorklist& JITWorklist::ensureGlobalWorklist()
 
 CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
 {
+    switch (plan->mode()) {
+    case JITCompilationMode::Baseline:
+        CompileStats::ensure().baselineCompiles++;
+        break;
+    case JITCompilationMode::DFG:
+        CompileStats::ensure().dfgCompiles++;
+        break;
+    case JITCompilationMode::UnlinkedDFG:
+        CompileStats::ensure().unlikedDfgCompiles++;
+        break;
+    case JITCompilationMode::FTL:
+        CompileStats::ensure().ftlCompiles++;
+        break;
+    default:
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+
     if (!Options::useConcurrentJIT()) {
 #if USE(PROTECTED_JIT)
         // Must be constructed before we allocate anything using SequesteredArenaMalloc
