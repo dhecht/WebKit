@@ -273,15 +273,10 @@ using namespace WebCore;
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(WebProcess);
 
-//JS_EXPORT_PRIVATE void DFGDumpCompileStats();
-
 #if !PLATFORM(GTK) && !PLATFORM(WPE)
 NO_RETURN static void callExit(IPC::Connection*)
 {
-//    DFGDumpCompileStats();
-//    sleep(10);
-//    terminateProcess(EXIT_SUCCESS);
-    WTF::exitProcess(EXIT_SUCCESS);
+    exitProcess(EXIT_SUCCESS);
 }
 #endif
 

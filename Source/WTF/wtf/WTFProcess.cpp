@@ -24,7 +24,6 @@
  */
 
 #include "config.h"
-#include "wtf/ProcessID.h"
 #include <wtf/WTFProcess.h>
 
 #include <stdlib.h>
@@ -59,7 +58,6 @@ void exitProcess(int status)
     // let the process crash explicitly.
     CRASH();
 #else
-    printf("%u: exitProcess\n", getCurrentProcessID());
     exit(status);
 #endif
 }
@@ -71,8 +69,6 @@ void terminateProcess(int status)
     // See comment in exitProcess.
     exitProcess(status);
 #else
-    printf("%u: terminateProcess %u\n", getCurrentProcessID(), status);
-    RELEASE_ASSERT(status);
     _exit(status);
 #endif
 }

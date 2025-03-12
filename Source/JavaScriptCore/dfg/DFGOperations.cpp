@@ -5007,20 +5007,23 @@ JSC_DEFINE_JIT_OPERATION(operationLinkDirectCall, void, (DirectCallLinkInfo* cal
     macro(operationTriggerOSREntryNow)                       \
     macro(tierUpCommonCompile)                               \
 
-class DFGCompileStats;
-static DFGCompileStats* theGlobalStats;
+struct DFGCompileStats {
 
-struct DFGCompileStatsLogger;
-class DFGCompileStats {
-    friend DFGCompileStatsLogger;
-public:
-    DFGCompileStats() = default;
-    ~DFGCompileStats() {
-        dataLogLn("~DFGCompileStats!!!", WTF::RawPointer(this));
+    static DFGCompileStats& ensure()
+    {
+        static std::once_flag once;
+        std::call_once(once, [] {
+            atexit([]() {
+                dataLogLn(WTF::getCurrentProcessID(), ": DFGCompileStats: ", RawPointer(globalStats), pointerDump(globalStats));
+            });
+            auto* stats = new DFGCompileStats;
+            WTF::storeStoreFence();
+            globalStats = stats;
+            dataLogLn(WTF::getCurrentProcessID(), ": DFGCompileStats::ensure(): ", RawPointer(globalStats));
+        });
+        return *globalStats;
     }
 
-    static DFGCompileStats& ensure();
-    WTF_IMPORT_DECLARATION 
     void dump(PrintStream& out) const
     {
 #define STAT_PRINT(name) out.print("\n   " #name ": ", name);
@@ -5032,41 +5035,10 @@ public:
     FOR_EACH_DFG_COMPILE_STAT(STAT_DEF)
 #undef STAT_DEF
 
+    static DFGCompileStats* globalStats;
 };
 
-JS_EXPORT_PRIVATE void DFGDumpCompileStats();
-void DFGDumpCompileStats() {
-    dataLogLn(getCurrentProcessID(), ": DFGDumpCompileStats: ", pointerDump(theGlobalStats));
-}
-
-struct DFGCompileStatsLogger {
-    DFGCompileStats* stats;
-    unsigned count { 7 };
-
-    ~DFGCompileStatsLogger()
-    {
-        dataLogLn(getCurrentProcessID(), ": ~DFGCompileStatsLogger: ", count, ", ", WTF::RawPointer(stats), pointerDump(stats));
-    }
-};
-
-DEFINE_GLOBAL_FOR_LOGGING(DFGCompileStatsLogger, logger, { });
-
-DFGCompileStats& DFGCompileStats::ensure()
-{
-    static std::once_flag once;
-    std::call_once(
-        once,
-        [] {
-            auto* stats = new DFGCompileStats();
-            logger.stats = stats;
-            WTF::storeStoreFence();
-            theGlobalStats = stats;
-            dataLogLn(getCurrentProcessID(), ": Initialized theGlobalStats count=", logger.count, ", ", WTF::RawPointer(theGlobalStats), " : ", WTF::RawPointer(logger.stats));
-            logger.count++;
-        });
-    return *theGlobalStats;
-}
-
+DFGCompileStats* DFGCompileStats::globalStats { };
 
 JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationTriggerReoptimizationNow, void, (CodeBlock* codeBlock, CodeBlock* optimizedCodeBlock, OSRExitBase* exit))
 {
