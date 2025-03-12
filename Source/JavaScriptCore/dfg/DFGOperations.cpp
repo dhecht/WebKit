@@ -33,6 +33,7 @@
 #include "CodeBlock.h"
 #include "CodeBlockInlines.h"
 #include "CommonSlowPathsInlines.h"
+#include "CompileStats.h"
 #include "DFGDriver.h"
 #include "DFGJITCode.h"
 #include "DFGToFTLDeferredCompilationCallback.h"
@@ -95,7 +96,6 @@
 #include "WeakMapImplInlines.h"
 #include "WeakMapPrototype.h"
 #include "WeakSetPrototype.h"
-#include "wtf/ProcessID.h"
 #include <wtf/text/MakeString.h>
 
 #if ENABLE(JIT)
@@ -4998,51 +4998,9 @@ JSC_DEFINE_JIT_OPERATION(operationLinkDirectCall, void, (DirectCallLinkInfo* cal
     OPERATION_RETURN(scope);
 }
 
-#define FOR_EACH_DFG_COMPILE_STAT(macro) \
-    macro(operationTriggerReoptimizationNow)                 \
-    macro(operationTriggerReoptimizationNowJettison)         \
-    macro(operationTriggerTierUpNow)                         \
-    macro(triggerFTLReplacementCompile)                      \
-    macro(operationTriggerTierUpNowInLoop)                   \
-    macro(operationTriggerOSREntryNow)                       \
-    macro(tierUpCommonCompile)                               \
-
-struct DFGCompileStats {
-
-    static DFGCompileStats& ensure()
-    {
-        static std::once_flag once;
-        std::call_once(once, [] {
-            atexit([]() {
-                dataLogLn(WTF::getCurrentProcessID(), ": DFGCompileStats: ", RawPointer(globalStats), pointerDump(globalStats));
-            });
-            auto* stats = new DFGCompileStats;
-            WTF::storeStoreFence();
-            globalStats = stats;
-            dataLogLn(WTF::getCurrentProcessID(), ": DFGCompileStats::ensure(): ", RawPointer(globalStats));
-        });
-        return *globalStats;
-    }
-
-    void dump(PrintStream& out) const
-    {
-#define STAT_PRINT(name) out.print("\n   " #name ": ", name);
-        FOR_EACH_DFG_COMPILE_STAT(STAT_PRINT)
-#undef STAT_PRINT
-    }
-
-#define STAT_DEF(name) unsigned name { 0 };
-    FOR_EACH_DFG_COMPILE_STAT(STAT_DEF)
-#undef STAT_DEF
-
-    static DFGCompileStats* globalStats;
-};
-
-DFGCompileStats* DFGCompileStats::globalStats { };
-
 JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationTriggerReoptimizationNow, void, (CodeBlock* codeBlock, CodeBlock* optimizedCodeBlock, OSRExitBase* exit))
 {
-    DFGCompileStats::ensure().operationTriggerReoptimizationNow++;
+    CompileStats::ensure().operationTriggerReoptimizationNow++;
     // It's sort of preferable that we don't GC while in here. Anyways, doing so wouldn't
     // really be profitable.
     DeferGCForAWhile deferGC(codeBlock->vm());
@@ -5091,7 +5049,7 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationTriggerReoptimizationNow, void, (Code
         return;
     }
     
-    DFGCompileStats::ensure().operationTriggerReoptimizationNowJettison++;
+    CompileStats::ensure().operationTriggerReoptimizationNowJettison++;
     optimizedCodeBlock->jettison(Profiler::JettisonDueToOSRExit, CountReoptimization);
 }
 
@@ -5150,7 +5108,7 @@ static void triggerFTLReplacementCompile(VM& vm, CodeBlock* codeBlock, JITCode* 
     }
 
     CODEBLOCK_LOG_EVENT(codeBlock, "triggerFTLReplacement", ());
-    DFGCompileStats::ensure().triggerFTLReplacementCompile++;
+    CompileStats::ensure().triggerFTLReplacementCompile++;
     // We need to compile the code.
     compile(
         vm, codeBlock->newReplacement(), codeBlock, JITCompilationMode::FTL, BytecodeIndex(),
@@ -5169,7 +5127,7 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationTriggerTierUpNow, void, (VM* vmPointe
     DeferGCForAWhile deferGC(vm);
     CodeBlock* codeBlock = callFrame->codeBlock();
 
-    DFGCompileStats::ensure().operationTriggerTierUpNow++;
+    CompileStats::ensure().operationTriggerTierUpNow++;
 
     sanitizeStackForVM(vm);
 
@@ -5400,7 +5358,7 @@ static char* tierUpCommon(VM& vm, CallFrame* callFrame, BytecodeIndex originByte
     CodeBlock* replacementCodeBlock = codeBlock->newReplacement();
 
     CODEBLOCK_LOG_EVENT(codeBlock, "triggerFTLOSR", ());
-    DFGCompileStats::ensure().tierUpCommonCompile++;
+    CompileStats::ensure().tierUpCommonCompile++;
     CompilationResult forEntryResult = compile(
         vm, replacementCodeBlock, codeBlock, JITCompilationMode::FTLForOSREntry, originBytecodeIndex,
         WTFMove(mustHandleValues), ToFTLForOSREntryDeferredCompilationCallback::create(triggerAddress));
@@ -5438,7 +5396,7 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationTriggerTierUpNowInLoop, void, (VM* vm
     CodeBlock* codeBlock = callFrame->codeBlock();
     BytecodeIndex bytecodeIndex = BytecodeIndex::fromBits(bytecodeIndexBits);
 
-    DFGCompileStats::ensure().operationTriggerTierUpNowInLoop++;
+    CompileStats::ensure().operationTriggerTierUpNowInLoop++;
 
     sanitizeStackForVM(vm);
 
@@ -5472,7 +5430,7 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationTriggerOSREntryNow, char*, (VM* vmPoi
     CodeBlock* codeBlock = callFrame->codeBlock();
     BytecodeIndex bytecodeIndex = BytecodeIndex::fromBits(bytecodeIndexBits);
 
-    DFGCompileStats::ensure().operationTriggerOSREntryNow++;
+    CompileStats::ensure().operationTriggerOSREntryNow++;
 
     sanitizeStackForVM(vm);
 
