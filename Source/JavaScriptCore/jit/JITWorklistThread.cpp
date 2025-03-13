@@ -95,6 +95,7 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
             }
             return PollResult::Stop;
         }
+        m_plan->m_queueMark.stop(CompileStats::perMode(m_plan->mode()).queuedTime);
 
         RELEASE_ASSERT(m_plan->stage() == JITPlanStage::Preparing);
         m_worklist.m_numberOfActiveThreads++;
@@ -112,10 +113,13 @@ auto JITWorklistThread::work() -> WorkResult
     Locker locker { m_rightToRun };
     {
         Locker locker { *m_worklist.m_lock };
-        if (m_plan->stage() == JITPlanStage::Canceled)
+        if (m_plan->stage() == JITPlanStage::Canceled) {
+            CompileStats::perMode(m_plan->mode()).canceledPlanInQueue++;
             return WorkResult::Continue;
+        }
         m_state = State::Compiling;
         m_plan->notifyCompiling();
+        m_plan->m_compileMark.start();
     }
 
 
@@ -137,8 +141,11 @@ auto JITWorklistThread::work() -> WorkResult
     {
         Locker locker { *m_worklist.m_lock };
         m_state = State::NotCompiling;
-        if (m_plan->stage() == JITPlanStage::Canceled)
+        m_plan->m_compileMark.stop(CompileStats::perMode(m_plan->mode()).compileTime);
+        if (m_plan->stage() == JITPlanStage::Canceled) {
+            CompileStats::perMode(m_plan->mode()).canceledPlanWhileCompiling++;
             return WorkResult::Continue;
+        }
 
         m_plan->notifyReady();
 
@@ -148,6 +155,7 @@ auto JITWorklistThread::work() -> WorkResult
         }
 
         RELEASE_ASSERT(!m_plan->vm()->heap.worldIsStopped());
+        m_plan->m_readyMark.start();
         m_worklist.m_readyPlans.append(WTFMove(m_plan));
         m_worklist.m_planCompiledOrCancelled.notifyAll();
     }

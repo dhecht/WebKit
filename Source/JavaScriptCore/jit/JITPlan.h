@@ -28,6 +28,7 @@
 #if ENABLE(JIT)
 
 #include "CompilationResult.h"
+#include "CompileStats.h"
 #include "JITCode.h"
 #include "JITCompilationKey.h"
 #include "JITCompilationMode.h"
@@ -121,6 +122,10 @@ protected:
     CodeBlock* m_codeBlock;
     JITWorklistThread* m_thread { nullptr };
     Vector<RefPtr<SharedTask<void()>>> m_mainThreadFinalizationTasks;
+public:
+    CompileStats::Mark m_queueMark;
+    CompileStats::Mark m_compileMark;
+    CompileStats::Mark m_readyMark;
 };
 
 } // namespace JSC

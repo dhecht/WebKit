@@ -27,14 +27,17 @@
 
 #if ENABLE(JIT)
 
+#include "JITCompilationMode.h"
+
 #include <wtf/Atomics.h>
 #include <wtf/DataLog.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/ProcessID.h>
 #include <wtf/RawPointer.h>
 
 namespace JSC {
 
-#define FOR_EACH_DFG_COMPILE_STAT(macro) \
+#define FOR_EACH_COMPILE_STAT(macro) \
     macro(operationTriggerReoptimizationNow)                 \
     macro(operationTriggerReoptimizationNowJettison)         \
     macro(operationTriggerTierUpNow)                         \
@@ -42,12 +45,73 @@ namespace JSC {
     macro(operationTriggerTierUpNowInLoop)                   \
     macro(operationTriggerOSREntryNow)                       \
     macro(tierUpCommonCompile)                               \
-    macro(baselineCompiles)                                  \
-    macro(dfgCompiles)                                       \
-    macro(unlikedDfgCompiles)                                \
-    macro(ftlCompiles)                                       \
 
-struct CompileStats {
+#define FOR_EACH_PER_TIER_COMPILE_STAT(macro) \
+    macro(compile) \
+    macro(failedFinalizer) \
+    macro(invalidatedCodeblock) \
+    macro(failedFinalize) \
+    macro(invalidatedReallyAdd) \
+    macro(invalidatedIsJettisoned) \
+    macro(canceledPlanInQueue) \
+    macro(canceledPlanWhileCompiling) \
+
+#define FOR_EACH_PER_TIER_COMPILE_DURATION_AGG(macro) \
+    macro(queuedTime) \
+    macro(compileTime) \
+    macro(readyTime) \
+
+struct CompileStats{
+    using Counter = unsigned;
+    static constexpr size_t numModes = 6;
+
+    class Mark;
+    class DurationAggregate {
+    public:
+
+        void dump(PrintStream& out) const 
+        {
+            out.println("count: ", m_count);
+            out.println("avg: ", (m_total / m_count).milliseconds(), " ms");
+            out.println("min: ", m_min.milliseconds(), " ms");
+            out.println("max: ", m_max.milliseconds(), " ms");
+        }
+    
+    private:
+        friend class Mark;
+
+        void aggregate(MonotonicTime start, MonotonicTime end)
+        {
+            ASSERT(start && end);
+            Seconds duration = end - start;
+            m_total += duration;
+            m_count++;
+            m_max = std::max(m_max, duration);
+            m_min = std::min(m_min, duration);
+        }
+
+        Counter m_count { 0 };
+        Seconds m_total { 0 };
+        Seconds m_max { 0 };
+        Seconds m_min { Seconds::infinity() };
+    };
+
+    class Mark {
+    public:
+        void start()
+        {
+            ASSERT(!m_start);
+            m_start = MonotonicTime::now();
+        }
+
+        void stop(DurationAggregate& agg)
+        {
+            agg.aggregate(m_start, MonotonicTime::now());
+        }
+
+    private:
+        MonotonicTime m_start;
+    };
 
     static CompileStats& ensure()
     {
@@ -55,6 +119,7 @@ struct CompileStats {
         std::call_once(once, [] {
             atexit([]() {
                 dataLogLn(WTF::getCurrentProcessID(), ": CompileStats: ", RawPointer(globalStats), pointerDump(globalStats));
+                WTF::dataFile().flush();
             });
             auto* stats = new CompileStats;
             WTF::storeStoreFence();
@@ -67,13 +132,46 @@ struct CompileStats {
     void dump(PrintStream& out) const
     {
 #define STAT_PRINT(name) out.print("\n   " #name ": ", name);
-        FOR_EACH_DFG_COMPILE_STAT(STAT_PRINT)
+        FOR_EACH_COMPILE_STAT(STAT_PRINT)
 #undef STAT_PRINT
+
+        for (size_t m = 0; m < numModes; m++) {
+            JITCompilationMode mode = static_cast<JITCompilationMode>(m);
+            if (mode == JITCompilationMode::InvalidCompilation)
+                continue;
+            out.print("\n\n   ", mode, ":", perMode(mode));
+        }
     }
 
-#define STAT_DEF(name) unsigned name { 0 };
-    FOR_EACH_DFG_COMPILE_STAT(STAT_DEF)
+#define STAT_DEF(name) Counter name { 0 };
+    FOR_EACH_COMPILE_STAT(STAT_DEF)
 #undef STAT_DEF
+
+    struct PerModeStats {
+
+        void dump(PrintStream& out) const
+        {
+#define STAT_PRINT(name) out.print("\n     " #name ": ", name);
+            FOR_EACH_PER_TIER_COMPILE_STAT(STAT_PRINT)
+            FOR_EACH_PER_TIER_COMPILE_DURATION_AGG(STAT_PRINT)
+#undef STAT_DEF
+        }
+
+#define STAT_DEF(name) Counter name { 0 };
+        FOR_EACH_PER_TIER_COMPILE_STAT(STAT_DEF)
+#undef STAT_DEF
+
+#define STAT_DEF(name) DurationAggregate name { };
+        FOR_EACH_PER_TIER_COMPILE_DURATION_AGG(STAT_DEF)
+#undef STAT_DEF
+    };
+
+    static PerModeStats& perMode(JITCompilationMode mode)
+    {
+        return ensure().perModeStats[static_cast<size_t>(mode)];
+    }
+
+    std::array<PerModeStats, numModes> perModeStats;
 
     static CompileStats* globalStats;
 };

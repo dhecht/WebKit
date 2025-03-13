@@ -84,22 +84,7 @@ JITWorklist& JITWorklist::ensureGlobalWorklist()
 
 CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
 {
-    switch (plan->mode()) {
-    case JITCompilationMode::Baseline:
-        CompileStats::ensure().baselineCompiles++;
-        break;
-    case JITCompilationMode::DFG:
-        CompileStats::ensure().dfgCompiles++;
-        break;
-    case JITCompilationMode::UnlinkedDFG:
-        CompileStats::ensure().unlikedDfgCompiles++;
-        break;
-    case JITCompilationMode::FTL:
-        CompileStats::ensure().ftlCompiles++;
-        break;
-    default:
-        RELEASE_ASSERT_NOT_REACHED();
-    }
+    CompileStats::perMode(plan->mode()).compile++;
 
     if (!Options::useConcurrentJIT()) {
 #if USE(PROTECTED_JIT)
@@ -111,6 +96,7 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
     }
 
     Locker locker { *m_lock };
+    plan->m_queueMark.start();
     if (Options::verboseCompilationQueue()) {
         dump(locker, WTF::dataFile());
         dataLog(": Enqueueing plan to optimize ", plan->key(), "\n");
@@ -353,6 +339,7 @@ JITWorklist::State JITWorklist::removeAllReadyPlansForVM(VM& vm, Vector<RefPtr<J
         if (plan->key() == requestedKey)
             isCompiled = true;
         m_plans.remove(plan->key());
+        plan->m_readyMark.stop(CompileStats::perMode(plan->mode()).readyTime);
         myReadyPlans.append(WTFMove(plan));
         return true;
     });
@@ -394,8 +381,10 @@ void JITWorklist::removeMatchingPlansForVM(VM& vm, const MatchFunction& matches)
         queue.swap(newQueue);
     }
     for (unsigned i = 0; i < m_readyPlans.size(); ++i) {
-        if (m_readyPlans[i]->stage() != JITPlanStage::Canceled)
+        auto& plan = m_readyPlans[i];
+        if (plan->stage() != JITPlanStage::Canceled)
             continue;
+        plan->m_readyMark.stop(CompileStats::perMode(plan->mode()).readyTime);
         m_readyPlans[i--] = m_readyPlans.last();
         m_readyPlans.removeLast();
     }

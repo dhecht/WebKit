@@ -28,6 +28,7 @@
 
 #if ENABLE(DFG_JIT)
 
+#include "CompileStats.h"
 #include "DFGArgumentsEliminationPhase.h"
 #include "DFGBackwardsPropagationPhase.h"
 #include "DFGByteCodeParser.h"
@@ -576,22 +577,26 @@ CompilationResult Plan::finalize()
     CompilationResult result = [&] {
         if (m_finalizer->isFailed()) {
             CODEBLOCK_LOG_EVENT(m_codeBlock, "dfgFinalize", ("failed"));
+            CompileStats::perMode(mode()).failedFinalizer++;
             return CompilationFailed;
         }
 
         if (!isStillValidCodeBlock()) {
             CODEBLOCK_LOG_EVENT(m_codeBlock, "dfgFinalize", ("invalidated"));
+            CompileStats::perMode(mode()).invalidatedCodeblock++;
             return CompilationInvalidated;
         }
 
         bool result = m_finalizer->finalize();
         if (!result) {
             CODEBLOCK_LOG_EVENT(m_codeBlock, "dfgFinalize", ("failed"));
+            CompileStats::perMode(mode()).failedFinalize++;
             return CompilationFailed;
         }
 
         if (!reallyAdd(m_codeBlock->jitCode()->dfgCommon())) {
             CODEBLOCK_LOG_EVENT(m_codeBlock, "dfgFinalize", ("invalidated"));
+            CompileStats::perMode(mode()).invalidatedReallyAdd++;
             return CompilationInvalidated;
         }
 
@@ -604,6 +609,7 @@ CompilationResult Plan::finalize()
         // it is possible that the current CodeBlock is now invalidated & jettisoned.
         if (m_codeBlock->isJettisoned()) {
             CODEBLOCK_LOG_EVENT(m_codeBlock, "dfgFinalize", ("invalidated"));
+            CompileStats::perMode(mode()).invalidatedIsJettisoned++;
             return CompilationInvalidated;
         }
 
