@@ -122,7 +122,6 @@ auto JITWorklistThread::work() -> WorkResult
         m_plan->m_compileMark.start();
     }
 
-
     dataLogLnIf(Options::verboseCompilationQueue(), m_worklist, ": Compiling ", m_plan->key(), " asynchronously");
 
     // There's no way for the GC to be safepointing since we own rightToRun.
@@ -141,12 +140,12 @@ auto JITWorklistThread::work() -> WorkResult
     {
         Locker locker { *m_worklist.m_lock };
         m_state = State::NotCompiling;
-        m_plan->m_compileMark.stop(CompileStats::perMode(m_plan->mode()).compileTime);
         if (m_plan->stage() == JITPlanStage::Canceled) {
             CompileStats::perMode(m_plan->mode()).canceledPlanWhileCompiling++;
+            m_plan->m_compileMark.stop(CompileStats::perMode(m_plan->mode()).compileTimeCanceled);
             return WorkResult::Continue;
         }
-
+        m_plan->m_compileMark.stop(CompileStats::perMode(m_plan->mode()).compileTime);
         m_plan->notifyReady();
 
         if (Options::verboseCompilationQueue()) {

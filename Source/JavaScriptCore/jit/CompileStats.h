@@ -58,8 +58,11 @@ namespace JSC {
 
 #define FOR_EACH_PER_TIER_COMPILE_DURATION_AGG(macro) \
     macro(queuedTime) \
+    macro(queuedTimeCanceled) \
     macro(compileTime) \
+    macro(compileTimeCanceled) \
     macro(readyTime) \
+    macro(readyTimeCanceled) \
 
 struct CompileStats{
     using Counter = unsigned;
@@ -71,10 +74,10 @@ struct CompileStats{
 
         void dump(PrintStream& out) const 
         {
-            out.println("count: ", m_count);
-            out.println("avg: ", (m_total / m_count).milliseconds(), " ms");
-            out.println("min: ", m_min.milliseconds(), " ms");
-            out.println("max: ", m_max.milliseconds(), " ms");
+            out.print("{ count: ", m_count);
+            out.print(" avg: ", (m_total / m_count).milliseconds(), " ms");
+            out.print(" min: ", m_min.milliseconds(), " ms");
+            out.print(" max: ", m_max.milliseconds(), " ms }");
         }
     
     private:
@@ -120,6 +123,7 @@ struct CompileStats{
             atexit([]() {
                 dataLogLn(WTF::getCurrentProcessID(), ": CompileStats: ", RawPointer(globalStats), pointerDump(globalStats));
                 WTF::dataFile().flush();
+                sleep(1);
             });
             auto* stats = new CompileStats;
             WTF::storeStoreFence();
@@ -131,7 +135,7 @@ struct CompileStats{
 
     void dump(PrintStream& out) const
     {
-#define STAT_PRINT(name) out.print("\n   " #name ": ", name);
+#define STAT_PRINT(name) out.println(#name ": ", name);
         FOR_EACH_COMPILE_STAT(STAT_PRINT)
 #undef STAT_PRINT
 
@@ -139,7 +143,7 @@ struct CompileStats{
             JITCompilationMode mode = static_cast<JITCompilationMode>(m);
             if (mode == JITCompilationMode::InvalidCompilation)
                 continue;
-            out.print("\n\n   ", mode, ":", perMode(mode));
+            out.println(mode, ":------------\n", perMode(mode));
         }
     }
 
@@ -151,11 +155,12 @@ struct CompileStats{
 
         void dump(PrintStream& out) const
         {
-#define STAT_PRINT(name) out.print("\n     " #name ": ", name);
+#define STAT_PRINT(name) out.println(#name ": ", name);
             FOR_EACH_PER_TIER_COMPILE_STAT(STAT_PRINT)
             FOR_EACH_PER_TIER_COMPILE_DURATION_AGG(STAT_PRINT)
-#undef STAT_DEF
-        }
+#undef STAT_PRINT
+
+}
 
 #define STAT_DEF(name) Counter name { 0 };
         FOR_EACH_PER_TIER_COMPILE_STAT(STAT_DEF)

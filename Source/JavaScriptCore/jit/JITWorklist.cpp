@@ -369,13 +369,17 @@ void JITWorklist::removeMatchingPlansForVM(VM& vm, const MatchFunction& matches)
         deadPlanKeys.add(plan->key());
     }
     bool didCancelPlans = !deadPlanKeys.isEmpty();
-    for (JITCompilationKey key : deadPlanKeys)
-        m_plans.take(key)->cancel();
+    for (JITCompilationKey key : deadPlanKeys) {
+        auto plan = m_plans.take(key);
+        plan->cancel();
+    }
     for (auto& queue : m_queues) {
         Deque<RefPtr<JITPlan>> newQueue;
         while (!queue.isEmpty()) {
             RefPtr<JITPlan> plan = queue.takeFirst();
-            if (plan->stage() != JITPlanStage::Canceled)
+            if (plan->stage() == JITPlanStage::Canceled)
+                plan->m_queueMark.stop(CompileStats::perMode(plan->mode()).queuedTimeCanceled);
+            else
                 newQueue.append(plan);
         }
         queue.swap(newQueue);
@@ -384,7 +388,7 @@ void JITWorklist::removeMatchingPlansForVM(VM& vm, const MatchFunction& matches)
         auto& plan = m_readyPlans[i];
         if (plan->stage() != JITPlanStage::Canceled)
             continue;
-        plan->m_readyMark.stop(CompileStats::perMode(plan->mode()).readyTime);
+        plan->m_readyMark.stop(CompileStats::perMode(plan->mode()).readyTimeCanceled);
         m_readyPlans[i--] = m_readyPlans.last();
         m_readyPlans.removeLast();
     }
