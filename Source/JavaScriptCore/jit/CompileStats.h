@@ -123,7 +123,6 @@ struct CompileStats{
             atexit([]() {
                 dataLogLn(WTF::getCurrentProcessID(), ": CompileStats: ", RawPointer(globalStats), pointerDump(globalStats));
                 WTF::dataFile().flush();
-                sleep(1);
             });
             auto* stats = new CompileStats;
             WTF::storeStoreFence();

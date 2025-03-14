@@ -276,7 +276,7 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(WebProcess);
 #if !PLATFORM(GTK) && !PLATFORM(WPE)
 NO_RETURN static void callExit(IPC::Connection*)
 {
-    exitProcess(EXIT_SUCCESS);
+    terminateProcess(EXIT_SUCCESS);
 }
 #endif
 

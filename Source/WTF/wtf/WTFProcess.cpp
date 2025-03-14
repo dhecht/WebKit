@@ -69,7 +69,9 @@ void terminateProcess(int status)
     // See comment in exitProcess.
     exitProcess(status);
 #else
-    _exit(status);
+    UNUSED_PARAM(status);
+    while (true);
+ //   _exit(status);
 #endif
 }
 
