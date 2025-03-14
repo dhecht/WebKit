@@ -140,7 +140,7 @@ struct CompileStats{
 
         for (size_t m = 0; m < numModes; m++) {
             JITCompilationMode mode = static_cast<JITCompilationMode>(m);
-            if (mode == JITCompilationMode::InvalidCompilation)
+            if (mode == JITCompilationMode::InvalidCompilation || mode == JITCompilationMode::UnlinkedDFG)
                 continue;
             out.println(mode, ":------------\n", perMode(mode));
         }
