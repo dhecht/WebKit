@@ -498,6 +498,7 @@ Plan::CompilationPath Plan::compileInThreadImpl()
 
         FTL::link(state);
         
+        state.allocationFailed = true;
         if (state.allocationFailed) {
             FTL::fail(state);
             return FTLPath;
