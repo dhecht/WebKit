@@ -336,6 +336,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, ftlOSREntryFailureCountForReoptimization, 15, Normal, nullptr) \
     v(Unsigned, ftlOSREntryRetryThreshold, 100, Normal, nullptr) \
     v(Bool, ftlFailCompileStart, false, Normal, nullptr) \
+    v(Bool, ftlFailCompileEnd, false, Normal, nullptr) \
     \
     v(Int32, evalThresholdMultiplier, 10, Normal, nullptr) \
     v(Unsigned, maximumEvalCacheableSourceLength, 256, Normal, nullptr) \
