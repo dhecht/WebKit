@@ -121,7 +121,7 @@ struct CompileStats{
         static std::once_flag once;
         std::call_once(once, [] {
             atexit([]() {
-                dataLogLn(WTF::getCurrentProcessID(), ": CompileStats: ", RawPointer(globalStats), pointerDump(globalStats));
+                dataLogLn(WTF::getCurrentProcessID(), ": CompileStats: ", RawPointer(globalStats), "\n", pointerDump(globalStats));
                 WTF::dataFile().flush();
             });
             auto* stats = new CompileStats;

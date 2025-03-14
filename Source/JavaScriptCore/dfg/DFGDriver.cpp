@@ -68,7 +68,7 @@ static CompilationResult compileImpl(
         || !ensureGlobalDFGAllowlist().contains(codeBlock))
         return CompilationFailed;
 
-    if (isFTL(mode))
+    if (isFTL(mode) && Options::ftlFailCompileStart())
         return CompilationFailed;
 
     numCompilations++;
