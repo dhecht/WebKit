@@ -5234,13 +5234,13 @@ static void triggerFTLReplacementCompile(VM& vm, CodeBlock* codeBlock, JITCode* 
 
     CODEBLOCK_LOG_EVENT(codeBlock, "triggerFTLReplacement", ());
     // We need to compile the code.
-    compile(
+    auto result = compile(
         vm, codeBlock->newReplacement(), codeBlock, JITCompilationMode::FTL, BytecodeIndex(),
         Operands<std::optional<JSValue>>(), ToFTLDeferredCompilationCallback::create());
 
     // If we reached here, the counter has not be reset. Do that now.
     jitCode->setOptimizationThresholdBasedOnCompilationResult(
-        codeBlock, CompilationDeferred);
+        codeBlock, result == CompilationFailed ? CompilationFailed : CompilationDeferred);
 }
 
 JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationTriggerTierUpNow, void, (VM* vmPointer))
@@ -5490,7 +5490,7 @@ static char* tierUpCommon(VM& vm, CallFrame* callFrame, BytecodeIndex originByte
     if (forEntryResult != CompilationSuccessful) {
         CODEBLOCK_LOG_EVENT(codeBlock, "delayFTLCompile", ("OSR ecompilation not successful"));
         jitCode->setOptimizationThresholdBasedOnCompilationResult(
-            codeBlock, CompilationDeferred);
+            codeBlock, forEntryResult == CompilationFailed ? CompilationFailed : CompilationDeferred);
         return nullptr;
     }
     

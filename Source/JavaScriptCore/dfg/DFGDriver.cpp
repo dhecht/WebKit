@@ -67,7 +67,10 @@ static CompilationResult compileImpl(
     if (!Options::bytecodeRangeToDFGCompile().isInRange(codeBlock->instructionsSize())
         || !ensureGlobalDFGAllowlist().contains(codeBlock))
         return CompilationFailed;
-    
+
+    if (isFTL(mode))
+        return CompilationFailed;
+
     numCompilations++;
     
     ASSERT(codeBlock);
