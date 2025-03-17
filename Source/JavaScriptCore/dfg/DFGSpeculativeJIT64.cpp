@@ -6370,6 +6370,8 @@ void SpeculativeJIT::compile(Node* node)
 
 #if ENABLE(FTL_JIT)        
     case CheckTierUpInLoop: {
+        if (!Options::generateDFGCheckTierUpInLoop())
+            break;
         Jump callTierUp = branchAdd32(PositiveOrZero, TrustedImm32(Options::ftlTierUpCounterIncrementForLoop()), Address(GPRInfo::jitDataRegister, JITData::offsetOfTierUpCounter()));
 
         Label toNextOperation = label();
@@ -6403,6 +6405,7 @@ void SpeculativeJIT::compile(Node* node)
         
     case CheckTierUpAndOSREnter: {
         ASSERT(!node->origin.semantic.inlineCallFrame());
+        RELEASE_ASSERT(Options::useOSREntryToFTL());
 
         GPRTemporary temp(this);
         GPRReg tempGPR = temp.gpr();

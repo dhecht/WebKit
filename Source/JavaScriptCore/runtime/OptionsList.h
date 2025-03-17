@@ -235,6 +235,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, dumpZappedCellCrashData, false, Normal, nullptr) \
     \
     v(Bool, useOSREntryToDFG, true, Normal, nullptr) \
+    v(Bool, generateDFGCheckTierUpInLoop, true, Normal, nullptr) \
     v(Bool, useOSREntryToFTL, true, Normal, nullptr) \
     \
     v(Bool, useFTLJIT, true, Normal, "allows the FTL JIT to be used if true"_s) \
@@ -330,6 +331,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Int32, executionCounterIncrementForEntry, 15, Normal, nullptr) \
     \
     v(Int32, thresholdForFTLOptimizeAfterWarmUp, 60000, Normal, nullptr) \
+    v(Bool, ftlInitWithDontOptimizeAnytimeSoon, false, Normal, nullptr) \
     v(Int32, thresholdForFTLOptimizeSoon, 1000, Normal, nullptr) \
     v(Int32, ftlTierUpCounterIncrementForLoop, 1, Normal, nullptr) \
     v(Int32, ftlTierUpCounterIncrementForReturn, 15, Normal, nullptr) \

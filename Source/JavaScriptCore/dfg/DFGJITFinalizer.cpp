@@ -71,7 +71,10 @@ bool JITFinalizer::finalize()
     codeBlock->setDFGJITData(WTFMove(data));
 
 #if ENABLE(FTL_JIT)
-    m_jitCode->optimizeAfterWarmUp(codeBlock);
+    if (Options::ftlInitWithDontOptimizeAnytimeSoon())
+        m_jitCode->dontOptimizeAnytimeSoon(codeBlock);
+    else
+        m_jitCode->optimizeAfterWarmUp(codeBlock);
 #endif // ENABLE(FTL_JIT)
 
     if (UNLIKELY(m_plan.compilation()))
