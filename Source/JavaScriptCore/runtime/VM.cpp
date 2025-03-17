@@ -460,6 +460,7 @@ void waitForVMDestruction()
 
 VM::~VM()
 {
+    dataLogLn(WTF::getCurrentProcessID(), ": ~VM");
     Locker destructionLocker { s_destructionLock.read() };
 
     if (vmType == VMType::Default)

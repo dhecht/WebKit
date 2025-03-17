@@ -52,9 +52,23 @@ JITWorklist::JITWorklist()
         Options::numberOfFTLCompilerThreads(),
     };
 
+    {
     Locker locker { *m_lock };
     for (unsigned i = 0; i < Options::numberOfWorklistThreads(); ++i)
         m_threads.append(*new JITWorklistThread(locker, *this));
+    }
+    dataLogLn(WTF::getCurrentProcessID(), ": JITWorklist construct: ", *this);
+    dataLogLn("kernTCSMAwareNumberOfProcessorCores=", kernTCSMAwareNumberOfProcessorCores());
+    for (unsigned i = 0; i < static_cast<unsigned>(JITPlan::Tier::Count); ++i)
+        dataLogLn("Num threads for ", static_cast<JITPlan::Tier>(i), "=", m_maximumNumberOfConcurrentCompilationsPerTier[i]);
+
+    lifetimeMark.start();
+    std::atexit([]() {
+        auto worklist = existingGlobalWorklistOrNull();
+        ASSERT(worklist);
+        worklist->lifetimeMark.stop(CompileStats::ensure().jitWorklistLifetime);
+        dataLogLn(WTF::getCurrentProcessID(), ": atexit");
+    });
 }
 
 JITWorklist::~JITWorklist()
@@ -135,11 +149,16 @@ void JITWorklist::suspendAllThreads() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     m_suspensionLock.lock();
     Vector<Ref<JITWorklistThread>, 8> busyThreads;
     for (auto& thread : m_threads) {
-        if (!thread->m_rightToRun.tryLock())
+        if (!thread->m_rightToRun.tryLock()) {
             busyThreads.append(thread.copyRef());
+            CompileStats::ensure().suspendAllThreadsBusyThread++;
+        }
     }
+    CompileStats::Mark mark;
+    mark.start();
     for (auto& thread : busyThreads)
         thread->m_rightToRun.lock();
+    mark.stop(CompileStats::ensure().suspendAllThreadsBlocked);
 }
 
 void JITWorklist::resumeAllThreads() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
@@ -234,6 +253,8 @@ void JITWorklist::completeAllPlansForVM(VM& vm)
 
 void JITWorklist::cancelAllPlansForVM(VM& vm)
 {
+    lifetimeMark.stop(CompileStats::ensure().jitWorklistLifetime);
+
     if (!vm.numberOfActiveJITPlans())
         return;
 

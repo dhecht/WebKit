@@ -123,6 +123,8 @@ private:
 
     Ref<AutomaticThreadCondition> m_planEnqueued;
     Condition m_planCompiledOrCancelled;
+
+    CompileStats::Mark lifetimeMark;
 };
 
 } // namespace JSC

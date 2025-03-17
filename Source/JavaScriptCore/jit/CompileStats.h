@@ -45,6 +45,11 @@ namespace JSC {
     macro(operationTriggerTierUpNowInLoop)                   \
     macro(operationTriggerOSREntryNow)                       \
     macro(tierUpCommonCompile)                               \
+    macro(suspendAllThreadsBusyThread)                       \
+
+#define FOR_EACH_COMPILE_DURATION_AGG(macro) \
+    macro(jitWorklistLifetime) \
+    macro(suspendAllThreadsBlocked) \
 
 #define FOR_EACH_PER_TIER_COMPILE_STAT(macro) \
     macro(compile) \
@@ -75,6 +80,7 @@ struct CompileStats{
         void dump(PrintStream& out) const 
         {
             out.print("{ count: ", m_count);
+            out.print(" tot: ", m_total.milliseconds(), " ms");
             out.print(" avg: ", (m_total / m_count).milliseconds(), " ms");
             out.print(" min: ", m_min.milliseconds(), " ms");
             out.print(" max: ", m_max.milliseconds(), " ms }");
@@ -138,6 +144,10 @@ struct CompileStats{
         FOR_EACH_COMPILE_STAT(STAT_PRINT)
 #undef STAT_PRINT
 
+#define STAT_PRINT(name) out.println(#name ": ", name);
+        FOR_EACH_COMPILE_DURATION_AGG(STAT_PRINT)
+#undef STAT_PRINT
+
         for (size_t m = 0; m < numModes; m++) {
             JITCompilationMode mode = static_cast<JITCompilationMode>(m);
             if (mode == JITCompilationMode::InvalidCompilation || mode == JITCompilationMode::UnlinkedDFG)
@@ -150,6 +160,9 @@ struct CompileStats{
     FOR_EACH_COMPILE_STAT(STAT_DEF)
 #undef STAT_DEF
 
+#define STAT_DEF(name) DurationAggregate name { };
+    FOR_EACH_COMPILE_DURATION_AGG(STAT_DEF)
+#undef STAT_DEF
     struct PerModeStats {
 
         void dump(PrintStream& out) const
