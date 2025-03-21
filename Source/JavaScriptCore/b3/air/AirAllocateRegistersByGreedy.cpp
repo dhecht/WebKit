@@ -1509,6 +1509,9 @@ private:
                     }
                     if (evictHeuristicAggregatorIsMax)
                         conflictsSpillCost = std::max(conflictsSpillCost, cost);
+                    else if (UNLIKELY(cost == std::numeric_limits<float>::max()
+                        || conflictsSpillCost == std::numeric_limits<float>::max()))
+                        conflictsSpillCost = std::numeric_limits<float>::max();
                     else
                         conflictsSpillCost += cost;
                     return conflictsSpillCost >= minSpillCost ? IterationStatus::Done : IterationStatus::Continue;
