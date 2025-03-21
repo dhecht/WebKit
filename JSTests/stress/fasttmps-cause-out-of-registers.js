@@ -1,3 +1,4 @@
+//@ runDefault("--useConcurrentJIT=0",  "--thresholdForFTLOptimizeAfterWarmUp=100")
 function opt(a1, a2) {
     try {
         undefined(a1);
