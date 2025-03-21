@@ -1453,6 +1453,18 @@ private:
             insertFixupCode(); // So that the log shows the fixup code too
             StringPrintStream out;
             out.println("FATAL: no register for ", tmp);
+            out.println("Unspillable Conflicts:");
+            for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
+                out.print("  ", r, ": ");
+                m_regRanges[r].forEachConflict(m_map[tmp].liveRange,
+                    [&](auto& conflict) -> IterationStatus {
+                        TmpData& conflictData = m_map[conflict.tmp];
+                        if (conflictData.spillCost() == unspillableCost)
+                            out.print("{", conflict.tmp, ", ", conflict.interval, "}, ");
+                        return IterationStatus::Continue;
+                    });
+                out.println("");
+            }
             out.println("Code:", m_code);
             out.println("Register Allocator State:\n", pointerDump(this));
             dataLogLn(out.toCString());
