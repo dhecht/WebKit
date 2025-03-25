@@ -71,7 +71,7 @@ namespace JSC {
     macro(readyTimeCanceled) \
 
 struct CompileStats{
-    using Counter = unsigned;
+    using Counter = std::atomic<unsigned>;
     static constexpr size_t numModes = 6;
 
     class Mark;
@@ -106,7 +106,7 @@ struct CompileStats{
         void dump(PrintStream& out) const
         {
             for (unsigned i = 0; i < m_buckets.size(); i++)
-                out.println("< ", (m_bucketWidth * (i + 1)).milliseconds(), " ms: ", m_buckets[i]);
+                out.println("  < ", (m_bucketWidth * (i + 1)).milliseconds(), " ms: ", m_buckets[i]);
         }
 
     private:
@@ -132,8 +132,8 @@ struct CompileStats{
             out.print(" tot: ", m_total.milliseconds(), " ms");
             out.print(" avg: ", (m_total / m_count).milliseconds(), " ms");
             out.print(" min: ", m_min.milliseconds(), " ms");
-            out.print(" max: ", m_max.milliseconds(), " ms }");
-            out.print(" hist: ", m_histogram);
+            out.println(" max: ", m_max.milliseconds(), " ms }");
+            out.println("hist: ", m_histogram);
         }
     
     private:
