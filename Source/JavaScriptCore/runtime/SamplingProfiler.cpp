@@ -51,6 +51,7 @@
 #include <wtf/JSONValues.h>
 #include <wtf/RefPtr.h>
 #include <wtf/StackTrace.h>
+#include <wtf/ProcessID.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
 
@@ -1178,8 +1179,10 @@ void SamplingProfiler::registerForReportAtExit()
     Locker locker { registrationLock };
 
     if (!profilesToReport) {
+        dataLogLn(WTF::getCurrentProcessID(), ": registerForReportAtExit: setting atexit");
         profilesToReport = new UncheckedKeyHashSet<RefPtr<SamplingProfiler>>();
         atexit([]() {
+            dataLogLn(WTF::getCurrentProcessID(), ": registerForReportAtExit: doing exit handler");
             for (const auto& profile : *profilesToReport)
                 profile->reportDataToOptionFile();
         });
@@ -1199,8 +1202,11 @@ void SamplingProfiler::reportDataToOptionFile()
         pathOut.print(path, "/");
         pathOut.print("JSCSampilingProfile-", reinterpret_cast<uintptr_t>(this), ".txt");
         auto out = FilePrintStream::open(pathOut.toCString().data(), "w");
-        reportTopFunctions(*out);
-        reportTopBytecodes(*out);
+        dataLogLn(WTF::getCurrentProcessID(), "reportDataToOptionFile filename=", pathOut.toCString());
+        reportTopFunctions(WTF::dataFile());
+        reportTopBytecodes(WTF::dataFile());
+        out->flush();
+        dataLogLn(WTF::getCurrentProcessID(), "reportDataToOptionFile done");
     }
 }
 

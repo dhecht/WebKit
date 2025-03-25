@@ -34,6 +34,7 @@
 #include <wtf/MonotonicTime.h>
 #include <wtf/ProcessID.h>
 #include <wtf/RawPointer.h>
+#include <wtf/Vector.h>
 
 namespace JSC {
 
@@ -74,8 +75,56 @@ struct CompileStats{
     static constexpr size_t numModes = 6;
 
     class Mark;
+
+    class Histogram {
+        static constexpr std::array<Seconds, numModes> modeWidths = {
+            /* InvalidCompilation*/ Seconds(0),
+            /* Baseline */ Seconds::fromMicroseconds(10),
+            /* DFG */ Seconds::fromMicroseconds(100),
+            /* UnlinkedDFG */ Seconds::fromMicroseconds(100),
+            /* FTL */ Seconds::fromMilliseconds(1),
+            /* FTLForOSREntry */ Seconds::fromMilliseconds(1),
+        };
+    public:
+        Histogram(JITCompilationMode mode)
+        : Histogram(modeWidths[static_cast<unsigned>(mode)], 10)
+        { }
+
+        Histogram(Seconds bucketWidth, unsigned numBuckets)
+        : m_buckets(numBuckets)
+        , m_bucketWidth(bucketWidth)
+        { }
+
+        void add(Seconds sample)
+        {
+            unsigned index = sample / m_bucketWidth;
+            if (index >= m_buckets.size())
+                index = m_buckets.size() - 1;
+            ++m_buckets[index];
+        }
+
+        void dump(PrintStream& out) const
+        {
+            for (unsigned i = 0; i < m_buckets.size(); i++)
+                out.println("< ", (m_bucketWidth * (i + 1)).milliseconds(), " ms: ", m_buckets[i]);
+        }
+
+    private:
+        Vector<Counter> m_buckets;
+        Seconds m_bucketWidth;
+    };
+
     class DurationAggregate {
     public:
+        DurationAggregate()
+        : m_histogram(JITCompilationMode::InvalidCompilation)
+        {
+        }
+
+        DurationAggregate(JITCompilationMode mode)
+        : m_histogram(mode)
+        {
+        }
 
         void dump(PrintStream& out) const 
         {
@@ -84,6 +133,7 @@ struct CompileStats{
             out.print(" avg: ", (m_total / m_count).milliseconds(), " ms");
             out.print(" min: ", m_min.milliseconds(), " ms");
             out.print(" max: ", m_max.milliseconds(), " ms }");
+            out.print(" hist: ", m_histogram);
         }
     
     private:
@@ -103,6 +153,7 @@ struct CompileStats{
         Seconds m_total { 0 };
         Seconds m_max { 0 };
         Seconds m_min { Seconds::infinity() };
+        Histogram m_histogram;
     };
 
     class Mark {
@@ -164,6 +215,12 @@ struct CompileStats{
     FOR_EACH_COMPILE_DURATION_AGG(STAT_DEF)
 #undef STAT_DEF
     struct PerModeStats {
+        PerModeStats(JITCompilationMode mode) :
+#define STAT_CONSTRUCT(name) name(mode),
+    FOR_EACH_PER_TIER_COMPILE_DURATION_AGG(STAT_CONSTRUCT)
+#undef STAT_CONSTRUCT
+        dummy(false) /* FIXME: Better way to deal with trailing comma? */
+        {};
 
         void dump(PrintStream& out) const
         {
@@ -178,9 +235,11 @@ struct CompileStats{
         FOR_EACH_PER_TIER_COMPILE_STAT(STAT_DEF)
 #undef STAT_DEF
 
-#define STAT_DEF(name) DurationAggregate name { };
+#define STAT_DEF(name) DurationAggregate name;
         FOR_EACH_PER_TIER_COMPILE_DURATION_AGG(STAT_DEF)
 #undef STAT_DEF
+
+        bool dummy;
     };
 
     static PerModeStats& perMode(JITCompilationMode mode)
@@ -188,7 +247,14 @@ struct CompileStats{
         return ensure().perModeStats[static_cast<size_t>(mode)];
     }
 
-    std::array<PerModeStats, numModes> perModeStats;
+    std::array<PerModeStats, numModes> perModeStats = {
+        JITCompilationMode::InvalidCompilation,
+        JITCompilationMode::Baseline,
+        JITCompilationMode::DFG,
+        JITCompilationMode::UnlinkedDFG,
+        JITCompilationMode::FTL,
+        JITCompilationMode::FTLForOSREntry,
+    };
 
     static CompileStats* globalStats;
 };
