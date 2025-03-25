@@ -147,9 +147,11 @@ struct CompileStats{
             m_count++;
             m_max = std::max(m_max, duration);
             m_min = std::min(m_min, duration);
+            m_histogram.add(duration);
         }
 
         Counter m_count { 0 };
+        // FIXME: these need to be atomic, but they are doubles so no atomic max/min
         Seconds m_total { 0 };
         Seconds m_max { 0 };
         Seconds m_min { Seconds::infinity() };
