@@ -205,16 +205,28 @@ static inline CString signpostMessage(JITPlan& plan)
     return stream.toCString();
 }
 
+static inline void* signpostId(JITPlan& plan)
+{
+    uintptr_t id = std::bit_cast<uintptr_t>(&plan);
+    unsigned stage = static_cast<unsigned>(plan.stage());
+    ASSERT(!(id & 0xf));
+    ASSERT(!(stage & ~0xfu));
+    id |= stage;
+    return std::bit_cast<void*>(id);
+}
+
 void JITPlan::beginSignpostImpl()
 {
     auto message = signpostMessage(*this);
-    WTFBeginSignpost(this, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+    auto id = signpostId(*this);
+    WTFBeginSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
 }
 
 void JITPlan::endSignpostImpl()
 {
     auto message = signpostMessage(*this);
-    WTFEndSignpost(this, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+    auto id = signpostId(*this);
+    WTFEndSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
 }
 
 void JITPlan::compileInThread(JITWorklistThread* thread)

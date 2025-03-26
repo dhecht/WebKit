@@ -171,7 +171,7 @@ auto JITWorklist::completeAllReadyPlansForVM(VM& vm, JITCompilationKey requested
     State resultingState = removeAllReadyPlansForVM(vm, myReadyPlans, requestedKey);
     for (auto& plan : myReadyPlans) {
         dataLogLnIf(Options::verboseCompilationQueue(), *this, ": Completing ", plan->key());
-        RELEASE_ASSERT(plan->stage() == JITPlanStage::Ready);
+        RELEASE_ASSERT(plan->stage() == JITPlanStage::Done);
         plan->finalize();
     }
     return resultingState;
