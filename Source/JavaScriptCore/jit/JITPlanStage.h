@@ -31,7 +31,8 @@ enum class JITPlanStage {
     Preparing,
     Compiling,
     Ready,
-    Canceled,
+    Canceled, // Terminal
+    Done, // Terminal
 };
 
 

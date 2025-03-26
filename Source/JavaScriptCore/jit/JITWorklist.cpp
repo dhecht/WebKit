@@ -88,7 +88,9 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
         // Must be constructed before we allocate anything using SequesteredArenaMalloc
         ArenaLifetime saLifetime;
 #endif
+        plan->notifyCompiling();
         plan->compileInThread(nullptr);
+        plan->notifyDone();
         return plan->finalize();
     }
 
@@ -154,6 +156,7 @@ auto JITWorklist::compilationState(VM& vm, JITCompilationKey key) -> State
     const auto& iter = m_plans.find(key);
     if (iter == m_plans.end())
         return NotKnown;
+    ASSERT(iter->value->stage() != JITPlanStage::Done && iter->value->stage() != JITPlanStage::Canceled);
     return iter->value->stage() == JITPlanStage::Ready ? Compiled : Compiling;
 }
 
@@ -330,11 +333,10 @@ JITWorklist::State JITWorklist::removeAllReadyPlansForVM(VM& vm, Vector<RefPtr<J
     m_readyPlans.removeAllMatching([&](RefPtr<JITPlan> plan) {
         if (plan->vm() != &vm)
             return false;
-        if (plan->stage() != JITPlanStage::Ready)
-            return false;
+        RELEASE_ASSERT(plan->stage() == JITPlanStage::Ready);
         if (plan->key() == requestedKey)
             isCompiled = true;
-        m_plans.remove(plan->key());
+        m_plans.take(plan->key())->notifyDone();
         myReadyPlans.append(WTFMove(plan));
         return true;
     });

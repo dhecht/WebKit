@@ -53,33 +53,55 @@ JITPlan::JITPlan(JITCompilationMode mode, CodeBlock* codeBlock)
     , m_codeBlock(codeBlock)
 {
     m_vm->changeNumberOfActiveJITPlans(1);
+    ASSERT(m_stage == JITPlanStage::Preparing);
+    beginSignpost();
 }
 
 JITPlan::~JITPlan()
 {
-    if (m_vm)
+    RELEASE_ASSERT(m_stage == JITPlanStage::Done || m_stage == JITPlanStage::Canceled);
+    if (m_stage == JITPlanStage::Done) {
+        ASSERT(m_vm);
         m_vm->changeNumberOfActiveJITPlans(-1);
+        endSignpost();
+    }
+}
+
+void JITPlan::stageTransition(JITPlanStage newStage)
+{
+    endSignpost();
+    m_stage = newStage;
+    if (m_stage != JITPlanStage::Canceled)
+        beginSignpost();
 }
 
 void JITPlan::cancel()
 {
-    RELEASE_ASSERT(m_stage != JITPlanStage::Canceled);
+    RELEASE_ASSERT(m_stage != JITPlanStage::Done && m_stage != JITPlanStage::Canceled);
     RELEASE_ASSERT(!safepointKeepsDependenciesLive());
     ASSERT(m_vm);
     m_vm->changeNumberOfActiveJITPlans(-1);
-    m_stage = JITPlanStage::Canceled;
+    stageTransition(JITPlanStage::Canceled);
     m_vm = nullptr;
     m_codeBlock = nullptr;
 }
 
 void JITPlan::notifyCompiling()
 {
-    m_stage = JITPlanStage::Compiling;
+    RELEASE_ASSERT(m_stage == JITPlanStage::Preparing);
+    stageTransition(JITPlanStage::Compiling);
 }
 
 void JITPlan::notifyReady()
 {
-    m_stage = JITPlanStage::Ready;
+    RELEASE_ASSERT(m_stage == JITPlanStage::Compiling);
+    stageTransition(JITPlanStage::Ready);
+}
+
+void JITPlan::notifyDone()
+{
+    RELEASE_ASSERT(m_stage == JITPlanStage::Compiling || m_stage == JITPlanStage::Ready);
+    stageTransition(JITPlanStage::Done);
 }
 
 auto JITPlan::tier() const -> Tier
@@ -174,6 +196,27 @@ bool JITPlan::reportCompileTimes() const
         || (Options::reportFTLCompileTimes() && isFTL());
 }
 
+static inline CString signpostMessage(JITPlan& plan)
+{
+    ASSERT(Options::useCompilerSignpost());
+
+    StringPrintStream stream;
+    stream.print(plan.stage(), " ", plan.mode(), " ", *plan.codeBlock(), " instructions size = ", plan.codeBlock()->instructionsSize());
+    return stream.toCString();
+}
+
+void JITPlan::beginSignpostImpl()
+{
+    auto message = signpostMessage(*this);
+    WTFBeginSignpost(this, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+}
+
+void JITPlan::endSignpostImpl()
+{
+    auto message = signpostMessage(*this);
+    WTFEndSignpost(this, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+}
+
 void JITPlan::compileInThread(JITWorklistThread* thread)
 {
     SetForScope threadScope(m_thread, thread);
@@ -195,21 +238,8 @@ void JITPlan::compileInThread(JITWorklistThread* thread)
         dataLog("DFG(Plan) compiling ", *m_codeBlock, " with ", m_mode, ", instructions size = ", m_codeBlock->instructionsSize(), "\n");
 #endif // ENABLE(DFG_JIT)
 
-    CString signpostMessage;
-    UNUSED_VARIABLE(signpostMessage);
-    if (UNLIKELY(Options::useCompilerSignpost())) {
-        StringPrintStream stream;
-        stream.print(m_mode, " ", *m_codeBlock, " instructions size = ", m_codeBlock->instructionsSize());
-        signpostMessage = stream.toCString();
-        WTFBeginSignpost(this, JSCJITCompiler, "%" PUBLIC_LOG_STRING, signpostMessage.data() ? signpostMessage.data() : "(nullptr)");
-    }
-
     CompilationPath path = compileInThreadImpl();
-
     RELEASE_ASSERT((path == CancelPath) == (m_stage == JITPlanStage::Canceled));
-
-    if (UNLIKELY(Options::useCompilerSignpost()))
-        WTFEndSignpost(this, JSCJITCompiler, "%" PUBLIC_LOG_STRING, signpostMessage.data() ? signpostMessage.data() : "(nullptr)");
 
     if (LIKELY(!computeCompileTimes))
         return;

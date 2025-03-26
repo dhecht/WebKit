@@ -89,6 +89,7 @@ public:
 
     void notifyCompiling();
     virtual void notifyReady();
+    void notifyDone();
     virtual void cancel();
 
     virtual bool isKnownToBeLiveAfterGC();
@@ -107,12 +108,29 @@ public:
 
     void runMainThreadFinalizationTasks();
 
+    void beginSignpost()
+    {
+        if (UNLIKELY(Options::useCompilerSignpost()))
+            beginSignpostImpl();
+    }
+
+    void endSignpost()
+    {
+        if (UNLIKELY(Options::useCompilerSignpost()))
+            endSignpostImpl();
+    }
+
 protected:
+    void stageTransition(JITPlanStage newStage);
+
     bool computeCompileTimes() const;
     bool reportCompileTimes() const;
 
     enum CompilationPath { FailPath, BaselinePath, DFGPath, FTLPath, CancelPath };
     virtual CompilationPath compileInThreadImpl() = 0;
+
+    void beginSignpostImpl();
+    void endSignpostImpl();
 
     JITPlanStage m_stage { JITPlanStage::Preparing };
     JITCompilationMode m_mode;
