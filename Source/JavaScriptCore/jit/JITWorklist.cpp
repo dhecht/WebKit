@@ -91,7 +91,7 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
         plan->compileInThread(nullptr);
         return plan->finalize();
     }
-    plan->beginSignpost(JITPlan::Signpost::Lifetime);
+    plan->beginSignpost(JITPlan::Signpost::Queued, plan->signpostMessage());
 
     Locker locker { *m_lock };
     if (Options::verboseCompilationQueue()) {
@@ -171,7 +171,7 @@ auto JITWorklist::completeAllReadyPlansForVM(VM& vm, JITCompilationKey requested
         dataLogLnIf(Options::verboseCompilationQueue(), *this, ": Completing ", plan->key());
         RELEASE_ASSERT(plan->stage() == JITPlanStage::Ready);
         plan->finalize();
-        plan->endSignpost(JITPlan::Signpost::Lifetime);
+        plan->endSignpost(JITPlan::Signpost::Ready, plan->signpostMessage());
     }
     return resultingState;
 }
@@ -244,7 +244,7 @@ void JITWorklist::cancelAllPlansForVM(VM& vm)
     Vector<RefPtr<JITPlan>, 8> myReadyPlans;
     removeAllReadyPlansForVM(vm, myReadyPlans, { });
     for (auto& plan : myReadyPlans)
-        plan->endSignpost(JITPlan::Signpost::Lifetime);
+        plan->endSignpost(JITPlan::Signpost::Ready, plan->signpostMessage());
 }
 
 void JITWorklist::removeDeadPlans(VM& vm)
@@ -370,7 +370,10 @@ void JITWorklist::removeMatchingPlansForVM(VM& vm, const MatchFunction& matches)
     bool didCancelPlans = !deadPlanKeys.isEmpty();
     for (JITCompilationKey key : deadPlanKeys) {
         RefPtr<JITPlan> plan = m_plans.take(key);
-        plan->endSignpost(JITPlan::Signpost::Lifetime);
+        if (plan->stage() == JITPlanStage::Preparing)
+            plan->endSignpost(JITPlan::Signpost::Queued, plan->signpostMessage());
+        else if (plan->stage() == JITPlanStage::Ready)
+            plan->endSignpost(JITPlan::Signpost::Ready, plan->signpostMessage());
         plan->cancel();
     }
     for (auto& queue : m_queues) {

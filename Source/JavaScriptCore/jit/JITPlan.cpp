@@ -174,16 +174,6 @@ bool JITPlan::reportCompileTimes() const
         || (Options::reportFTLCompileTimes() && isFTL());
 }
 
-static inline CString signpostMessage(JITPlan& plan, JITPlan::Signpost signpost)
-{
-    ASSERT(Options::useCompilerSignpost());
-    ASSERT(plan.stage() != JITPlanStage::Canceled);
-
-    StringPrintStream stream;
-    stream.print(signpost, " ", plan.mode(), " ", *plan.codeBlock(), " instructions size = ", plan.codeBlock()->instructionsSize());
-    return stream.toCString();
-}
-
 static inline void* signpostId(JITPlan& plan, JITPlan::Signpost signpost)
 {
     uintptr_t id = std::bit_cast<uintptr_t>(&plan);
@@ -194,20 +184,38 @@ static inline void* signpostId(JITPlan& plan, JITPlan::Signpost signpost)
     return std::bit_cast<void*>(id);
 }
 
-CString JITPlan::beginSignpostImpl(Signpost signpost)
+void JITPlan::beginSignpostImpl(Signpost signpost, const CString& message)
 {
-    auto message = signpostMessage(*this, signpost);
+    ASSERT(Options::useCompilerSignpost() && !message.isNull());
     auto id = signpostId(*this, signpost);
-    WTFBeginSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
-    return message;
+    switch (signpost) {
+    case Signpost::Queued:
+        WTFBeginSignpost(id, JSCJITCompilerQueued, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        break;
+    case Signpost::Compiling:
+        WTFBeginSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        break;
+    case Signpost::Ready:
+        WTFBeginSignpost(id, JSCJITCompilerReady, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        break;
+    };
 }
 
-void JITPlan::endSignpostImpl(Signpost signpost, CString message)
+void JITPlan::endSignpostImpl(Signpost signpost, const CString& message)
 {
-    if (message.isNull())
-        message = signpostMessage(*this, signpost);
+    ASSERT(Options::useCompilerSignpost() && !message.isNull());
     auto id = signpostId(*this, signpost);
-    WTFEndSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+    switch (signpost) {
+    case Signpost::Queued:
+        WTFEndSignpost(id, JSCJITCompilerQueued, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        break;
+    case Signpost::Compiling:
+        WTFEndSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        break;
+    case Signpost::Ready:
+        WTFEndSignpost(id, JSCJITCompilerReady, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        break;
+    };
 }
 
 void JITPlan::compileInThread(JITWorklistThread* thread)
@@ -231,12 +239,8 @@ void JITPlan::compileInThread(JITWorklistThread* thread)
         dataLog("DFG(Plan) compiling ", *m_codeBlock, " with ", m_mode, ", instructions size = ", m_codeBlock->instructionsSize(), "\n");
 #endif // ENABLE(DFG_JIT)
 
-    auto signpostMessage = beginSignpost(Signpost::Compiling);
-
     CompilationPath path = compileInThreadImpl();
     RELEASE_ASSERT((path == CancelPath) == (m_stage == JITPlanStage::Canceled));
-
-    endSignpost(Signpost::Compiling, signpostMessage);
 
     if (LIKELY(!computeCompileTimes))
         return;

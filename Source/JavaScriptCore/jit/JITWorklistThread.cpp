@@ -108,16 +108,18 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
 auto JITWorklistThread::work() -> WorkResult
 {
     WorkScope workScope(*this);
+    CString signpostMessage;
 
     Locker locker { m_rightToRun };
     {
         Locker locker { *m_worklist.m_lock };
         if (m_plan->stage() == JITPlanStage::Canceled)
             return WorkResult::Continue;
+        signpostMessage = m_plan->signpostMessage();
         m_state = State::Compiling;
         m_plan->notifyCompiling();
     }
-
+    m_plan->endSignpost(JITPlan::Signpost::Queued, signpostMessage);
 
     dataLogLnIf(Options::verboseCompilationQueue(), m_worklist, ": Compiling ", m_plan->key(), " asynchronously");
 
@@ -126,7 +128,11 @@ auto JITWorklistThread::work() -> WorkResult
         dataLog("Heap is stopped but here we are! (1)\n");
         RELEASE_ASSERT_NOT_REACHED();
     }
+
+    m_plan->beginSignpost(JITPlan::Signpost::Compiling, signpostMessage);
     m_plan->compileInThread(this);
+    m_plan->endSignpost(JITPlan::Signpost::Compiling, signpostMessage);
+
     if (m_plan->stage() != JITPlanStage::Canceled) {
         if (m_plan->vm()->heap.worldIsStopped()) {
             dataLog("Heap is stopped but here we are! (2)\n");
@@ -134,11 +140,15 @@ auto JITWorklistThread::work() -> WorkResult
         }
     }
 
+    m_plan->beginSignpost(JITPlan::Signpost::Ready, signpostMessage);
     {
         Locker locker { *m_worklist.m_lock };
         m_state = State::NotCompiling;
-        if (m_plan->stage() == JITPlanStage::Canceled)
+        if (m_plan->stage() == JITPlanStage::Canceled) {
+            locker.unlockEarly();
+            m_plan->endSignpost(JITPlan::Signpost::Ready, signpostMessage);
             return WorkResult::Continue;
+        }
 
         m_plan->notifyReady();
 
