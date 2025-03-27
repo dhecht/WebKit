@@ -108,14 +108,13 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
 auto JITWorklistThread::work() -> WorkResult
 {
     WorkScope workScope(*this);
-    CString signpostMessage;
+    CString signpostMessage = m_plan->signpostMessage();
 
     Locker locker { m_rightToRun };
     {
         Locker locker { *m_worklist.m_lock };
         if (m_plan->stage() == JITPlanStage::Canceled)
             return WorkResult::Continue;
-        signpostMessage = m_plan->signpostMessage();
         m_state = State::Compiling;
         m_plan->notifyCompiling();
     }
