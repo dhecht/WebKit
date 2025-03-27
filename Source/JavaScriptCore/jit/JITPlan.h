@@ -107,12 +107,30 @@ public:
 
     void runMainThreadFinalizationTasks();
 
+    enum class Signpost { Lifetime, Compiling };
+
+    CString beginSignpost(Signpost signpost)
+    {
+        if (UNLIKELY(Options::useCompilerSignpost()))
+            return beginSignpostImpl(signpost);
+        return CString();
+    }
+
+    void endSignpost(Signpost signpost, CString message = CString())
+    {
+        if (UNLIKELY(Options::useCompilerSignpost()))
+            endSignpostImpl(signpost, message);
+    }
+
 protected:
     bool computeCompileTimes() const;
     bool reportCompileTimes() const;
 
     enum CompilationPath { FailPath, BaselinePath, DFGPath, FTLPath, CancelPath };
     virtual CompilationPath compileInThreadImpl() = 0;
+
+    CString beginSignpostImpl(Signpost);
+    void endSignpostImpl(Signpost, CString message);
 
     JITPlanStage m_stage { JITPlanStage::Preparing };
     JITCompilationMode m_mode;
