@@ -113,23 +113,21 @@ public:
     {
         if (LIKELY(!Options::useCompilerSignpost()))
             return CString();
-        ASSERT(stage() != JITPlanStage::Canceled);
-
         StringPrintStream stream;
         stream.print(/*signpost, " ",*/m_mode, " ", *m_codeBlock);
         return stream.toCString();
     }
 
-    void beginSignpost(Signpost signpost, const CString& message)
+    void beginSignpost(Signpost signpost)
     {
         if (UNLIKELY(Options::useCompilerSignpost()))
-            beginSignpostImpl(signpost, message);
+            beginSignpostImpl(signpost);
     }
 
-    void endSignpost(Signpost signpost, const CString& message)
+    void endSignpost(Signpost signpost)
     {
         if (UNLIKELY(Options::useCompilerSignpost()))
-            endSignpostImpl(signpost, message);
+            endSignpostImpl(signpost);
     }
 
 protected:
@@ -139,8 +137,8 @@ protected:
     enum CompilationPath { FailPath, BaselinePath, DFGPath, FTLPath, CancelPath };
     virtual CompilationPath compileInThreadImpl() = 0;
 
-    void beginSignpostImpl(Signpost, const CString& message);
-    void endSignpostImpl(Signpost, const CString& message);
+    void beginSignpostImpl(Signpost);
+    void endSignpostImpl(Signpost);
 
     JITPlanStage m_stage { JITPlanStage::Preparing };
     JITCompilationMode m_mode;
@@ -149,6 +147,7 @@ protected:
     CodeBlock* m_codeBlock;
     JITWorklistThread* m_thread { nullptr };
     Vector<RefPtr<SharedTask<void()>>> m_mainThreadFinalizationTasks;
+    CString m_signpostMsg; // Non-null iff Options::useCompilerSignpost()
 };
 
 } // namespace JSC

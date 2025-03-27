@@ -51,6 +51,7 @@ JITPlan::JITPlan(JITCompilationMode mode, CodeBlock* codeBlock)
     : m_mode(mode)
     , m_vm(&codeBlock->vm())
     , m_codeBlock(codeBlock)
+    , m_signpostMsg(signpostMessage())
 {
     m_vm->changeNumberOfActiveJITPlans(1);
 }
@@ -184,36 +185,36 @@ static inline void* signpostId(JITPlan& plan, JITPlan::Signpost signpost)
     return std::bit_cast<void*>(id);
 }
 
-void JITPlan::beginSignpostImpl(Signpost signpost, const CString& message)
+void JITPlan::beginSignpostImpl(Signpost signpost)
 {
-    ASSERT(Options::useCompilerSignpost() && !message.isNull());
+    ASSERT(Options::useCompilerSignpost() && !m_signpostMsg.isNull());
     auto id = signpostId(*this, signpost);
     switch (signpost) {
     case Signpost::Queued:
-        WTFBeginSignpost(id, JSCJITCompilerQueued, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        WTFBeginSignpost(id, JSCJITCompilerQueued, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
     case Signpost::Compiling:
-        WTFBeginSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        WTFBeginSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
     case Signpost::Ready:
-        WTFBeginSignpost(id, JSCJITCompilerReady, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        WTFBeginSignpost(id, JSCJITCompilerReady, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
     };
 }
 
-void JITPlan::endSignpostImpl(Signpost signpost, const CString& message)
+void JITPlan::endSignpostImpl(Signpost signpost)
 {
-    ASSERT(Options::useCompilerSignpost() && !message.isNull());
+    ASSERT(Options::useCompilerSignpost() && !m_signpostMsg.isNull());
     auto id = signpostId(*this, signpost);
     switch (signpost) {
     case Signpost::Queued:
-        WTFEndSignpost(id, JSCJITCompilerQueued, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        WTFEndSignpost(id, JSCJITCompilerQueued, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
     case Signpost::Compiling:
-        WTFEndSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        WTFEndSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
     case Signpost::Ready:
-        WTFEndSignpost(id, JSCJITCompilerReady, "%" PUBLIC_LOG_STRING, message.data() ? message.data() : "(nullptr)");
+        WTFEndSignpost(id, JSCJITCompilerReady, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
     };
 }
