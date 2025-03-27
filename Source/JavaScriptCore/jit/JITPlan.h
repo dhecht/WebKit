@@ -107,8 +107,6 @@ public:
 
     void runMainThreadFinalizationTasks();
 
-    enum class Signpost { Queued, Compiling, Ready };
-
     CString signpostMessage()
     {
         if (LIKELY(!Options::useCompilerSignpost()))
@@ -118,16 +116,18 @@ public:
         return stream.toCString();
     }
 
-    void beginSignpost(Signpost signpost)
+    enum class SignpostDetail { None, Canceled };
+
+    void beginSignpost()
     {
         if (UNLIKELY(Options::useCompilerSignpost()))
-            beginSignpostImpl(signpost);
+            beginSignpostImpl();
     }
 
-    void endSignpost(Signpost signpost)
+    void endSignpost(SignpostDetail detail = SignpostDetail::None)
     {
         if (UNLIKELY(Options::useCompilerSignpost()))
-            endSignpostImpl(signpost);
+            endSignpostImpl(detail);
     }
 
 protected:
@@ -137,8 +137,8 @@ protected:
     enum CompilationPath { FailPath, BaselinePath, DFGPath, FTLPath, CancelPath };
     virtual CompilationPath compileInThreadImpl() = 0;
 
-    void beginSignpostImpl(Signpost);
-    void endSignpostImpl(Signpost);
+    void beginSignpostImpl();
+    void endSignpostImpl(SignpostDetail);
 
     JITPlanStage m_stage { JITPlanStage::Preparing };
     JITCompilationMode m_mode;

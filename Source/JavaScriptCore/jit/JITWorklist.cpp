@@ -88,10 +88,12 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
         // Must be constructed before we allocate anything using SequesteredArenaMalloc
         ArenaLifetime saLifetime;
 #endif
+        // FIXME: signposts
         plan->compileInThread(nullptr);
         return plan->finalize();
     }
-    plan->beginSignpost(JITPlan::Signpost::Queued);
+    ASSERT(plan->stage() == JITPlanStage::Preparing);
+    plan->beginSignpost();
 
     Locker locker { *m_lock };
     if (Options::verboseCompilationQueue()) {
@@ -171,7 +173,7 @@ auto JITWorklist::completeAllReadyPlansForVM(VM& vm, JITCompilationKey requested
         dataLogLnIf(Options::verboseCompilationQueue(), *this, ": Completing ", plan->key());
         RELEASE_ASSERT(plan->stage() == JITPlanStage::Ready);
         plan->finalize();
-        plan->endSignpost(JITPlan::Signpost::Ready);
+        plan->endSignpost();
     }
     return resultingState;
 }
@@ -243,8 +245,10 @@ void JITWorklist::cancelAllPlansForVM(VM& vm)
 
     Vector<RefPtr<JITPlan>, 8> myReadyPlans;
     removeAllReadyPlansForVM(vm, myReadyPlans, { });
-    for (auto& plan : myReadyPlans)
-        plan->endSignpost(JITPlan::Signpost::Ready);
+    for (auto& plan : myReadyPlans) {
+        ASSERT(plan->stage() == JITPlanStage::Ready);
+        plan->endSignpost(JITPlan::SignpostDetail::Canceled);
+    }
 }
 
 void JITWorklist::removeDeadPlans(VM& vm)
@@ -368,14 +372,8 @@ void JITWorklist::removeMatchingPlansForVM(VM& vm, const MatchFunction& matches)
         deadPlanKeys.add(plan->key());
     }
     bool didCancelPlans = !deadPlanKeys.isEmpty();
-    for (JITCompilationKey key : deadPlanKeys) {
-        RefPtr<JITPlan> plan = m_plans.take(key);
-        if (plan->stage() == JITPlanStage::Preparing)
-            plan->endSignpost(JITPlan::Signpost::Queued);
-        else if (plan->stage() == JITPlanStage::Ready)
-            plan->endSignpost(JITPlan::Signpost::Ready);
-        plan->cancel();
-    }
+    for (JITCompilationKey key : deadPlanKeys)
+        m_plans.take(key)->cancel();
     for (auto& queue : m_queues) {
         Deque<RefPtr<JITPlan>> newQueue;
         while (!queue.isEmpty()) {

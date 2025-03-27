@@ -67,6 +67,8 @@ void JITPlan::cancel()
     RELEASE_ASSERT(m_stage != JITPlanStage::Canceled);
     RELEASE_ASSERT(!safepointKeepsDependenciesLive());
     ASSERT(m_vm);
+
+    endSignpost(JITPlan::SignpostDetail::Canceled);
     m_vm->changeNumberOfActiveJITPlans(-1);
     m_stage = JITPlanStage::Canceled;
     m_vm = nullptr;
@@ -75,12 +77,18 @@ void JITPlan::cancel()
 
 void JITPlan::notifyCompiling()
 {
+    ASSERT(m_stage == JITPlanStage::Preparing);
+    endSignpost();
     m_stage = JITPlanStage::Compiling;
+    beginSignpost();
 }
 
 void JITPlan::notifyReady()
 {
+    ASSERT(m_stage == JITPlanStage::Compiling);
+    endSignpost();
     m_stage = JITPlanStage::Ready;
+    beginSignpost();
 }
 
 auto JITPlan::tier() const -> Tier
@@ -175,47 +183,54 @@ bool JITPlan::reportCompileTimes() const
         || (Options::reportFTLCompileTimes() && isFTL());
 }
 
-static inline void* signpostId(JITPlan& plan, JITPlan::Signpost signpost)
+static inline void* signpostId(JITPlan& plan)
 {
     uintptr_t id = std::bit_cast<uintptr_t>(&plan);
-    unsigned sp = static_cast<unsigned>(signpost);
+    unsigned stage = static_cast<unsigned>(plan.stage());
     ASSERT(!(id & 0xf));
-    ASSERT(!(sp & ~0xfu));
-    id |= sp;
+    ASSERT(!(stage & ~0xfu));
+    id |= stage;
     return std::bit_cast<void*>(id);
 }
 
-void JITPlan::beginSignpostImpl(Signpost signpost)
+void JITPlan::beginSignpostImpl()
 {
     ASSERT(Options::useCompilerSignpost() && !m_signpostMsg.isNull());
-    auto id = signpostId(*this, signpost);
-    switch (signpost) {
-    case Signpost::Queued:
-        WTFBeginSignpost(id, JSCJITCompilerQueued, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
+    auto id = signpostId(*this);
+    switch (m_stage) {
+    case JITPlanStage::Preparing:
+        WTFBeginSignpost(id, JSCJITPlanQueued, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
-    case Signpost::Compiling:
+    case JITPlanStage::Compiling:
         WTFBeginSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
-    case Signpost::Ready:
-        WTFBeginSignpost(id, JSCJITCompilerReady, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
+    case JITPlanStage::Ready:
+        WTFBeginSignpost(id, JSCJITPlanReady, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
         break;
+    case JITPlanStage::Canceled:
+        RELEASE_ASSERT_NOT_REACHED();
     };
 }
 
-void JITPlan::endSignpostImpl(Signpost signpost)
+void JITPlan::endSignpostImpl(JITPlan::SignpostDetail detail)
 {
     ASSERT(Options::useCompilerSignpost() && !m_signpostMsg.isNull());
-    auto id = signpostId(*this, signpost);
-    switch (signpost) {
-    case Signpost::Queued:
-        WTFEndSignpost(id, JSCJITCompilerQueued, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
+    auto id = signpostId(*this);
+    const char* detailStr = "";
+    if (detail == JITPlan::SignpostDetail::Canceled)
+        detailStr = "Canceled";
+    switch (m_stage) {
+    case JITPlanStage::Preparing:
+        WTFEndSignpost(id, JSCJITPlanQueued, "%" PUBLIC_LOG_STRING " %" PUBLIC_LOG_STRING, m_signpostMsg.data(), detailStr);
         break;
-    case Signpost::Compiling:
-        WTFEndSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
+    case JITPlanStage::Compiling:
+        WTFEndSignpost(id, JSCJITCompiler, "%" PUBLIC_LOG_STRING " %" PUBLIC_LOG_STRING, m_signpostMsg.data(), detailStr);
         break;
-    case Signpost::Ready:
-        WTFEndSignpost(id, JSCJITCompilerReady, "%" PUBLIC_LOG_STRING, m_signpostMsg.data());
+    case JITPlanStage::Ready:
+        WTFEndSignpost(id, JSCJITPlanReady, "%" PUBLIC_LOG_STRING " %" PUBLIC_LOG_STRING, m_signpostMsg.data(), detailStr);
         break;
+    case JITPlanStage::Canceled:g
+        RELEASE_ASSERT_NOT_REACHED();
     };
 }
 

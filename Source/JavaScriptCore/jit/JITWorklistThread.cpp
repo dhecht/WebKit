@@ -117,7 +117,6 @@ auto JITWorklistThread::work() -> WorkResult
         m_state = State::Compiling;
         m_plan->notifyCompiling();
     }
-    m_plan->endSignpost(JITPlan::Signpost::Queued);
 
     dataLogLnIf(Options::verboseCompilationQueue(), m_worklist, ": Compiling ", m_plan->key(), " asynchronously");
 
@@ -127,9 +126,7 @@ auto JITWorklistThread::work() -> WorkResult
         RELEASE_ASSERT_NOT_REACHED();
     }
 
-    m_plan->beginSignpost(JITPlan::Signpost::Compiling);
     m_plan->compileInThread(this);
-    m_plan->endSignpost(JITPlan::Signpost::Compiling);
 
     if (m_plan->stage() != JITPlanStage::Canceled) {
         if (m_plan->vm()->heap.worldIsStopped()) {
@@ -138,15 +135,11 @@ auto JITWorklistThread::work() -> WorkResult
         }
     }
 
-    m_plan->beginSignpost(JITPlan::Signpost::Ready);
     {
         Locker locker { *m_worklist.m_lock };
         m_state = State::NotCompiling;
-        if (m_plan->stage() == JITPlanStage::Canceled) {
-            locker.unlockEarly();
-            m_plan->endSignpost(JITPlan::Signpost::Ready);
+        if (m_plan->stage() == JITPlanStage::Canceled)
             return WorkResult::Continue;
-        }
 
         m_plan->notifyReady();
 
