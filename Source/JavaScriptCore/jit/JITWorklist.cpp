@@ -44,6 +44,7 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(JITWorklist);
 JITWorklist::JITWorklist()
     : m_lock(Box<Lock>::create())
     , m_planEnqueued(AutomaticThreadCondition::create())
+    , m_ftlPlanEnqueued(AutomaticThreadCondition::create())
 {
     m_maximumNumberOfConcurrentCompilationsPerTier = {
         Options::numberOfWorklistThreads(),
@@ -53,7 +54,9 @@ JITWorklist::JITWorklist()
 
     Locker locker { *m_lock };
     for (unsigned i = 0; i < Options::numberOfWorklistThreads(); ++i)
-        m_threads.append(*new JITWorklistThread(locker, *this));
+        m_threads.append(*new JITWorklistThread(locker, *this, m_planEnqueued.copyRef(), false));
+    for (unsigned i = 0; i < Options::numberOfFTLCompilerThreads(); ++i)
+        m_ftlThreads.append(*new JITWorklistThread(locker, *this, m_ftlPlanEnqueued.copyRef(), true));
 }
 
 JITWorklist::~JITWorklist()
@@ -107,10 +110,14 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
     m_plans.add(plan->key(), plan.copyRef());
     m_queues[tier].append(WTFMove(plan));
 
-    if (m_numberOfActiveThreads < Options::numberOfWorklistThreads()
-        && m_ongoingCompilationsPerTier[tier] < m_maximumNumberOfConcurrentCompilationsPerTier[tier])
-        m_planEnqueued->notifyOne(locker);
-
+    if (static_cast<JITPlan::Tier>(tier) == JITPlan::Tier::FTL) {
+        if (m_numberOfActiveFTLThreads < Options::numberOfFTLCompilerThreads())
+            m_ftlPlanEnqueued->notifyOne(locker);
+    } else {
+        if (m_numberOfActiveThreads < Options::numberOfWorklistThreads()
+            && m_ongoingCompilationsPerTier[tier] < m_maximumNumberOfConcurrentCompilationsPerTier[tier])
+            m_planEnqueued->notifyOne(locker);
+    }
     return CompilationDeferred;
 }
 
@@ -136,6 +143,10 @@ void JITWorklist::suspendAllThreads() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
         if (!thread->m_rightToRun.tryLock())
             busyThreads.append(thread.copyRef());
     }
+    for (auto& thread : m_ftlThreads) {
+        if (!thread->m_rightToRun.tryLock())
+            busyThreads.append(thread.copyRef());
+    }
     for (auto& thread : busyThreads)
         thread->m_rightToRun.lock();
 }
@@ -143,6 +154,8 @@ void JITWorklist::suspendAllThreads() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
 void JITWorklist::resumeAllThreads() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
 {
     for (auto& thread : m_threads)
+        thread->m_rightToRun.unlock();
+    for (auto& thread : m_ftlThreads)
         thread->m_rightToRun.unlock();
     m_suspensionLock.unlock();
 }
@@ -264,6 +277,16 @@ void JITWorklist::removeDeadPlans(VM& vm)
 
     // No locking needed for this part, see comment in visitWeakReferences().
     for (auto& thread : m_threads) {
+        Safepoint* safepoint = thread->m_safepoint;
+        if (!safepoint)
+            continue;
+        if (safepoint->vm() != &vm)
+            continue;
+        if (safepoint->isKnownToBeLiveAfterGC())
+            continue;
+        safepoint->cancel();
+    }
+    for (auto& thread : m_ftlThreads) {
         Safepoint* safepoint = thread->m_safepoint;
         if (!safepoint)
             continue;

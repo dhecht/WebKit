@@ -59,9 +59,10 @@ private:
     JITPlan::Tier m_tier;
 };
 
-JITWorklistThread::JITWorklistThread(const AbstractLocker& locker, JITWorklist& worklist)
-    : AutomaticThread(locker, worklist.m_lock, worklist.m_planEnqueued.copyRef(), ThreadType::Compiler)
+JITWorklistThread::JITWorklistThread(const AbstractLocker& locker, JITWorklist& worklist, Ref<AutomaticThreadCondition>&& cond, bool isFTL)
+    : AutomaticThread(locker, worklist.m_lock, WTFMove(cond), ThreadType::Compiler)
     , m_worklist(worklist)
+    , m_isFTL(isFTL)
 {
 }
 
@@ -77,10 +78,17 @@ ASCIILiteral JITWorklistThread::name() const
 auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
 {
     for (unsigned i = 0; i < static_cast<unsigned>(JITPlan::Tier::Count); ++i) {
+        if (m_isFTL) {
+            if (static_cast<JITPlan::Tier>(i) != JITPlan::Tier::FTL)
+                continue;
+        } else {
+            if (static_cast<JITPlan::Tier>(i) == JITPlan::Tier::FTL)
+                continue;
+        }
+
         auto& queue = m_worklist.m_queues[i];
         if (queue.isEmpty())
             continue;
-
 
         if (m_worklist.m_ongoingCompilationsPerTier[i] >= m_worklist.m_maximumNumberOfConcurrentCompilationsPerTier[i])
             continue;
@@ -97,15 +105,23 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
         RELEASE_ASSERT(m_plan->stage() == JITPlanStage::Preparing);
         m_worklist.m_ongoingCompilationsPerTier[i]++;
         if (!m_isActive) {
-            m_worklist.m_numberOfActiveThreads++;
+            if (m_isFTL)
+                m_worklist.m_numberOfActiveFTLThreads++;
+            else
+                m_worklist.m_numberOfActiveThreads++;
             m_isActive = true;
         }
         return PollResult::Work;
     }
 
     if (m_isActive) {
-        RELEASE_ASSERT(m_worklist.m_numberOfActiveThreads);
-        m_worklist.m_numberOfActiveThreads--;
+        if (m_isFTL) {
+            RELEASE_ASSERT(m_worklist.m_numberOfActiveFTLThreads);
+            m_worklist.m_numberOfActiveFTLThreads--;
+        } else {
+            RELEASE_ASSERT(m_worklist.m_numberOfActiveThreads);
+            m_worklist.m_numberOfActiveThreads--;
+        }
         m_isActive = false;
     }
     return PollResult::Wait;

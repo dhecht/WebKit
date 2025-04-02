@@ -100,10 +100,12 @@ private:
     void dump(const AbstractLocker&, PrintStream&) const;
 
     unsigned m_numberOfActiveThreads { 0 };
+    unsigned m_numberOfActiveFTLThreads { 0 };
     std::array<unsigned, static_cast<size_t>(JITPlan::Tier::Count)> m_ongoingCompilationsPerTier { 0, 0, 0 };
     std::array<unsigned, static_cast<size_t>(JITPlan::Tier::Count)> m_maximumNumberOfConcurrentCompilationsPerTier;
 
     Vector<Ref<JITWorklistThread>> m_threads;
+    Vector<Ref<JITWorklistThread>> m_ftlThreads;
 
     // Used to inform the thread about what work there is left to do.
     std::array<Deque<RefPtr<JITPlan>>, static_cast<size_t>(JITPlan::Tier::Count)> m_queues;
@@ -122,6 +124,8 @@ private:
     Box<Lock> m_lock;
 
     Ref<AutomaticThreadCondition> m_planEnqueued;
+    Ref<AutomaticThreadCondition> m_ftlPlanEnqueued;
+
     Condition m_planCompiledOrCancelled;
 };
 
