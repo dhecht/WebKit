@@ -60,6 +60,8 @@ Safepoint::Safepoint(JITPlan& plan, Result& result)
 Safepoint::~Safepoint()
 {
     RELEASE_ASSERT(m_didCallBegin);
+    if (m_plan.shouldCancel)
+        m_result.m_didGetCancelled = true;
     if (JITWorklistThread* thread = m_plan.thread()) {
         RELEASE_ASSERT(thread->m_safepoint == this);
         thread->m_rightToRun.lock();

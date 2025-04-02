@@ -140,6 +140,10 @@ auto JITWorklistThread::work() -> WorkResult
 
     {
         Locker locker { *m_worklist.m_lock };
+        if (m_plan->shouldCancel && m_plan->stage() != JITPlanStage::Canceled) {
+            m_worklist.m_plans.take(m_plan->key())->cancel();
+            m_worklist.m_planCompiledOrCancelled.notifyAll();
+        }
         if (m_plan->stage() == JITPlanStage::Canceled)
             return WorkResult::Continue;
 

@@ -110,7 +110,16 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
     if (m_numberOfActiveThreads < Options::numberOfWorklistThreads()
         && m_ongoingCompilationsPerTier[tier] < m_maximumNumberOfConcurrentCompilationsPerTier[tier])
         m_planEnqueued->notifyOne(locker);
-
+    else {
+        for (auto& thread: m_threads) {
+            // FIXME: m_plan write is not protected
+            JITPlan* plan = thread->m_plan.get();
+            if (plan && plan->tier() == JITPlan::Tier::FTL) {
+                plan->shouldCancel = true;
+                break;
+            }
+        }
+    }
     return CompilationDeferred;
 }
 

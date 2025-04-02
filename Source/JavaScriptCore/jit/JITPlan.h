@@ -123,6 +123,7 @@ public:
             endSignpostImpl(detail);
     }
 
+    bool shouldCancel { false };
 protected:
     bool computeCompileTimes() const;
     bool reportCompileTimes() const;

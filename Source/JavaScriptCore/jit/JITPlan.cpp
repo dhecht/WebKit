@@ -268,7 +268,10 @@ void JITPlan::compileInThread(JITWorklistThread* thread)
 #endif // ENABLE(DFG_JIT)
 
     CompilationPath path = compileInThreadImpl();
-    RELEASE_ASSERT((path == CancelPath) == (m_stage == JITPlanStage::Canceled));
+    if (shouldCancel)
+        RELEASE_ASSERT_IMPLIES(m_stage == JITPlanStage::Canceled, path == CancelPath);
+    else
+        RELEASE_ASSERT((path == CancelPath) == (m_stage == JITPlanStage::Canceled));
 
     if (LIKELY(!computeCompileTimes))
         return;
