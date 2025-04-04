@@ -46,14 +46,14 @@ JITWorklist::JITWorklist()
     , m_planEnqueued(AutomaticThreadCondition::create())
 {
     m_maximumNumberOfConcurrentCompilationsPerTier = {
-        Options::numberOfWorklistThreads(),
+        Options::numberOfBaselineCompilerThreads(),
         Options::numberOfDFGCompilerThreads(),
         Options::numberOfFTLCompilerThreads(),
     };
 
     Locker locker { *m_lock };
-    for (unsigned i = 0; i < Options::numberOfWorklistThreads(); ++i)
-        m_threads.append(*new JITWorklistThread(locker, *this));
+    for (unsigned i = 0; i < Options::maxNumberOfWorklistThreads(); ++i)
+        m_threads.append(*new JITWorklistThread(locker, *this, i));
 }
 
 JITWorklist::~JITWorklist()
@@ -79,6 +79,29 @@ JITWorklist& JITWorklist::ensureGlobalWorklist()
             theGlobalJITWorklist = worklist;
         });
     return *theGlobalJITWorklist;
+}
+
+unsigned JITWorklist::wakeThreads(const AbstractLocker& locker)
+{
+    unsigned numEligiblePlans = 0;
+    for (unsigned tier = 0; tier < static_cast<unsigned>(JITPlan::Tier::Count); tier++) {
+        unsigned plansForTier = m_ongoingCompilationsPerTier[tier] + m_queues[tier].size();
+        numEligiblePlans += std::max(plansForTier, m_maximumNumberOfConcurrentCompilationsPerTier[tier]);
+    }
+    unsigned load = numEligiblePlans;
+    unsigned targetNumThreads = (load + Options::worklistLoadFactor() - 1) / Options::worklistLoadFactor();
+    targetNumThreads = std::min(targetNumThreads, Options::maxNumberOfWorklistThreads());
+
+    while (m_numberOfActiveThreads < targetNumThreads) {
+        m_planEnqueued->notifyOne(locker);
+        m_numberOfActiveThreads++;
+    }
+    return targetNumThreads;
+}
+
+bool JITWorklist::threadShouldWait(const AbstractLocker&)
+{
+    return false;
 }
 
 CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
@@ -107,10 +130,13 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
     m_plans.add(plan->key(), plan.copyRef());
     m_queues[tier].append(WTFMove(plan));
 
-    if (m_numberOfActiveThreads < Options::numberOfWorklistThreads()
-        && m_ongoingCompilationsPerTier[tier] < m_maximumNumberOfConcurrentCompilationsPerTier[tier])
+    if (m_numberOfActiveThreads < Options::minNumberOfWorklistThreads()) {
         m_planEnqueued->notifyOne(locker);
-
+        m_numberOfActiveThreads++;
+    } else if (enqueueWakes) {
+        wakeThreads(locker);
+        ASSERT(m_numberOfActiveThreads >= 1);
+    }
     return CompilationDeferred;
 }
 

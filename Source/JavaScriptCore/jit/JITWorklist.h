@@ -48,6 +48,10 @@ class JITWorklist {
     friend class JITWorklistThread;
 
 public:
+    static constexpr bool enqueueWakes = true;
+    static constexpr bool pollWakes = false;
+    static constexpr bool pollAggressiveWait = false;
+
     ~JITWorklist();
 
     static JITWorklist& ensureGlobalWorklist();
@@ -87,6 +91,9 @@ public:
 
 private:
     JITWorklist();
+
+    unsigned wakeThreads(const AbstractLocker&);
+    bool threadShouldWait(const AbstractLocker&);
 
     size_t queueLength(const AbstractLocker&) const;
 
