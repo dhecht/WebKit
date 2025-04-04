@@ -88,6 +88,9 @@ public:
 private:
     JITWorklist();
 
+    unsigned wakeThreads(const AbstractLocker&);
+    bool threadShouldWait(const AbstractLocker&);
+
     size_t queueLength(const AbstractLocker&) const;
 
     void waitUntilAllPlansForVMAreReady(VM&);

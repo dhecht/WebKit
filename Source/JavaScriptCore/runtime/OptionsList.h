@@ -272,7 +272,12 @@ bool hasCapacityToUseLargeGigacage();
     v(Unsigned, maxDFGNodesInBasicBlockForPreciseAnalysis, 20000, Normal, "Disable precise but costly analysis and give conservative results if the number of DFG nodes in a block exceeds this threshold"_s) \
     \
     v(Bool, useConcurrentJIT, true, Normal, "allows the DFG / FTL compilation in threads other than the executing JS thread"_s) \
-    v(Unsigned, numberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
+    v(Unsigned, worklistLoadFactor, 2, Normal, nullptr) \
+    v(Bool, worklistPollWakes, false, Normal, nullptr) \
+    v(Bool, worklistPollAggressiveWait, false, Normal, nullptr) \
+    v(Unsigned, minNumberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
+    v(Unsigned, maxNumberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
+    v(Unsigned, numberOfBaselineCompilerThreads, computeNumberOfWorkerThreads(3, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfDFGCompilerThreads, computeNumberOfWorkerThreads(3, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfFTLCompilerThreads, computeNumberOfWorkerThreads(MAXIMUM_NUMBER_OF_FTL_COMPILER_THREADS, 2) - 1, Normal, nullptr) \
     v(Unsigned, numberOfWasmCompilerThreads, computeNumberOfWorkerThreads(INT32_MAX, 2) - 1, Normal, nullptr) \

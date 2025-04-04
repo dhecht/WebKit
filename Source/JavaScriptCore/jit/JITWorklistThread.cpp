@@ -59,9 +59,10 @@ private:
     JITPlan::Tier m_tier;
 };
 
-JITWorklistThread::JITWorklistThread(const AbstractLocker& locker, JITWorklist& worklist)
+JITWorklistThread::JITWorklistThread(const AbstractLocker& locker, JITWorklist& worklist, unsigned id)
     : AutomaticThread(locker, worklist.m_lock, worklist.m_planEnqueued.copyRef(), ThreadType::Compiler)
     , m_worklist(worklist)
+    , m_id(id)
 {
 }
 
@@ -76,11 +77,18 @@ ASCIILiteral JITWorklistThread::name() const
 
 auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
 {
+    if (Options::worklistPollWakes()) {
+        unsigned idealNumberOfThreads = m_worklist.wakeThreads(locker);
+        if (Options::worklistPollAggressiveWait() && m_id >= idealNumberOfThreads) {
+            RELEASE_ASSERT(m_worklist.m_numberOfActiveThreads);
+            m_worklist.m_numberOfActiveThreads--;
+            return PollResult::Wait;
+        }
+    }
     for (unsigned i = 0; i < static_cast<unsigned>(JITPlan::Tier::Count); ++i) {
         auto& queue = m_worklist.m_queues[i];
         if (queue.isEmpty())
             continue;
-
         if (m_worklist.m_ongoingCompilationsPerTier[i] >= m_worklist.m_maximumNumberOfConcurrentCompilationsPerTier[i])
             continue;
 
