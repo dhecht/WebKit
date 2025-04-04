@@ -88,8 +88,8 @@ unsigned JITWorklist::wakeThreads(const AbstractLocker& locker)
     for (unsigned tier = 0; tier < static_cast<unsigned>(JITPlan::Tier::Count); tier++) {
         unsigned loadForTier = m_ongoingCompilationsPerTier[tier] + m_queues[tier].size();
         unsigned maxThreadsUsedForTier = std::min(loadForTier, m_maximumNumberOfConcurrentCompilationsPerTier[tier]);
-        load += loadForTier;
         maxThreads += maxThreadsUsedForTier;
+        load += loadForTier;
     }
     maxThreads = std::min(maxThreads, Options::maxNumberOfWorklistThreads());
 
