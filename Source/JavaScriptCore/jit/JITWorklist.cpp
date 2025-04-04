@@ -83,14 +83,18 @@ JITWorklist& JITWorklist::ensureGlobalWorklist()
 
 unsigned JITWorklist::wakeThreads(const AbstractLocker& locker)
 {
-    unsigned numEligiblePlans = 0;
+    unsigned load = 0;
+    unsigned maxThreads = 0;
     for (unsigned tier = 0; tier < static_cast<unsigned>(JITPlan::Tier::Count); tier++) {
-        unsigned plansForTier = m_ongoingCompilationsPerTier[tier] + m_queues[tier].size();
-        numEligiblePlans += std::max(plansForTier, m_maximumNumberOfConcurrentCompilationsPerTier[tier]);
+        unsigned loadForTier = m_ongoingCompilationsPerTier[tier] + m_queues[tier].size();
+        unsigned maxThreadsUsedForTier = std::min(loadForTier, m_maximumNumberOfConcurrentCompilationsPerTier[tier]);
+        load += loadForTier;
+        maxThreads += maxThreadsUsedForTier;
     }
-    unsigned load = numEligiblePlans;
+    maxThreads = std::min(maxThreads, Options::maxNumberOfWorklistThreads());
+
     unsigned targetNumThreads = (load + Options::worklistLoadFactor() - 1) / Options::worklistLoadFactor();
-    targetNumThreads = std::min(targetNumThreads, Options::maxNumberOfWorklistThreads());
+    targetNumThreads = std::min(targetNumThreads, maxThreads);
 
     while (m_numberOfActiveThreads < targetNumThreads) {
         m_planEnqueued->notifyOne(locker);
@@ -133,7 +137,7 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
     if (m_numberOfActiveThreads < Options::minNumberOfWorklistThreads()) {
         m_planEnqueued->notifyOne(locker);
         m_numberOfActiveThreads++;
-    } else if (enqueueWakes) {
+    } else if (!pollWakes) {
         wakeThreads(locker);
         ASSERT(m_numberOfActiveThreads >= 1);
     }
