@@ -74,7 +74,7 @@ ASCIILiteral JITWorklistThread::name() const
 #endif
 }
 
-auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
+auto JITWorklistThread::poll(const AbstractLocker&) -> PollResult
 {
     for (unsigned i = 0; i < static_cast<unsigned>(JITPlan::Tier::Count); ++i) {
         auto& queue = m_worklist.m_queues[i];
@@ -84,7 +84,9 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
         if (m_worklist.m_ongoingCompilationsPerTier[i] >= m_worklist.m_maximumNumberOfConcurrentCompilationsPerTier[i])
             continue;
 
-        m_plan = queue.takeFirst();
+        auto elem = queue.dequeue();
+        m_plan = WTFMove(elem.m_plan);
+#if 0
         if (UNLIKELY(!m_plan)) {
             if (Options::verboseCompilationQueue()) {
                 m_worklist.dump(locker, WTF::dataFile());
@@ -92,7 +94,7 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
             }
             return PollResult::Stop;
         }
-
+#endif
         RELEASE_ASSERT(m_plan->stage() == JITPlanStage::Preparing);
         m_worklist.m_ongoingCompilationsPerTier[i]++;
         return PollResult::Work;

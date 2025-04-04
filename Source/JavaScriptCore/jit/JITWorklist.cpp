@@ -105,7 +105,7 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
     unsigned tier = static_cast<unsigned>(plan->tier());
     ASSERT(m_plans.find(plan->key()) == m_plans.end());
     m_plans.add(plan->key(), plan.copyRef());
-    m_queues[tier].append(WTFMove(plan));
+    m_queues[tier].enqueue(QueueElement(WTFMove(plan)));
 
     if (m_numberOfActiveThreads < Options::numberOfWorklistThreads()
         && m_ongoingCompilationsPerTier[tier] < m_maximumNumberOfConcurrentCompilationsPerTier[tier]) {
@@ -375,11 +375,11 @@ void JITWorklist::removeMatchingPlansForVM(VM& vm, const MatchFunction& matches)
     for (JITCompilationKey key : deadPlanKeys)
         m_plans.take(key)->cancel();
     for (auto& queue : m_queues) {
-        Deque<RefPtr<JITPlan>> newQueue;
+        Queue newQueue;
         while (!queue.isEmpty()) {
-            RefPtr<JITPlan> plan = queue.takeFirst();
-            if (plan->stage() != JITPlanStage::Canceled)
-                newQueue.append(plan);
+            auto elem = queue.dequeue();
+            if (elem.plan()->stage() != JITPlanStage::Canceled)
+                newQueue.enqueue(elem);
         }
         queue.swap(newQueue);
     }

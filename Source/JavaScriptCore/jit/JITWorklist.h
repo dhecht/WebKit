@@ -27,11 +27,12 @@
 
 #if ENABLE(JIT)
 
+#include "CodeBlock.h"
 #include "JITPlan.h"
 #include "JITWorklistThread.h"
-#include <wtf/Deque.h>
 #include <wtf/Lock.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/PriorityQueue.h>
 #include <wtf/RefPtr.h>
 #include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
@@ -105,8 +106,31 @@ private:
 
     Vector<Ref<JITWorklistThread>> m_threads;
 
+    class QueueElement {
+    public:
+        QueueElement(RefPtr<JITPlan>&& plan)
+        : m_plan(WTFMove(plan))
+        , m_cost(m_plan->codeBlock()->bytecodeCost())
+        {
+            ASSERT(m_cost);
+        }
+
+        JITPlan* plan()
+        {
+            return m_plan.get();
+        }
+
+        static bool isHigherPriority(const QueueElement& left, const QueueElement& right)
+        {
+            return left.m_cost < right.m_cost;
+        }
+
+        RefPtr<JITPlan> m_plan;
+        unsigned m_cost;
+    };
+    using Queue = PriorityQueue<QueueElement, QueueElement::isHigherPriority, 10>;
     // Used to inform the thread about what work there is left to do.
-    std::array<Deque<RefPtr<JITPlan>>, static_cast<size_t>(JITPlan::Tier::Count)> m_queues;
+    std::array<Queue, static_cast<size_t>(JITPlan::Tier::Count)> m_queues;
 
     // Used to answer questions about the current state of a code block. This
     // is particularly great for the cti_optimize OSR slow path, which wants

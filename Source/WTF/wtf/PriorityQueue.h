@@ -99,6 +99,11 @@ public:
         return true;
     }
 
+    void swap(PriorityQueue& other)
+    {
+        m_buffer.swap(other.m_buffer);
+    }
+
 protected:
     static inline size_t parentOf(size_t location) { ASSERT(location); return (location - 1) / 2; }
     static constexpr size_t leftChildOf(size_t location) { return location * 2 + 1; }
