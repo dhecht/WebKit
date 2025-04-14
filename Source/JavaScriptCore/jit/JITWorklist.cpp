@@ -137,7 +137,7 @@ CompilationResult JITWorklist::enqueue(Ref<JITPlan> plan)
     if (m_numberOfActiveThreads < Options::minNumberOfWorklistThreads()) {
         m_planEnqueued->notifyOne(locker);
         m_numberOfActiveThreads++;
-    } else if (!pollWakes) {
+    } else if (!Options::worklistPollWakes()) {
         wakeThreads(locker);
         ASSERT(m_numberOfActiveThreads >= 1);
     }

@@ -48,8 +48,7 @@ class JITWorklist {
     friend class JITWorklistThread;
 
 public:
-    static constexpr bool pollWakes = true;
-    static constexpr bool pollAggressiveWait = true;
+    static constexpr bool pollAggressiveWait = false;
 
     ~JITWorklist();
 

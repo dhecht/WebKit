@@ -77,7 +77,7 @@ ASCIILiteral JITWorklistThread::name() const
 
 auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
 {
-    if (m_worklist.pollWakes) {
+    if (Options::worklistPollWakes()) {
         unsigned idealNumberOfThreads = m_worklist.wakeThreads(locker);
         if (m_worklist.pollAggressiveWait && m_id >= idealNumberOfThreads) {
             RELEASE_ASSERT(m_worklist.m_numberOfActiveThreads);

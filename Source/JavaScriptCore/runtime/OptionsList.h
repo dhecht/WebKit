@@ -271,6 +271,7 @@ bool hasCapacityToUseLargeGigacage();
     \
     v(Bool, useConcurrentJIT, true, Normal, "allows the DFG / FTL compilation in threads other than the executing JS thread"_s) \
     v(Unsigned, worklistLoadFactor, 2, Normal, nullptr) \
+    v(Bool, worklistPollWakes, false, Normal, nullptr) \
     v(Unsigned, minNumberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
     v(Unsigned, maxNumberOfWorklistThreads, computeNumberOfWorkerThreads(3, 2), Normal, nullptr) \
     v(Unsigned, numberOfBaselineCompilerThreads, computeNumberOfWorkerThreads(3, 2) - 1, Normal, nullptr) \
