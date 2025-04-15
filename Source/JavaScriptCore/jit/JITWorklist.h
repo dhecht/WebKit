@@ -48,8 +48,6 @@ class JITWorklist {
     friend class JITWorklistThread;
 
 public:
-    static constexpr bool pollAggressiveWait = false;
-
     ~JITWorklist();
 
     static JITWorklist& ensureGlobalWorklist();

@@ -79,7 +79,7 @@ auto JITWorklistThread::poll(const AbstractLocker& locker) -> PollResult
 {
     if (Options::worklistPollWakes()) {
         unsigned idealNumberOfThreads = m_worklist.wakeThreads(locker);
-        if (m_worklist.pollAggressiveWait && m_id >= idealNumberOfThreads) {
+        if (Options::worklistPollAggressiveWait() && m_id >= idealNumberOfThreads) {
             RELEASE_ASSERT(m_worklist.m_numberOfActiveThreads);
             m_worklist.m_numberOfActiveThreads--;
             return PollResult::Wait;
