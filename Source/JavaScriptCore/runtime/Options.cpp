@@ -589,12 +589,13 @@ static void overrideDefaults()
 
     Options::minNumberOfWorklistThreads() = std::min<unsigned>(1, kernTCSMAwareNumberOfProcessorCores());
     Options::maxNumberOfWorklistThreads() = std::min<unsigned>(6, kernTCSMAwareNumberOfProcessorCores());
-    Options::worklistLoadFactor() = 1;
     Options::numberOfBaselineCompilerThreads() = std::min<unsigned>(3, kernTCSMAwareNumberOfProcessorCores());
     Options::numberOfDFGCompilerThreads() = std::min<unsigned>(6, kernTCSMAwareNumberOfProcessorCores());
     Options::numberOfFTLCompilerThreads() = std::min<unsigned>(6, kernTCSMAwareNumberOfProcessorCores());
-    Options::worklistPollWakes() = false;
-    Options::worklistPollAggressiveWait() = false;
+    Options::worklistLoadFactor() = 4;
+    Options::worklistBaselineLoadWeight() = 1;
+    Options::worklistDFGLoadWeight() = 2;
+    Options::worklistFTLLoadWeight() = 4;
 #endif
 
 #if OS(LINUX) && CPU(ARM)

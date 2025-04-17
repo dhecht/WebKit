@@ -43,7 +43,7 @@ class JITWorklistThread final : public AutomaticThread {
     friend class JITWorklist;
 
 public:
-    JITWorklistThread(const AbstractLocker&, JITWorklist&, unsigned id);
+    JITWorklistThread(const AbstractLocker&, JITWorklist&);
 
     ASCIILiteral name() const final;
 
@@ -61,7 +61,6 @@ private:
     JITWorklist& m_worklist;
     RefPtr<JITPlan> m_plan { nullptr };
     Safepoint* m_safepoint { nullptr };
-    unsigned m_id;
 };
 
 } // namespace JSC

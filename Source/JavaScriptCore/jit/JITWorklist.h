@@ -88,8 +88,7 @@ public:
 private:
     JITWorklist();
 
-    unsigned wakeThreads(const AbstractLocker&);
-    bool threadShouldWait(const AbstractLocker&);
+    void wakeThreads(const AbstractLocker&, unsigned enqueuedTier);
 
     size_t queueLength(const AbstractLocker&) const;
 
