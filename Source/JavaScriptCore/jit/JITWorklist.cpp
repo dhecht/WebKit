@@ -50,6 +50,11 @@ JITWorklist::JITWorklist()
         Options::numberOfDFGCompilerThreads(),
         Options::numberOfFTLCompilerThreads(),
     };
+    m_loadWeightsPerTier = {
+        Options::worklistBaselineLoadWeight(),
+        Options::worklistDFGLoadWeight(),
+        Options::worklistFTLLoadWeight(),
+    };
 
     Locker locker { *m_lock };
     for (unsigned i = 0; i < Options::maxNumberOfWorklistThreads(); ++i)
@@ -87,15 +92,18 @@ void JITWorklist::wakeThreads(const AbstractLocker& locker, unsigned enqueuedTie
 
     if (m_numberOfActiveThreads < Options::minNumberOfWorklistThreads()
         && m_ongoingCompilationsPerTier[enqueuedTier] < m_maximumNumberOfConcurrentCompilationsPerTier[enqueuedTier]) {
-        // FIXME: a thread might not have a plan
+        // FIXME: a thread between work and poll won't have a plan and so is available, rather than waking another
         targetNumThreads = m_numberOfActiveThreads + 1;
     } else {
         unsigned load = 0;
         unsigned maxThreads = 0;
         for (unsigned tier = 0; tier < static_cast<unsigned>(JITPlan::Tier::Count); tier++) {
-            unsigned loadForTier = m_ongoingCompilationsPerTier[tier] + m_queues[tier].size();
-            unsigned maxThreadsUsedForTier = std::min(loadForTier, m_maximumNumberOfConcurrentCompilationsPerTier[tier]);
+            unsigned plansForTier = m_ongoingCompilationsPerTier[tier] + m_queues[tier].size();
+
+            unsigned maxThreadsUsedForTier = std::min(plansForTier, m_maximumNumberOfConcurrentCompilationsPerTier[tier]);
             maxThreads += maxThreadsUsedForTier;
+
+            unsigned loadForTier = plansForTier * m_loadWeightsPerTier[tier];
             load += loadForTier;
         }
         maxThreads = std::min(maxThreads, Options::maxNumberOfWorklistThreads());
