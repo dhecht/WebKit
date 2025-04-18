@@ -97,6 +97,8 @@ private:
 
     State removeAllReadyPlansForVM(VM&, Vector<RefPtr<JITPlan>, 8>&, JITCompilationKey);
 
+    State prioritizePlan(const AbstractLocker&, JITCompilationKey);
+
     void dump(const AbstractLocker&, PrintStream&) const;
 
     unsigned m_numberOfActiveThreads { 0 };

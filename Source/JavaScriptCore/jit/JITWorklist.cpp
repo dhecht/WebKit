@@ -150,16 +150,36 @@ void JITWorklist::resumeAllThreads() WTF_IGNORES_THREAD_SAFETY_ANALYSIS
     m_suspensionLock.unlock();
 }
 
+auto JITWorklist::prioritizePlan(const AbstractLocker&, JITCompilationKey key) -> State
+{
+    const auto& iter = m_plans.find(key);
+    if (iter == m_plans.end())
+        return NotKnown;
+
+    RefPtr<JITPlan>& plan = iter->value;
+    if (plan->stage() == JITPlanStage::Ready)
+        return Compiled;
+
+    if (plan->stage() == JITPlanStage::Preparing) {
+        auto tier = static_cast<unsigned>(plan->tier());
+        auto& queue = m_queues[tier];
+        auto queueIter = queue.findIf([plan] (RefPtr<JITPlan> p) {
+            return p == plan;
+        });
+        // Not found means the compiler thread is between poll() and work() for this plan.
+        if (queueIter != queue.end())
+            queue.bubble(queueIter);
+    }
+    return Compiling;
+}
+
 auto JITWorklist::compilationState(VM& vm, JITCompilationKey key) -> State
 {
     if (!vm.numberOfActiveJITPlans())
         return NotKnown;
 
     Locker locker { *m_lock };
-    const auto& iter = m_plans.find(key);
-    if (iter == m_plans.end())
-        return NotKnown;
-    return iter->value->stage() == JITPlanStage::Ready ? Compiled : Compiling;
+    return prioritizePlan(locker, key);
 }
 
 auto JITWorklist::completeAllReadyPlansForVM(VM& vm, JITCompilationKey requestedKey) -> State
@@ -352,9 +372,7 @@ JITWorklist::State JITWorklist::removeAllReadyPlansForVM(VM& vm, Vector<RefPtr<J
     if (requestedKey) {
         if (isCompiled)
             return Compiled;
-
-        if (m_plans.contains(requestedKey))
-            return Compiling;
+        return prioritizePlan(locker, requestedKey);
     }
     return NotKnown;
 }

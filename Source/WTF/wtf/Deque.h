@@ -96,6 +96,9 @@ public:
     template<typename Func> size_t removeAllMatching(const Func&);
     template<typename Func> bool removeFirstMatching(const Func&);
 
+    // Bubble one position towards begin() unless the element is at begin() already.
+    void bubble(iterator&);
+
     // This is a priority enqueue. The callback is given a value, and if it returns true, then this
     // will put the appended value before that value. It will keep bubbling until the callback returns
     // false or the value ends up at the head of the queue.
@@ -594,6 +597,22 @@ inline bool Deque<T, inlineCapacity>::removeFirstMatching(const Func& func)
         }
     }
     return false;
+}
+
+template<typename T, size_t inlineCapacity>
+inline void Deque<T, inlineCapacity>::bubble(iterator& it)
+{
+    checkValidity();
+    it.checkValidity();
+    ASSERT(it != end());
+
+    if (it == begin())
+        return;
+    iterator prev = it;
+    --prev;
+    std::swap(*prev, *it);
+
+    checkValidity();
 }
 
 template<typename T, size_t inlineCapacity>
