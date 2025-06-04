@@ -70,23 +70,27 @@ bool pas_heap_config_utils_for_each_shared_page_directory_remote(
                      void* arg),
     void* arg)
 {
-    pas_basic_heap_runtime_config* runtime_config;
-    pas_basic_heap_page_caches* page_caches;
+    pas_basic_heap_runtime_config runtime_config;
+    pas_basic_heap_page_caches page_caches;
     pas_segregated_page_config_variant variant;
 
-    runtime_config = pas_enumerator_read(
-        enumerator, heap->runtime_config, sizeof(pas_basic_heap_runtime_config));
-    if (!runtime_config)
+    if (!pas_enumerator_copy_remote(
+            enumerator,
+            &runtime_config,
+            heap->runtime_config,
+            sizeof(pas_basic_heap_runtime_config)))
         return false;
 
-    page_caches = pas_enumerator_read(
-        enumerator, runtime_config->page_caches, sizeof(pas_basic_heap_page_caches));
-    if (!page_caches)
+    if (!pas_enumerator_copy_remote(
+            enumerator,
+            &page_caches,
+            runtime_config.page_caches,
+            sizeof(pas_basic_heap_page_caches)))
         return false;
 
     for (PAS_EACH_SEGREGATED_PAGE_CONFIG_VARIANT_ASCENDING(variant)) {
         if (!pas_shared_page_directory_by_size_for_each_remote(
-                pas_basic_heap_page_caches_get_shared_page_directories(page_caches, variant),
+                pas_basic_heap_page_caches_get_shared_page_directories(&page_caches, variant),
                 enumerator, callback, arg))
             return false;
     }
