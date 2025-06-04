@@ -139,6 +139,7 @@ pas_enumerator* pas_enumerator_create(pas_root* remote_root_address,
             sizeof(size_t)))
         goto fail;
 
+    /* XXX: copy only occupied size */
     compact_heap_copy = (uintptr_t)pas_enumerator_alloc_and_copy_remote(
         result,
         (void*)(compact_heap_base + compact_heap_guard_size),

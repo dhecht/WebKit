@@ -642,6 +642,8 @@ void testAllocationChaos(unsigned numThreads, unsigned numIsolatedHeaps,
             pageRanges.clear();
             readerCache.clear();
             recordedRanges.clear();
+            prevMappingAddr = NULL;
+            prevMappingSize = 0;
 
             addPageRange(
                 pas_range_create(
