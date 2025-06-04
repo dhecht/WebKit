@@ -163,7 +163,7 @@ void* pas_heap_config_utils_prepare_to_enumerate(pas_enumerator* enumerator,
     pas_page_header_table medium_page_header_table;
     pas_page_header_table marge_page_header_table;
 
-    if (!pas_enumerator_copy_remote(enumerator, &config_ptr, enumerator->root->heap_configs + my_config->kind, sizeof(const pas_heap_config*)))
+    if (!pas_enumerator_copy_remote(enumerator, &config_ptr, enumerator->root->heap_configs + my_config->kind, sizeof(pas_heap_config*)))
         return NULL;
 
     if (!pas_enumerator_copy_remote(enumerator, &root_data_ptr, &config_ptr->root_data, sizeof(pas_basic_heap_config_root_data*)))
