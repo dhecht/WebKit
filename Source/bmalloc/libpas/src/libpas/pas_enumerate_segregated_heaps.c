@@ -523,6 +523,8 @@ static bool enumerate_partial_view(pas_enumerator* enumerator,
         /* This is so weird: the size we pass is only valid when view->alloc_bits is pointing at the
         local_allocator's bits. But that's the only time that load_remote will go down the path where it needs
         to know the size. So, it's fine, I guess. */
+
+        /* XXX This could do a non compact remote read!! */
         full_alloc_bits.bits = pas_lenient_compact_unsigned_ptr_load_remote(
             enumerator, &view->alloc_bits, pas_segregated_page_config_num_alloc_bytes(*page_config));
         full_alloc_bits.word_index_begin = view->alloc_bits_offset;
@@ -634,7 +636,7 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
     pas_thread_local_cache_node* tlc_node_next;
     pas_thread_local_cache_layout_segment* tlc_layout_first_segment;
     enumeration_context context;
-    pas_baseline_allocator** baseline_allocator_table_ptr;
+    pas_baseline_allocator* baseline_allocator_table_ptr;
     size_t index;
 
     local_allocator_map_construct(&context.allocators);
@@ -671,7 +673,7 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
         if (!pas_enumerator_copy_remote(enumerator, &allocator_index_capacity, &tlc_node.cache->allocator_index_capacity, sizeof(unsigned)))
             return false;
 
-        /* Copy the full remote tlc since we'll be stashing away pointers to the individual local allocators
+        /* Copy the remote tlc since we'll be stashing away pointers to the individual local allocators
            when calling consider_allocator. */
         tlc = pas_enumerator_alloc_and_copy_remote(enumerator,
                                                    tlc_node.cache,
@@ -773,19 +775,21 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
         }
     }
 
-    baseline_allocator_table_ptr = pas_enumerator_read(enumerator,
-                                                       enumerator->root->baseline_allocator_table,
-                                                       sizeof(pas_baseline_allocator*));
-    if (!baseline_allocator_table_ptr)
+    if (!pas_enumerator_copy_remote(
+            enumerator,
+            &baseline_allocator_table_ptr,
+            enumerator->root->baseline_allocator_table,
+            sizeof(pas_baseline_allocator*)))
         return false;
 
-    if (*baseline_allocator_table_ptr) {
+    if (baseline_allocator_table_ptr) {
         pas_baseline_allocator* baseline_allocator_table;
         size_t index;
         
-        baseline_allocator_table = pas_enumerator_read(
+        /* Copy the remote baseline allocator table since consider_allocator will stash away pointers to the local allocators. */
+        baseline_allocator_table = pas_enumerator_alloc_and_copy_remote(
             enumerator,
-            *baseline_allocator_table_ptr,
+            baseline_allocator_table_ptr,
             sizeof(pas_baseline_allocator) * enumerator->root->num_baseline_allocators);
         if (!baseline_allocator_table)
             return false;
