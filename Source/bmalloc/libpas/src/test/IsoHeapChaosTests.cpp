@@ -25,6 +25,7 @@
 
 #include "TestHarness.h"
 
+#define PAS_ENABLE_ISO 1
 #if PAS_ENABLE_ISO
 
 #include "bmalloc_heap.h"
@@ -230,7 +231,7 @@ void addPageRange(pas_range range)
         cout << "libpas page range: " << reinterpret_cast<void*>(range.begin) << "..."
              << reinterpret_cast<void*>(range.end) << "\n";
     }
-    pageRanges.insert(PageRange(reinterpret_cast<void*>(range.begin), pas_range_size(range)));
+//    pageRanges.insert(PageRange(reinterpret_cast<void*>(range.begin), pas_range_size(range)));
 }
 
 bool addPageRangeCallback(pas_range range, void* arg)
@@ -286,6 +287,11 @@ struct ReaderRange {
     size_t size { 0 };
 };
 
+constexpr bool zeroPrevious = true;
+
+void* prevMappingAddr;
+size_t prevMappingSize;
+
 map<pas_enumerator_record_kind, set<RecordedRange>> recordedRanges;
 map<ReaderRange, void*> readerCache;
 
@@ -299,9 +305,17 @@ void* enumeratorReader(pas_enumerator* enumerator,
 
     ReaderRange range = ReaderRange(address, size);
 
-    auto readerCacheIter = readerCache.find(range);
-    if (readerCacheIter != readerCache.end())
-        return readerCacheIter->second;
+    if (zeroPrevious) {
+#if 1        
+        if (prevMappingAddr && prevMappingSize) {
+            memset(prevMappingAddr, 0xda, prevMappingSize);
+        }
+#endif
+    } else {
+        auto readerCacheIter = readerCache.find(range);
+        if (readerCacheIter != readerCache.end())
+            return readerCacheIter->second;
+    }
 
     void* result = pas_enumerator_allocate(enumerator, size);
         
@@ -348,6 +362,8 @@ void* enumeratorReader(pas_enumerator* enumerator,
     }
 
     readerCache[range] = result;
+    prevMappingAddr = result;
+    prevMappingSize = size;
     return result;
 }
 
@@ -391,7 +407,9 @@ void testAllocationChaos(unsigned numThreads, unsigned numIsolatedHeaps,
                          unsigned maxTotalSize, bool testEnumerator)
 {
     PAS_ASSERT(!pas_epoch_is_counter); // We don't want to run these tests in the fake scavenger mode.
-    
+   
+    if (!testEnumerator) return;
+
     if (verbose)
         cout << "Starting.\n";
     
@@ -935,6 +953,8 @@ void testAllocationChaos(unsigned numThreads, unsigned numIsolatedHeaps,
 
 void addTheTests(unsigned multiplier, bool testEnumerator)
 {
+    if (!testEnumerator) return;
+
 #if PAS_OS(LINUX)
     // FIXME: thread suspension/resume in libpas, required for enumerator tests, is missing on Linux
     // http://webkit.org/b/234071

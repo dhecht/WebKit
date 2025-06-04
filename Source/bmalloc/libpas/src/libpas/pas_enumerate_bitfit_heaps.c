@@ -84,64 +84,67 @@ static bool view_callback(pas_enumerator* enumerator,
     if (!page)
         return false;
 
-    payload_begin = pas_bitfit_page_offset_to_first_object(*page_config);
-    payload_end = pas_bitfit_page_offset_to_end_of_last_object(*page_config);
+    PAS_ENUMERATOR_PIN_REMOTE_BEGIN(enumerator, page) {
 
-    page_size = page_config->base.page_size;
-    granule_size = page_config->base.granule_size;
+        payload_begin = pas_bitfit_page_offset_to_first_object(*page_config);
+        payload_end = pas_bitfit_page_offset_to_end_of_last_object(*page_config);
 
-    if (page_size == granule_size)
-        use_counts = NULL;
-    else
-        use_counts = pas_bitfit_page_get_granule_use_counts(page, *page_config);
+        page_size = page_config->base.page_size;
+        granule_size = page_config->base.granule_size;
 
-    pas_enumerator_record_page_payload_and_meta(
-        enumerator, page_boundary, page_size, granule_size, use_counts, payload_begin, payload_end);
+        if (page_size == granule_size)
+            use_counts = NULL;
+        else
+            use_counts = pas_bitfit_page_get_granule_use_counts(page, *page_config);
 
-    if (enumerator->record_object) {
-        if (verbose)
-            pas_log("Iterating objects in bitfit page %p\n", (void*)page_boundary);
-        
-        for (offset = payload_begin;
-             offset < payload_end;
-             offset += pas_page_base_config_min_align(page_config->base)) {
-            uintptr_t second_offset;
+        pas_enumerator_record_page_payload_and_meta(
+            enumerator, page_boundary, page_size, granule_size, use_counts, payload_begin, payload_end);
 
+        if (enumerator->record_object) {
             if (verbose)
-                pas_log("offset = %zu\n", offset);
+                pas_log("Iterating objects in bitfit page %p\n", (void*)page_boundary);
             
-            if (pas_bitvector_get(pas_bitfit_page_free_bits(page),
-                                  offset >> page_config->base.min_align_shift))
-                continue;
+            for (offset = payload_begin;
+                offset < payload_end;
+                offset += pas_page_base_config_min_align(page_config->base)) {
+                uintptr_t second_offset;
 
-            for (second_offset = offset;
-                 second_offset < payload_end;
-                 second_offset += pas_page_base_config_min_align(page_config->base)) {
-                size_t second_index;
+                if (verbose)
+                    pas_log("offset = %zu\n", offset);
+                
+                if (pas_bitvector_get(pas_bitfit_page_free_bits(page),
+                                    offset >> page_config->base.min_align_shift))
+                    continue;
 
-                second_index = second_offset >> page_config->base.min_align_shift;
-                
-                if (pas_bitvector_get(pas_bitfit_page_free_bits(page), second_index)) {
-                    /* Found free bit before finding end bit; this means that this is an allocation
-                       or deallocation in progress, so assume that it's a dead object. */
-                    break;
+                for (second_offset = offset;
+                    second_offset < payload_end;
+                    second_offset += pas_page_base_config_min_align(page_config->base)) {
+                    size_t second_index;
+
+                    second_index = second_offset >> page_config->base.min_align_shift;
+                    
+                    if (pas_bitvector_get(pas_bitfit_page_free_bits(page), second_index)) {
+                        /* Found free bit before finding end bit; this means that this is an allocation
+                        or deallocation in progress, so assume that it's a dead object. */
+                        break;
+                    }
+                    
+                    if (pas_bitvector_get(pas_bitfit_page_object_end_bits(page, *page_config),
+                                        second_index)) {
+                        pas_enumerator_record(
+                            enumerator,
+                            (void*)(page_boundary + offset),
+                            second_offset - offset + pas_page_base_config_min_align(page_config->base),
+                            pas_enumerator_object_record);
+                        break;
+                    }
                 }
-                
-                if (pas_bitvector_get(pas_bitfit_page_object_end_bits(page, *page_config),
-                                      second_index)) {
-                    pas_enumerator_record(
-                        enumerator,
-                        (void*)(page_boundary + offset),
-                        second_offset - offset + pas_page_base_config_min_align(page_config->base),
-                        pas_enumerator_object_record);
-                    break;
-                }
+
+                offset = second_offset;
             }
-
-            offset = second_offset;
         }
-    }
-    
+    } PAS_ENUMERATOR_PIN_REMOTE_END(enumerator);
+
     return true;
 }
 

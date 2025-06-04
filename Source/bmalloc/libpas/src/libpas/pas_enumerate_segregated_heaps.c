@@ -346,36 +346,40 @@ static bool enumerate_exclusive_view(pas_enumerator* enumerator,
 
     page = pas_enumerator_read(
         enumerator, page, pas_segregated_page_header_size(*page_config, pas_segregated_page_exclusive_role));
+
     if (!page)
         return false;
 
-    allocator_node = local_allocator_map_get(&context->allocators, page_boundary).head;
-    if (!allocator_node)
-        allocator = NULL;
-    else {
-        /* Exclusives can only have one allocator allocating in them at a time. */
-        PAS_ASSERT_WITH_DETAIL(!allocator_node->next);
-        allocator = allocator_node->allocator;
-        PAS_ASSERT_WITH_DETAIL(allocator);
-    }
+    PAS_ENUMERATOR_PIN_REMOTE_BEGIN(enumerator, page) {
 
-    if (verbose)
-        pas_log("Have allocator = %p\n", allocator);
+        allocator_node = local_allocator_map_get(&context->allocators, page_boundary).head;
+        if (!allocator_node)
+            allocator = NULL;
+        else {
+            /* Exclusives can only have one allocator allocating in them at a time. */
+            PAS_ASSERT_WITH_DETAIL(!allocator_node->next);
+            allocator = allocator_node->allocator;
+            PAS_ASSERT_WITH_DETAIL(allocator);
+        }
 
-    record_page_payload_and_meta(
-        enumerator,
-        page_config,
-        page_boundary,
-        page,
-        data->offset_from_page_boundary_to_first_object,
-        data->offset_from_page_boundary_to_end_of_last_object);
+        if (verbose)
+            pas_log("Have allocator = %p\n", allocator);
 
-    alloc_bits.bits = pas_compact_tagged_unsigned_ptr_load_remote(enumerator, &data->full_alloc_bits);
-    alloc_bits.word_index_begin = 0;
-    alloc_bits.word_index_end = (unsigned)pas_segregated_page_config_num_alloc_words(*page_config);
-    record_page_objects(
-        enumerator, context, directory, page_config, page_boundary, page, allocator, &alloc_bits);
-    
+        record_page_payload_and_meta(
+            enumerator,
+            page_config,
+            page_boundary,
+            page,
+            data->offset_from_page_boundary_to_first_object,
+            data->offset_from_page_boundary_to_end_of_last_object);
+
+        alloc_bits.bits = pas_compact_tagged_unsigned_ptr_load_remote(enumerator, &data->full_alloc_bits);
+        alloc_bits.word_index_begin = 0;
+        alloc_bits.word_index_end = (unsigned)pas_segregated_page_config_num_alloc_words(*page_config);
+        record_page_objects(
+            enumerator, context, directory, page_config, page_boundary, page, allocator, &alloc_bits);
+
+    } PAS_ENUMERATOR_PIN_REMOTE_END(enumerator);
     return true;
 }
 
@@ -490,41 +494,43 @@ static bool enumerate_partial_view(pas_enumerator* enumerator,
     if (!page)
         return false;
 
-    if (verbose)
-        pas_log("Enumerating partial view of shared page %p\n", (void*)page_boundary);
+    PAS_ENUMERATOR_PIN_REMOTE_BEGIN(enumerator, page) {
+        if (verbose)
+            pas_log("Enumerating partial view of shared page %p\n", (void*)page_boundary);
 
-    allocator = NULL;
-    for (allocator_node = local_allocator_map_get(&context->allocators, page_boundary).head;
-         allocator_node;
-         allocator_node = allocator_node->next) {
-        pas_segregated_view allocator_view;
+        allocator = NULL;
+        for (allocator_node = local_allocator_map_get(&context->allocators, page_boundary).head;
+            allocator_node;
+            allocator_node = allocator_node->next) {
+            pas_segregated_view allocator_view;
 
-        allocator_view = pas_enumerator_read_compact(enumerator, allocator_node->allocator->view);
+            allocator_view = pas_enumerator_read_compact(enumerator, allocator_node->allocator->view);
 
-        if (verbose) {
-            pas_log("Considering allocator %p (allocator_view = %p, view = %p)\n",
-                    allocator_node->allocator, allocator_view, view);
+            if (verbose) {
+                pas_log("Considering allocator %p (allocator_view = %p, view = %p)\n",
+                        allocator_node->allocator, allocator_view, view);
+            }
+            
+            if (pas_segregated_view_get_ptr(allocator_view) == view) {
+                allocator = allocator_node->allocator;
+                break;
+            }
         }
-        
-        if (pas_segregated_view_get_ptr(allocator_view) == view) {
-            allocator = allocator_node->allocator;
-            break;
-        }
-    }
 
-    if (verbose)
-        pas_log("Found allocator = %p\n", allocator);
+        if (verbose)
+            pas_log("Found allocator = %p\n", allocator);
 
-    /* This is so weird: the size we pass is only valid when view->alloc_bits is pointing at the
-       local_allocator's bits. But that's the only time that load_remote will go down the path where it needs
-       to know the size. So, it's fine, I guess. */
-    full_alloc_bits.bits = pas_lenient_compact_unsigned_ptr_load_remote(
-        enumerator, &view->alloc_bits, pas_segregated_page_config_num_alloc_bytes(*page_config));
-    full_alloc_bits.word_index_begin = view->alloc_bits_offset;
-    full_alloc_bits.word_index_end = view->alloc_bits_offset + view->alloc_bits_size;
-    record_page_objects(
-        enumerator, context, directory, page_config, page_boundary, page, allocator, &full_alloc_bits);
-    
+        /* This is so weird: the size we pass is only valid when view->alloc_bits is pointing at the
+        local_allocator's bits. But that's the only time that load_remote will go down the path where it needs
+        to know the size. So, it's fine, I guess. */
+        full_alloc_bits.bits = pas_lenient_compact_unsigned_ptr_load_remote(
+            enumerator, &view->alloc_bits, pas_segregated_page_config_num_alloc_bytes(*page_config));
+        full_alloc_bits.word_index_begin = view->alloc_bits_offset;
+        full_alloc_bits.word_index_end = view->alloc_bits_offset + view->alloc_bits_size;
+        record_page_objects(
+            enumerator, context, directory, page_config, page_boundary, page, allocator, &full_alloc_bits);
+
+    } PAS_ENUMERATOR_PIN_REMOTE_END(enumerator);
     return true;
 }
 

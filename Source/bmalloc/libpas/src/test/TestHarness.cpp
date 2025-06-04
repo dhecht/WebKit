@@ -654,16 +654,18 @@ void runForkedTest(const Test& test)
     cout << "    FAIL: child process terminated with unknown status code " << waitStatus << endl;
 }
 
+constexpr bool singleProcess = true;
+
 void runTests(const vector<Test>& tests)
 {
     CHECK(tests.size());
     
-    if (tests.size() == 1)
+    if (tests.size() == 1 || singleProcess)
         runOneTest(tests[0]);
-    
-    for (const Test& test : tests)
-        runForkedTest(test);
-
+    else {
+        for (const Test& test : tests)
+            runForkedTest(test);
+    }
     PAS_ASSERT(testsPassed <= testsRan);
     cout << endl;
     cout << testsPassed << "/" << testsRan << " TESTS PASSED!" << endl;

@@ -411,6 +411,7 @@ PAS_BEGIN_EXTERN_C;
         entry_type* table_table; \
         size_t table_size; \
         size_t index; \
+        bool result; \
         \
         in_flux_stash = (name##_in_flux_stash*)pas_enumerator_read( \
             enumerator, remote_in_flux_stash, sizeof(name##_in_flux_stash)); \
@@ -441,20 +442,24 @@ PAS_BEGIN_EXTERN_C;
         if (!table_table) \
             return false; \
         \
-        for (index = table_size; index--;) { \
-            entry_type* entry; \
-            \
-            entry = table_table + index; \
-            if (entry == in_flux_stash->in_flux_entry) \
-                continue; \
-            if (entry_type##_is_empty_or_deleted(*entry)) \
-                continue; \
-            \
-            if (!callback(enumerator, entry, arg)) \
-                return false; \
-        } \
-        \
-        return true; \
+        result = true; \
+        PAS_ENUMERATOR_PIN_REMOTE_BEGIN(enumerator, table_table) { \
+            for (index = table_size; index--;) { \
+                entry_type* entry; \
+                \
+                entry = table_table + index; \
+                if (entry == in_flux_stash->in_flux_entry) \
+                    continue; \
+                if (entry_type##_is_empty_or_deleted(*entry)) \
+                    continue; \
+                \
+                if (!callback(enumerator, entry, arg)) { \
+                    result = false; \
+                    break; \
+                } \
+            } \
+        } PAS_ENUMERATOR_PIN_REMOTE_END(enumerator); \
+        return result; \
     } \
     \
     struct pas_dummy
