@@ -60,7 +60,6 @@ bool pas_basic_heap_config_enumerator_data_add_page_header_table(
     if (verbose)
         pas_log("The table has size %u.\n", table_size);
     
-    /* XXX is this covered by the test? */
     for (index = table_size; index--;) {
         pas_pair pair;
         pas_ptr_hash_map_entry entry;
