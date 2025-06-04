@@ -156,41 +156,42 @@ void* pas_heap_config_utils_prepare_to_enumerate(pas_enumerator* enumerator,
                                                  const pas_heap_config* my_config)
 {
     pas_basic_heap_config_enumerator_data* result;
-    const pas_heap_config** configs;
-    const pas_heap_config* config;
-    pas_basic_heap_config_root_data* root_data;
 
-    configs = pas_enumerator_read(
-        enumerator, enumerator->root->heap_configs,
-        sizeof(const pas_heap_config*) * pas_heap_config_kind_num_kinds);
-    if (!configs)
-        return NULL;
-    
-    config = pas_enumerator_read(enumerator, (void*)(uintptr_t)configs[my_config->kind], sizeof(pas_heap_config));
-    if (!config)
+    pas_heap_config* config_ptr;
+    pas_basic_heap_config_root_data* root_data_ptr;
+    pas_basic_heap_config_root_data root_data;
+    pas_page_header_table medium_page_header_table;
+    pas_page_header_table marge_page_header_table;
+
+    if (!pas_enumerator_copy_remote(enumerator, &config_ptr, enumerator->root->heap_configs + my_config->kind, sizeof(const pas_heap_config*)))
         return NULL;
 
-    root_data = pas_enumerator_read(
-        enumerator, config->root_data, sizeof(pas_basic_heap_config_root_data));
-    if (!root_data)
+    if (!pas_enumerator_copy_remote(enumerator, &root_data_ptr, &config_ptr->root_data, sizeof(pas_basic_heap_config_root_data*)))
+        return NULL;
+
+    if (!pas_enumerator_copy_remote(enumerator, &root_data, root_data_ptr, sizeof(pas_basic_heap_config_root_data)))
         return NULL;
 
     result = pas_enumerator_allocate(enumerator, sizeof(pas_basic_heap_config_enumerator_data));
     
     pas_ptr_hash_map_construct(&result->page_header_table);
 
+    if (!pas_enumerator_copy_remote(enumerator, &medium_page_header_table, root_data.medium_page_header_table, sizeof(pas_page_header_table)))
+        return NULL;
+
     if (!pas_basic_heap_config_enumerator_data_add_page_header_table(
             result,
             enumerator,
-            pas_enumerator_read(
-                enumerator, root_data->medium_page_header_table, sizeof(pas_page_header_table))))
+            &medium_page_header_table))
         return NULL;
     
+    if (!pas_enumerator_copy_remote(enumerator, &marge_page_header_table, root_data.marge_page_header_table, sizeof(pas_page_header_table)))
+        return NULL;
+
     if (!pas_basic_heap_config_enumerator_data_add_page_header_table(
             result,
             enumerator,
-            pas_enumerator_read(
-                enumerator, root_data->marge_page_header_table, sizeof(pas_page_header_table))))
+            &marge_page_header_table))
         return NULL;
     
     return result;
