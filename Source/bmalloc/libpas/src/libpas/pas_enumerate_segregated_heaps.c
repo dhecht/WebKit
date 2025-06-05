@@ -408,7 +408,7 @@ static bool enumerate_shared_view(pas_enumerator* enumerator,
                 enumerator, (void*)page_boundary);
             PAS_ASSERT_WITH_DETAIL(page);
 
-            page = pas_enumerator_read(
+            page = pas_enumerator_pin_remote(
                 enumerator, page,
                 pas_segregated_page_header_size(*page_config, pas_segregated_page_shared_role));
             if (!page)
@@ -447,6 +447,8 @@ static bool enumerate_shared_view(pas_enumerator* enumerator,
                                      page,
                                      payload_begin,
                                      payload_end);
+
+        pas_enumerator_unpin_remote(enumerator, page);
     }
 
     return true;
