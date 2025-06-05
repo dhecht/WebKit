@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "pas_config.h"
@@ -167,7 +167,7 @@ static bool for_each_view(pas_enumerator* enumerator,
         if (!callback(enumerator, view, arg))
             return false;
     }
-    
+
     return true;
 }
 
@@ -237,10 +237,10 @@ static void record_page_objects(pas_enumerator* enumerator,
                                 pas_full_alloc_bits* full_alloc_bits)
 {
     size_t index;
-    
+
     if (!enumerator->record_object)
         return;
-    
+
     for (index = PAS_BITVECTOR_BIT_INDEX(full_alloc_bits->word_index_begin);
          index < PAS_BITVECTOR_BIT_INDEX(full_alloc_bits->word_index_end);
          ++index) {
@@ -249,7 +249,7 @@ static void record_page_objects(pas_enumerator* enumerator,
 
         if (!pas_bitvector_get(full_alloc_bits->bits, index))
             continue;
-        
+
         if (!pas_bitvector_get(page->alloc_bits, index))
             continue;
 
@@ -258,7 +258,7 @@ static void record_page_objects(pas_enumerator* enumerator,
 
         if (verbose)
             pas_log("Considering possible object %p\n", (void*)begin);
-        
+
         if (allocator) {
             if (begin < allocator->payload_end
                 && begin >= allocator->payload_end - allocator->remaining) {
@@ -268,7 +268,7 @@ static void record_page_objects(pas_enumerator* enumerator,
                 }
                 continue;
             }
-            
+
             if (allocator->end_offset > allocator->current_offset) {
                 if (page_config->variant == pas_small_segregated_page_config_variant
                     && PAS_BITVECTOR_WORD64_INDEX(index) == allocator->current_offset
@@ -278,7 +278,7 @@ static void record_page_objects(pas_enumerator* enumerator,
                     current_word = allocator->current_word;
                     if (page_config->use_reversed_current_word)
                         current_word = pas_reverse64(current_word);
-                    
+
                     if (current_word & PAS_BITVECTOR_BIT_MASK64(index)) {
                         if (verbose) {
                             pas_log("The object has an allocator bit set in current_word "
@@ -303,7 +303,7 @@ static void record_page_objects(pas_enumerator* enumerator,
                 pas_log("The object is in the deallocation log.\n");
             continue;
         }
-        
+
         pas_enumerator_record(enumerator,
                               (void*)begin,
                               directory->object_size,
@@ -334,7 +334,7 @@ static bool enumerate_exclusive_view(pas_enumerator* enumerator,
 
     pas_enumerator_exclude_accounted_pages(
         enumerator, (void*)page_boundary, page_config->base.page_size);
-    
+
     if (!view->is_owned)
         return true;
 
@@ -344,42 +344,41 @@ static bool enumerate_exclusive_view(pas_enumerator* enumerator,
         enumerator, (void*)page_boundary);
     PAS_ASSERT_WITH_DETAIL(page);
 
-    page = pas_enumerator_read(
+    page = pas_enumerator_pin_remote(
         enumerator, page, pas_segregated_page_header_size(*page_config, pas_segregated_page_exclusive_role));
 
     if (!page)
         return false;
 
-    PAS_ENUMERATOR_PIN_REMOTE_BEGIN(enumerator, page) {
+    allocator_node = local_allocator_map_get(&context->allocators, page_boundary).head;
+    if (!allocator_node)
+        allocator = NULL;
+    else {
+        /* Exclusives can only have one allocator allocating in them at a time. */
+        PAS_ASSERT_WITH_DETAIL(!allocator_node->next);
+        allocator = allocator_node->allocator;
+        PAS_ASSERT_WITH_DETAIL(allocator);
+    }
 
-        allocator_node = local_allocator_map_get(&context->allocators, page_boundary).head;
-        if (!allocator_node)
-            allocator = NULL;
-        else {
-            /* Exclusives can only have one allocator allocating in them at a time. */
-            PAS_ASSERT_WITH_DETAIL(!allocator_node->next);
-            allocator = allocator_node->allocator;
-            PAS_ASSERT_WITH_DETAIL(allocator);
-        }
+    if (verbose)
+        pas_log("Have allocator = %p\n", allocator);
 
-        if (verbose)
-            pas_log("Have allocator = %p\n", allocator);
+    record_page_payload_and_meta(
+        enumerator,
+        page_config,
+        page_boundary,
+        page,
+        data->offset_from_page_boundary_to_first_object,
+        data->offset_from_page_boundary_to_end_of_last_object);
 
-        record_page_payload_and_meta(
-            enumerator,
-            page_config,
-            page_boundary,
-            page,
-            data->offset_from_page_boundary_to_first_object,
-            data->offset_from_page_boundary_to_end_of_last_object);
+    alloc_bits.bits = pas_compact_tagged_unsigned_ptr_load_remote(enumerator, &data->full_alloc_bits);
+    alloc_bits.word_index_begin = 0;
+    alloc_bits.word_index_end = (unsigned)pas_segregated_page_config_num_alloc_words(*page_config);
+    record_page_objects(
+        enumerator, context, directory, page_config, page_boundary, page, allocator, &alloc_bits);
 
-        alloc_bits.bits = pas_compact_tagged_unsigned_ptr_load_remote(enumerator, &data->full_alloc_bits);
-        alloc_bits.word_index_begin = 0;
-        alloc_bits.word_index_end = (unsigned)pas_segregated_page_config_num_alloc_words(*page_config);
-        record_page_objects(
-            enumerator, context, directory, page_config, page_boundary, page, allocator, &alloc_bits);
+    pas_enumerator_unpin_remote(enumerator, page);
 
-    } PAS_ENUMERATOR_PIN_REMOTE_END(enumerator);
     return true;
 }
 
@@ -408,7 +407,7 @@ static bool enumerate_shared_view(pas_enumerator* enumerator,
             page = (pas_segregated_page*)page_config->base.page_header_for_boundary_remote(
                 enumerator, (void*)page_boundary);
             PAS_ASSERT_WITH_DETAIL(page);
-            
+
             page = pas_enumerator_read(
                 enumerator, page,
                 pas_segregated_page_header_size(*page_config, pas_segregated_page_shared_role));
@@ -430,18 +429,18 @@ static bool enumerate_shared_view(pas_enumerator* enumerator,
 
     pas_enumerator_exclude_accounted_pages(
         enumerator, (void*)page_boundary, page_config->base.page_size);
-    
+
     if (view->is_owned) {
         uintptr_t payload_begin;
         uintptr_t payload_end;
-        
+
         PAS_ASSERT_WITH_DETAIL(page);
-        
+
         payload_begin = pas_round_up_to_power_of_2(page_config->shared_payload_offset,
                                                    pas_segregated_page_config_min_align(*page_config));
         payload_end = pas_segregated_page_config_payload_end_offset_for_role(
             *page_config, pas_segregated_page_shared_role);
-        
+
         record_page_payload_and_meta(enumerator,
                                      page_config,
                                      page_boundary,
@@ -488,51 +487,51 @@ static bool enumerate_partial_view(pas_enumerator* enumerator,
     page = (pas_segregated_page*)page_config->base.page_header_for_boundary_remote(
         enumerator, (void*)page_boundary);
     PAS_ASSERT_WITH_DETAIL(page);
-    
-    page = pas_enumerator_read(
+
+    page = pas_enumerator_pin_remote(
         enumerator, page, pas_segregated_page_header_size(*page_config, pas_segregated_page_shared_role));
     if (!page)
         return false;
 
-    PAS_ENUMERATOR_PIN_REMOTE_BEGIN(enumerator, page) {
-        if (verbose)
-            pas_log("Enumerating partial view of shared page %p\n", (void*)page_boundary);
+    if (verbose)
+        pas_log("Enumerating partial view of shared page %p\n", (void*)page_boundary);
 
-        allocator = NULL;
-        for (allocator_node = local_allocator_map_get(&context->allocators, page_boundary).head;
-            allocator_node;
-            allocator_node = allocator_node->next) {
-            pas_segregated_view allocator_view;
+    allocator = NULL;
+    for (allocator_node = local_allocator_map_get(&context->allocators, page_boundary).head;
+        allocator_node;
+        allocator_node = allocator_node->next) {
+        pas_segregated_view allocator_view;
 
-            allocator_view = pas_enumerator_read_compact(enumerator, allocator_node->allocator->view);
+        allocator_view = pas_enumerator_read_compact(enumerator, allocator_node->allocator->view);
 
-            if (verbose) {
-                pas_log("Considering allocator %p (allocator_view = %p, view = %p)\n",
-                        allocator_node->allocator, allocator_view, view);
-            }
-            
-            if (pas_segregated_view_get_ptr(allocator_view) == view) {
-                allocator = allocator_node->allocator;
-                break;
-            }
+        if (verbose) {
+            pas_log("Considering allocator %p (allocator_view = %p, view = %p)\n",
+                    allocator_node->allocator, allocator_view, view);
         }
 
-        if (verbose)
-            pas_log("Found allocator = %p\n", allocator);
+        if (pas_segregated_view_get_ptr(allocator_view) == view) {
+            allocator = allocator_node->allocator;
+            break;
+        }
+    }
 
-        /* This is so weird: the size we pass is only valid when view->alloc_bits is pointing at the
-        local_allocator's bits. But that's the only time that load_remote will go down the path where it needs
-        to know the size. So, it's fine, I guess. */
+    if (verbose)
+        pas_log("Found allocator = %p\n", allocator);
 
-        /* XXX This could do a non compact remote read!! */
-        full_alloc_bits.bits = pas_lenient_compact_unsigned_ptr_load_remote(
-            enumerator, &view->alloc_bits, pas_segregated_page_config_num_alloc_bytes(*page_config));
-        full_alloc_bits.word_index_begin = view->alloc_bits_offset;
-        full_alloc_bits.word_index_end = view->alloc_bits_offset + view->alloc_bits_size;
-        record_page_objects(
-            enumerator, context, directory, page_config, page_boundary, page, allocator, &full_alloc_bits);
+    /* This is so weird: the size we pass is only valid when view->alloc_bits is pointing at the
+    local_allocator's bits. But that's the only time that load_remote will go down the path where it needs
+    to know the size. So, it's fine, I guess. */
 
-    } PAS_ENUMERATOR_PIN_REMOTE_END(enumerator);
+    /* XXX This could do a non compact remote read!! */
+    full_alloc_bits.bits = pas_lenient_compact_unsigned_ptr_load_remote(
+        enumerator, &view->alloc_bits, pas_segregated_page_config_num_alloc_bytes(*page_config));
+    full_alloc_bits.word_index_begin = view->alloc_bits_offset;
+    full_alloc_bits.word_index_end = view->alloc_bits_offset + view->alloc_bits_size;
+    record_page_objects(
+        enumerator, context, directory, page_config, page_boundary, page, allocator, &full_alloc_bits);
+
+    pas_enumerator_unpin_remote(enumerator, page);
+
     return true;
 }
 
@@ -594,7 +593,7 @@ static bool enumerate_segregated_heap_callback(pas_enumerator* enumerator,
          directory = pas_compact_atomic_segregated_size_directory_ptr_load_remote(
              enumerator, &directory->next_for_heap))
         for_each_view(enumerator, &directory->base, size_directory_view_callback, context);
-    
+
     return true;
 }
 
@@ -604,27 +603,27 @@ static PAS_NEVER_INLINE void consider_allocator(pas_enumerator* enumerator, enum
     const pas_segregated_page_config* page_config;
     uintptr_t page_boundary;
     local_allocator_node* allocator_node;
-    
+
     if (!allocator->page_ish)
         return;
 
     if (verbose)
         pas_log("Have allocator %p in page_ish = %p\n", allocator, (void*)allocator->page_ish);
-    
+
     PAS_ASSERT_WITH_EXTRA_DETAIL(!pas_local_allocator_config_kind_is_bitfit(allocator->config_kind), allocator->config_kind);
-    
+
     page_config = pas_segregated_page_config_kind_get_config(
         pas_local_allocator_config_kind_get_segregated_page_config_kind(allocator->config_kind));
-    
+
     page_boundary = pas_round_down_to_power_of_2(allocator->page_ish, page_config->base.page_size);
-    
+
     add_result = local_allocator_map_add(
         &context->allocators, page_boundary, NULL, &enumerator->allocation_config);
     if (add_result.is_new_entry) {
         add_result.entry->page_boundary = page_boundary;
         add_result.entry->head = NULL;
     }
-    
+
     allocator_node = pas_enumerator_allocate(enumerator, sizeof(local_allocator_node));
     allocator_node->next = add_result.entry->head;
     allocator_node->allocator = allocator;
@@ -662,7 +661,7 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
         unsigned allocator_index_capacity;
         pas_thread_local_cache* tlc;
         unsigned index;
-        
+
         if (!pas_enumerator_copy_remote(enumerator, &tlc_node, tlc_node_next, sizeof(pas_thread_local_cache_node)))
             return false;
         tlc_node_next = tlc_node.next;
@@ -732,7 +731,7 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
                     if (!layout_node)
                         break;
                 }
-                
+
                 if (pas_is_wrapped_segregated_size_directory(layout_node)) {
                     pas_segregated_size_directory* directory;
 
@@ -755,12 +754,12 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
 
                 if (has_allocator) {
                     pas_local_allocator* allocator;
-                    
+
                     if (!allocator_index || allocator_index >= tlc->allocator_index_upper_bound)
                         break;
 
                     allocator = pas_thread_local_cache_get_local_allocator_direct(tlc, allocator_index);
-                    
+
                     consider_allocator(enumerator, &context, allocator);
                 }
 
@@ -785,7 +784,7 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
     if (baseline_allocator_table_ptr) {
         pas_baseline_allocator* baseline_allocator_table;
         size_t index;
-        
+
         /* Copy the remote baseline allocator table since consider_allocator will stash away pointers to the local allocators. */
         baseline_allocator_table = pas_enumerator_alloc_and_copy_remote(
             enumerator,
@@ -793,7 +792,7 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
             sizeof(pas_baseline_allocator) * enumerator->root->num_baseline_allocators);
         if (!baseline_allocator_table)
             return false;
-        
+
         for (index = enumerator->root->num_baseline_allocators; index--;)
             consider_allocator(enumerator, &context, &baseline_allocator_table[index].u.allocator);
     }
@@ -814,7 +813,7 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
         if (!for_each_view(enumerator, &directory->base, shared_page_directory_view_callback, &data))
             return false;
     }
-    
+
     if (!pas_enumerator_for_each_heap(enumerator, enumerate_segregated_heap_callback, &context))
         return false;
 

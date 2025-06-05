@@ -124,7 +124,7 @@ struct pas_enumerator {
        as payload if it is still in this set, and then removes it from this set. */
     pas_ptr_hash_set* unaccounted_pages;
 
-    bool disallow_reader;
+    void* pinned_address;
     pas_enumerator_reader reader;
     void* reader_arg;
 
@@ -178,22 +178,19 @@ PAS_API void* pas_enumerator_read(pas_enumerator* enumerator,
                                   void* remote_address,
                                   size_t size);
 
+PAS_API void* pas_enumerator_pin_remote(pas_enumerator* enumerator,
+                                        void* remote_address,
+                                        size_t size);
+
+PAS_API void pas_enumerator_unpin_remote(pas_enumerator* enumerator,
+                                         void* pinned_address);
+
 /* Copy size bytes from remote_address in the target process to the local_address.
    Returns false if the remote_address is invalid. */
 PAS_API bool pas_enumerator_copy_remote(pas_enumerator* enumerator,
                                         void* local_address,
                                         void* remote_address,
                                         size_t size);
-
-#define PAS_ENUMERATOR_PIN_REMOTE_BEGIN(enumerator, pinned_pointer) \
-    do { \
-        PAS_ASSERT(!(enumerator)->disallow_reader); \
-        (enumerator)->disallow_reader = true;
-
-#define PAS_ENUMERATOR_PIN_REMOTE_END(enumerator) \
-        PAS_ASSERT((enumerator)->disallow_reader); \
-        (enumerator)->disallow_reader = false; \
-    } while (false);
 
 /* Allocate a buffer of size bytes, copy size bytes from remote_address in the 
    target process to the local_address. Returns NULL if the remote_address is invalid. */

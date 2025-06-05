@@ -96,6 +96,7 @@ pas_enumerator* pas_enumerator_create(pas_root* remote_root_address,
 
     result->reader = reader;
     result->reader_arg = reader_arg;
+    result->pinned_address = NULL;
     result->recorder = recorder;
     result->recorder_arg = recorder_arg;
     result->record_meta = record_meta;
@@ -226,7 +227,7 @@ void* pas_enumerator_read(pas_enumerator* enumerator,
 {
     void* compact_heap_end;
 
-    PAS_ASSERT(!enumerator->disallow_reader);
+    PAS_ASSERT(!enumerator->pinned_address);
     PAS_ASSERT_WITH_DETAIL(remote_address);
 
     compact_heap_end = (void*)(
@@ -242,6 +243,25 @@ void* pas_enumerator_read(pas_enumerator* enumerator,
         return &enumerator->dummy_byte;
     
     return enumerator->reader(enumerator, remote_address, size, enumerator->reader_arg);
+}
+
+void* pas_enumerator_pin_remote(pas_enumerator* enumerator,
+                                void* remote_address,
+                                size_t size)
+{
+    void* mapped_address;
+
+    PAS_ASSERT(!enumerator->pinned_address);
+    mapped_address = pas_enumerator_read(enumerator, remote_address, size);
+    enumerator->pinned_address = mapped_address;
+    return mapped_address;
+}
+
+void pas_enumerator_unpin_remote(pas_enumerator* enumerator,
+                                 void* pinned_address)
+{
+    PAS_ASSERT(enumerator->pinned_address == pinned_address);
+    enumerator->pinned_address = NULL;
 }
 
 bool pas_enumerator_copy_remote(pas_enumerator* enumerator,
