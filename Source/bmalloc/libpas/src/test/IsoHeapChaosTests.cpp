@@ -231,7 +231,7 @@ void addPageRange(pas_range range)
         cout << "libpas page range: " << reinterpret_cast<void*>(range.begin) << "..."
              << reinterpret_cast<void*>(range.end) << "\n";
     }
-//    pageRanges.insert(PageRange(reinterpret_cast<void*>(range.begin), pas_range_size(range)));
+    pageRanges.insert(PageRange(reinterpret_cast<void*>(range.begin), pas_range_size(range)));
 }
 
 bool addPageRangeCallback(pas_range range, void* arg)
