@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2019-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -286,6 +286,11 @@ struct ReaderRange {
     size_t size { 0 };
 };
 
+constexpr bool zeroPrevious = true;
+
+void* prevMappingAddr;
+size_t prevMappingSize;
+
 map<pas_enumerator_record_kind, set<RecordedRange>> recordedRanges;
 map<ReaderRange, void*> readerCache;
 
@@ -299,9 +304,17 @@ void* enumeratorReader(pas_enumerator* enumerator,
 
     ReaderRange range = ReaderRange(address, size);
 
-    auto readerCacheIter = readerCache.find(range);
-    if (readerCacheIter != readerCache.end())
-        return readerCacheIter->second;
+    if (zeroPrevious) {
+#if 1        
+        if (prevMappingAddr && prevMappingSize) {
+            memset(prevMappingAddr, 0xda, prevMappingSize);
+        }
+#endif
+    } else {
+        auto readerCacheIter = readerCache.find(range);
+        if (readerCacheIter != readerCache.end())
+            return readerCacheIter->second;
+    }
 
     void* result = pas_enumerator_allocate(enumerator, size);
         
@@ -329,7 +342,7 @@ void* enumeratorReader(pas_enumerator* enumerator,
     }
 
     if (verbose) {
-        cout << "address = " << address << "..."
+        cout << "enumeratorReader address = " << address << "..."
              << reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(address) + size)
              << ", pageAddress = " << pageAddress << "..." << pageEndAddress
              << ", areProtectedPages = " << areProtectedPages << "\n";
@@ -348,6 +361,8 @@ void* enumeratorReader(pas_enumerator* enumerator,
     }
 
     readerCache[range] = result;
+    prevMappingAddr = result;
+    prevMappingSize = size;
     return result;
 }
 
@@ -391,7 +406,9 @@ void testAllocationChaos(unsigned numThreads, unsigned numIsolatedHeaps,
                          unsigned maxTotalSize, bool testEnumerator)
 {
     PAS_ASSERT(!pas_epoch_is_counter); // We don't want to run these tests in the fake scavenger mode.
-    
+   
+    if (!testEnumerator) return;
+
     if (verbose)
         cout << "Starting.\n";
     
@@ -624,6 +641,8 @@ void testAllocationChaos(unsigned numThreads, unsigned numIsolatedHeaps,
             pageRanges.clear();
             readerCache.clear();
             recordedRanges.clear();
+            prevMappingAddr = NULL;
+            prevMappingSize = 0;
 
             addPageRange(
                 pas_range_create(
@@ -935,6 +954,8 @@ void testAllocationChaos(unsigned numThreads, unsigned numIsolatedHeaps,
 
 void addTheTests(unsigned multiplier, bool testEnumerator)
 {
+    if (!testEnumerator) return;
+
 #if PAS_OS(LINUX)
     // FIXME: thread suspension/resume in libpas, required for enumerator tests, is missing on Linux
     // http://webkit.org/b/234071

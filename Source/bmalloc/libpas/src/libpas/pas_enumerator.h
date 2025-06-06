@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2020-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -124,6 +124,10 @@ struct pas_enumerator {
        as payload if it is still in this set, and then removes it from this set. */
     pas_ptr_hash_set* unaccounted_pages;
 
+    void* lenient_compact_ptr_buffer;
+    size_t lenient_compact_ptr_buffer_capacity;
+
+    void* pinned_address;
     pas_enumerator_reader reader;
     void* reader_arg;
 
@@ -158,12 +162,41 @@ PAS_API void pas_enumerator_destroy(pas_enumerator* enumerator);
 PAS_API void* pas_enumerator_allocate(pas_enumerator* enumerator,
                                       size_t size);
 
+void* pas_enumerator_lenient_compact_ptr_buffer(pas_enumerator* enumerator,
+                                                size_t size);
+
 PAS_API void* pas_enumerator_read_compact(pas_enumerator* enumerator,
                                           void* remote_address);
 
+/* Returns an address in the local process that maps the remote_address
+   in the target process.
+
+   WARNING: the mapping in the local process is valid only up until the next
+   call into pas_enumerator_read, pas_enumerator_copy_remote, and
+   pas_enumerator_alloc_and_copy_remote. See the definition of memory_reader_t in malloc.h.
+
+   Prefer pas_enumerator_copy_remote or pas_enumerator_alloc_and_copy_remote
+   instead. If the structure is large or variable size then
+   PAS_ENUMERATOR_PIN_REMOTE_BEGIN/PAS_ENUMERATOR_PIN_REMOTE_END can be used
+   to verify the mapping established by pas_enumerator_read persists during
+   the duration of the access. */
 PAS_API void* pas_enumerator_read(pas_enumerator* enumerator,
                                   void* remote_address,
                                   size_t size);
+
+PAS_API void* pas_enumerator_pin_remote(pas_enumerator* enumerator,
+                                        void* remote_address,
+                                        size_t size);
+
+PAS_API void pas_enumerator_unpin_remote(pas_enumerator* enumerator,
+                                         void* pinned_address);
+
+/* Copy size bytes from remote_address in the target process to the local_buffer.
+   Returns false if the remote_address is invalid. */
+PAS_API bool pas_enumerator_copy_remote(pas_enumerator* enumerator,
+                                        void* local_buffer,
+                                        void* remote_address,
+                                        size_t size);
 
 PAS_API void pas_enumerator_add_unaccounted_pages(pas_enumerator* enumerator,
                                                   void* remote_address,
