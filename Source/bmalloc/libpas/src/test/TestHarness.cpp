@@ -654,7 +654,7 @@ void runForkedTest(const Test& test)
     cout << "    FAIL: child process terminated with unknown status code " << waitStatus << endl;
 }
 
-constexpr bool singleProcess = true;
+constexpr bool singleProcess = false;
 
 void runTests(const vector<Test>& tests)
 {
