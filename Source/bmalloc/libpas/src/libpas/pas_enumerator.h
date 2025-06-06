@@ -124,6 +124,9 @@ struct pas_enumerator {
        as payload if it is still in this set, and then removes it from this set. */
     pas_ptr_hash_set* unaccounted_pages;
 
+    void* lenient_compact_ptr_buffer;
+    size_t lenient_compact_ptr_buffer_capacity;
+
     void* pinned_address;
     pas_enumerator_reader reader;
     void* reader_arg;
@@ -158,6 +161,9 @@ PAS_API void pas_enumerator_destroy(pas_enumerator* enumerator);
 
 PAS_API void* pas_enumerator_allocate(pas_enumerator* enumerator,
                                       size_t size);
+
+void* pas_enumerator_lenient_compact_ptr_buffer(pas_enumerator* enumerator,
+                                                size_t size);
 
 PAS_API void* pas_enumerator_read_compact(pas_enumerator* enumerator,
                                           void* remote_address);

@@ -102,7 +102,9 @@ pas_enumerator* pas_enumerator_create(pas_root* remote_root_address,
     result->record_meta = record_meta;
     result->record_payload = record_payload;
     result->record_object = record_object;
-
+    result->lenient_compact_ptr_buffer = NULL;
+    result->lenient_compact_ptr_buffer_capacity = 0;
+    
     result->heap_config_datas = pas_enumerator_allocate(
         result, sizeof(void*) * pas_heap_config_kind_num_kinds);
     pas_zero_memory(result->heap_config_datas, sizeof(void*) * pas_heap_config_kind_num_kinds);
@@ -212,6 +214,20 @@ void* pas_enumerator_allocate(pas_enumerator* enumerator,
                               size_t size)
 {
     return pas_enumerator_region_allocate(&enumerator->region, size);
+}
+
+void* pas_enumerator_lenient_compact_ptr_buffer(pas_enumerator* enumerator,
+                                                size_t size)
+{
+    PAS_ASSERT(size);
+    if (size > enumerator->lenient_compact_ptr_buffer_capacity) {
+        size_t new_capacity;
+
+        new_capacity = PAS_MAX(2 * enumerator->lenient_compact_ptr_buffer_capacity, size);
+        enumerator->lenient_compact_ptr_buffer = pas_enumerator_allocate(enumerator, new_capacity);
+        enumerator->lenient_compact_ptr_buffer_capacity = new_capacity;
+    }
+    return enumerator->lenient_compact_ptr_buffer;
 }
 
 void* pas_enumerator_read_compact(pas_enumerator* enumerator,

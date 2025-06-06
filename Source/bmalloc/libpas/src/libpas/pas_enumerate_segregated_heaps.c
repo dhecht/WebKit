@@ -480,20 +480,10 @@ static bool enumerate_partial_view(pas_enumerator* enumerator,
     if (!shared_view->is_owned)
         return true;
 
-    page = NULL;
     shared_handle_or_page_boundary = shared_view->shared_handle_or_page_boundary;
     shared_handle = pas_unwrap_shared_handle_no_liveness_checks(shared_handle_or_page_boundary);
     shared_handle = pas_enumerator_read_compact(enumerator, shared_handle);
     page_boundary = (uintptr_t)shared_handle->page_boundary;
-
-    page = (pas_segregated_page*)page_config->base.page_header_for_boundary_remote(
-        enumerator, (void*)page_boundary);
-    PAS_ASSERT_WITH_DETAIL(page);
-
-    page = pas_enumerator_pin_remote(
-        enumerator, page, pas_segregated_page_header_size(*page_config, pas_segregated_page_shared_role));
-    if (!page)
-        return false;
 
     if (verbose)
         pas_log("Enumerating partial view of shared page %p\n", (void*)page_boundary);
@@ -523,12 +513,20 @@ static bool enumerate_partial_view(pas_enumerator* enumerator,
     /* This is so weird: the size we pass is only valid when view->alloc_bits is pointing at the
     local_allocator's bits. But that's the only time that load_remote will go down the path where it needs
     to know the size. So, it's fine, I guess. */
-
-    /* XXX This could do a non compact remote read!! */
     full_alloc_bits.bits = pas_lenient_compact_unsigned_ptr_load_remote(
         enumerator, &view->alloc_bits, pas_segregated_page_config_num_alloc_bytes(*page_config));
     full_alloc_bits.word_index_begin = view->alloc_bits_offset;
     full_alloc_bits.word_index_end = view->alloc_bits_offset + view->alloc_bits_size;
+
+    page = (pas_segregated_page*)page_config->base.page_header_for_boundary_remote(
+        enumerator, (void*)page_boundary);
+    PAS_ASSERT_WITH_DETAIL(page);
+
+    page = pas_enumerator_pin_remote(
+        enumerator, page, pas_segregated_page_header_size(*page_config, pas_segregated_page_shared_role));
+    if (!page)
+        return false;
+
     record_page_objects(
         enumerator, context, directory, page_config, page_boundary, page, allocator, &full_alloc_bits);
 

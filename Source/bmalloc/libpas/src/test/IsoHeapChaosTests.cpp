@@ -343,7 +343,7 @@ void* enumeratorReader(pas_enumerator* enumerator,
     }
 
     if (verbose) {
-        cout << "address = " << address << "..."
+        cout << "enumeratorReader address = " << address << "..."
              << reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(address) + size)
              << ", pageAddress = " << pageAddress << "..." << pageEndAddress
              << ", areProtectedPages = " << areProtectedPages << "\n";
