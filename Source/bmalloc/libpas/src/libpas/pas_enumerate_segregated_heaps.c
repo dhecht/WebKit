@@ -690,25 +690,25 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
 
         if (tlc_layout_first_segment) {
             pas_thread_local_cache_layout_segment* tlc_layout_segment;
-            uintptr_t node_index = 0;
             pas_thread_local_cache_layout_node layout_node;
             pas_compact_atomic_thread_local_cache_layout_node layout_node_compact_ptr;
+            uintptr_t node_index = 0;
 
             tlc_layout_segment = tlc_layout_first_segment;
 
-            if (!pas_enumerator_copy_remote(
-                    enumerator,
-                    &layout_node_compact_ptr,
-                    &tlc_layout_segment->nodes[node_index],
-                    sizeof(pas_compact_atomic_thread_local_cache_layout_node)))
-                return false;
-
-            layout_node = pas_compact_atomic_thread_local_cache_layout_node_load_remote(enumerator, &layout_node_compact_ptr);
             while (1) {
                 bool has_allocator;
                 unsigned allocator_index;
 
+                if (!pas_enumerator_copy_remote(
+                        enumerator,
+                        &layout_node_compact_ptr,
+                        &tlc_layout_segment->nodes[node_index], sizeof(pas_compact_atomic_thread_local_cache_layout_node)))
+                    return false;
+                layout_node = pas_compact_atomic_thread_local_cache_layout_node_load_remote(enumerator, &layout_node_compact_ptr);
+
                 if (!layout_node) {
+                    /* Reached end of the segment; start the next segment. */
                     if (!pas_enumerator_copy_remote(
                             enumerator,
                             &tlc_layout_segment,
@@ -762,12 +762,6 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
                 }
 
                 ++node_index;
-                if (!pas_enumerator_copy_remote(
-                        enumerator,
-                        &layout_node_compact_ptr,
-                        &tlc_layout_segment->nodes[node_index], sizeof(pas_compact_atomic_thread_local_cache_layout_node)))
-                    return false;
-                layout_node = pas_compact_atomic_thread_local_cache_layout_node_load_remote(enumerator, &layout_node_compact_ptr);
             }
         }
     }
