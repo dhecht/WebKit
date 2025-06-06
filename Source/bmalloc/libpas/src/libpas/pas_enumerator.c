@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "pas_config.h"
@@ -77,7 +77,7 @@ pas_enumerator* pas_enumerator_create(pas_root* remote_root_address,
     uintptr_t compact_heap_base;
     size_t compact_heap_size;
     size_t compact_heap_guard_size;
-    uintptr_t compact_heap_copy;
+    void* compact_heap_copy;
 
     const pas_heap_config* configs[pas_heap_config_kind_num_kinds];
     pas_heap_config_kind config_kind;
@@ -115,43 +115,51 @@ pas_enumerator* pas_enumerator_create(pas_root* remote_root_address,
      * local storage for these values and copy the remote values in.
      */
 
-    result->root = pas_enumerator_alloc_and_copy_remote(result, remote_root_address, sizeof(pas_root));
-    if (!result->root)
+    result->root = pas_enumerator_allocate(result, sizeof(pas_root));
+    if (!pas_enumerator_copy_remote(
+            result,
+            result->root,
+            remote_root_address,
+            sizeof(pas_root)))
         goto fail;
 
     PAS_ASSERT_WITH_DETAIL(result->root->magic == PAS_ROOT_MAGIC);
     PAS_ASSERT_WITH_DETAIL(result->root->num_heap_configs == pas_heap_config_kind_num_kinds);
 
-    if (!pas_enumerator_copy_remote(result,
+    if (!pas_enumerator_copy_remote(
+            result,
             &compact_heap_base,
             result->root->compact_heap_reservation_base,
             sizeof(uintptr_t)))
         goto fail;
 
-    if (!pas_enumerator_copy_remote(result,
+    if (!pas_enumerator_copy_remote(
+            result,
             &compact_heap_size,
             result->root->compact_heap_reservation_size,
             sizeof(size_t)))
         goto fail;
 
-    if (!pas_enumerator_copy_remote(result,
+    if (!pas_enumerator_copy_remote(
+            result,
             &compact_heap_guard_size,
-            result->root->compact_heap_reservation_guard_size, 
+            result->root->compact_heap_reservation_guard_size,
             sizeof(size_t)))
         goto fail;
 
     /* XXX: copy only occupied size */
-    compact_heap_copy = (uintptr_t)pas_enumerator_alloc_and_copy_remote(
-        result,
-        (void*)(compact_heap_base + compact_heap_guard_size),
-        compact_heap_size);
-    if (!compact_heap_copy)
+    compact_heap_copy = pas_enumerator_allocate(result, compact_heap_size);
+    if (!pas_enumerator_copy_remote(
+            result,
+            compact_heap_copy,
+            (void*)(compact_heap_base + compact_heap_guard_size),
+            compact_heap_size))
         goto fail;
 
     result->compact_heap_size = compact_heap_size;
     result->compact_heap_guard_size = compact_heap_guard_size;
     result->compact_heap_remote_base = (void*)compact_heap_base;
-    result->compact_heap_copy_base = (void*)(compact_heap_copy - compact_heap_guard_size);
+    result->compact_heap_copy_base = (void*)((uintptr_t)compact_heap_copy - compact_heap_guard_size);
 
     result->unaccounted_pages = pas_enumerator_allocate(result, sizeof(pas_ptr_hash_set));
     pas_ptr_hash_set_construct(result->unaccounted_pages);
@@ -211,7 +219,7 @@ void* pas_enumerator_read_compact(pas_enumerator* enumerator,
 {
     if ((uintptr_t)remote_address < (uintptr_t)PAS_INTERNAL_MIN_ALIGN)
         return remote_address;
-    
+
     PAS_ASSERT_WITH_DETAIL(remote_address >= (void*)((uintptr_t)enumerator->compact_heap_remote_base +
                                          enumerator->compact_heap_guard_size));
     PAS_ASSERT_WITH_DETAIL(remote_address < (void*)((uintptr_t)enumerator->compact_heap_remote_base +
@@ -232,7 +240,7 @@ void* pas_enumerator_read(pas_enumerator* enumerator,
 
     compact_heap_end = (void*)(
         (uintptr_t)enumerator->compact_heap_remote_base + enumerator->compact_heap_size);
-    
+
     if (remote_address >= enumerator->compact_heap_remote_base
         && remote_address < compact_heap_end) {
         PAS_ASSERT_WITH_DETAIL((uintptr_t)remote_address + size <= (uintptr_t)compact_heap_end);
@@ -241,7 +249,7 @@ void* pas_enumerator_read(pas_enumerator* enumerator,
 
     if (!size)
         return &enumerator->dummy_byte;
-    
+
     return enumerator->reader(enumerator, remote_address, size, enumerator->reader_arg);
 }
 
@@ -265,7 +273,7 @@ void pas_enumerator_unpin_remote(pas_enumerator* enumerator,
 }
 
 bool pas_enumerator_copy_remote(pas_enumerator* enumerator,
-                                void* local_address,
+                                void* local_buffer,
                                 void* remote_address,
                                 size_t size)
 {
@@ -274,20 +282,8 @@ bool pas_enumerator_copy_remote(pas_enumerator* enumerator,
     mapped_address = pas_enumerator_read(enumerator, remote_address, size);
     if (!mapped_address)
         return false;
-    memcpy(local_address, mapped_address, size);
+    memcpy(local_buffer, mapped_address, size);
     return true;
-}
-
-void* pas_enumerator_alloc_and_copy_remote(pas_enumerator* enumerator,
-                                           void* remote_address,
-                                           size_t size)
-{
-    void* local_copy;
-
-    local_copy = pas_enumerator_allocate(enumerator, size);
-    if (!pas_enumerator_copy_remote(enumerator, local_copy, remote_address, size))
-        return NULL;
-    return local_copy;
 }
 
 void pas_enumerator_add_unaccounted_pages(pas_enumerator* enumerator,
@@ -352,7 +348,7 @@ void pas_enumerator_record(pas_enumerator* enumerator,
 
     /* Catch bogus sizes, in case we did some overflow or weird subtraction. */
     PAS_ASSERT_WITH_DETAIL((uint64_t)size < ((uint64_t)1 << PAS_ADDRESS_BITS));
-    
+
     switch (kind) {
     case pas_enumerator_meta_record:
         if (!enumerator->record_meta)
@@ -419,11 +415,11 @@ void pas_enumerator_record_page_payload_and_meta(pas_enumerator* enumerator,
             PAS_ASSERT_WITH_DETAIL(use_counts);
 
             span = pas_range_create(payload_begin, payload_begin);
-            
+
             for (granule_index = 0; granule_index < page_size / granule_size; ++granule_index) {
                 uintptr_t begin;
                 uintptr_t end;
-                
+
                 begin = PAS_CLIP(granule_index * granule_size,
                                  payload_begin,
                                  payload_end);
@@ -431,15 +427,15 @@ void pas_enumerator_record_page_payload_and_meta(pas_enumerator* enumerator,
                                payload_begin,
                                payload_end);
                 PAS_UNUSED_PARAM(begin);
-                
+
                 if (use_counts[granule_index] == PAS_PAGE_GRANULE_DECOMMITTED) {
                     record_payload_span(enumerator, page_boundary, span);
                     span.begin = end;
                 }
-                
+
                 span.end = end;
             }
-            
+
             record_payload_span(enumerator, page_boundary, span);
         }
     }
@@ -478,7 +474,7 @@ bool pas_enumerator_for_each_heap(pas_enumerator* enumerator,
 
         if (!pas_enumerator_copy_remote(enumerator, &heap, static_heaps[index], sizeof(pas_heap)))
             return false;
-        
+
         if (!callback(enumerator, &heap, arg))
             return false;
     }
@@ -517,7 +513,7 @@ bool pas_enumerator_enumerate_all(pas_enumerator* enumerator)
 
     if (verbose)
         pas_log("Done enumerating all!\n");
-    
+
     return true;
 }
 

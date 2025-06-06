@@ -662,6 +662,7 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
         pas_thread_local_cache_node tlc_node;
         unsigned allocator_index_capacity;
         pas_thread_local_cache* tlc;
+        size_t tlc_size;
         unsigned index;
 
         if (!pas_enumerator_copy_remote(enumerator, &tlc_node, tlc_node_next, sizeof(pas_thread_local_cache_node)))
@@ -676,11 +677,9 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
 
         /* Copy the remote tlc since we'll be stashing away pointers to the individual local allocators
            when calling consider_allocator. */
-        tlc = pas_enumerator_alloc_and_copy_remote(enumerator,
-                                                   tlc_node.cache,
-                                                   pas_thread_local_cache_size_for_allocator_index_capacity(
-                                                      allocator_index_capacity));
-        if (!tlc)
+        tlc_size = pas_thread_local_cache_size_for_allocator_index_capacity(allocator_index_capacity);
+        tlc = pas_enumerator_allocate(enumerator, tlc_size);
+        if (!pas_enumerator_copy_remote(enumerator, tlc, tlc_node.cache, tlc_size))
             return false;
 
         for (index = PAS_DEALLOCATION_LOG_SIZE; index--;) {
@@ -785,14 +784,13 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
 
     if (baseline_allocator_table_ptr) {
         pas_baseline_allocator* baseline_allocator_table;
+        size_t table_size;
         size_t index;
 
         /* Copy the remote baseline allocator table since consider_allocator will stash away pointers to the local allocators. */
-        baseline_allocator_table = pas_enumerator_alloc_and_copy_remote(
-            enumerator,
-            baseline_allocator_table_ptr,
-            sizeof(pas_baseline_allocator) * enumerator->root->num_baseline_allocators);
-        if (!baseline_allocator_table)
+        table_size = sizeof(pas_baseline_allocator) * enumerator->root->num_baseline_allocators;
+        baseline_allocator_table = pas_enumerator_allocate(enumerator, table_size);
+        if (!pas_enumerator_copy_remote(enumerator, baseline_allocator_table, baseline_allocator_table_ptr, table_size))
             return false;
 
         for (index = enumerator->root->num_baseline_allocators; index--;)
