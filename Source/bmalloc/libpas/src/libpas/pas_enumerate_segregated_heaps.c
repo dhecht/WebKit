@@ -45,7 +45,7 @@
 #include "pas_thread_local_cache_layout.h"
 #include "pas_thread_local_cache_node.h"
 
-static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
+static const bool verbose = true;//PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
 struct enumeration_context;
 struct local_allocator_node;
@@ -57,6 +57,8 @@ typedef struct local_allocators_for_page local_allocators_for_page;
 struct local_allocator_node {
     local_allocator_node* next;
     pas_local_allocator* allocator;
+    pas_local_allocator* remote_allocator;
+    bool is_baseline;
 };
 
 struct local_allocators_for_page {
@@ -311,6 +313,20 @@ static void record_page_objects(pas_enumerator* enumerator,
     }
 }
 
+static volatile pas_segregated_view view;
+
+static PAS_NEVER_INLINE void pas_enumerator_verify_allocator(pas_enumerator* enumerator, local_allocator_node* node)
+{
+    void* local_addr = pas_enumerator_read(enumerator, node->remote_allocator, sizeof(*node->remote_allocator));
+    if (local_addr == node->allocator)
+        return;
+    pas_log("PAS FAIL: mapping changed for remote allocator %p was %p now %p is_baseline %u\n",
+        node->remote_allocator, node->allocator, local_addr, node->is_baseline);
+    pas_log("PAS FAIL: try old local read\n");
+    view = node->allocator->view;
+    PAS_ASSERT(!"PAS FAIL pas_enumerator_verify_allocator");
+}
+
 static bool enumerate_exclusive_view(pas_enumerator* enumerator,
                                      pas_segregated_exclusive_view* view,
                                      enumeration_context* context)
@@ -353,6 +369,8 @@ static bool enumerate_exclusive_view(pas_enumerator* enumerator,
     if (!allocator_node)
         allocator = NULL;
     else {
+        pas_enumerator_verify_allocator(enumerator, allocator_node);
+
         /* Exclusives can only have one allocator allocating in them at a time. */
         PAS_ASSERT_WITH_DETAIL(!allocator_node->next);
         allocator = allocator_node->allocator;
@@ -499,6 +517,8 @@ static bool enumerate_partial_view(pas_enumerator* enumerator,
          allocator_node = allocator_node->next) {
         pas_segregated_view allocator_view;
 
+        pas_enumerator_verify_allocator(enumerator, allocator_node);
+
         allocator_view = pas_enumerator_read_compact(enumerator, allocator_node->allocator->view);
 
         if (verbose) {
@@ -590,7 +610,7 @@ static bool enumerate_segregated_heap_callback(pas_enumerator* enumerator,
     return true;
 }
 
-static PAS_NEVER_INLINE void consider_allocator(pas_enumerator* enumerator, enumeration_context* context, pas_local_allocator* allocator)
+static PAS_NEVER_INLINE void consider_allocator(pas_enumerator* enumerator, enumeration_context* context, pas_local_allocator* allocator, pas_local_allocator* remote_allocator, bool is_baseline)
 {
     local_allocator_map_add_result add_result;
     const pas_segregated_page_config* page_config;
@@ -620,7 +640,11 @@ static PAS_NEVER_INLINE void consider_allocator(pas_enumerator* enumerator, enum
     allocator_node = pas_enumerator_allocate(enumerator, sizeof(local_allocator_node));
     allocator_node->next = add_result.entry->head;
     allocator_node->allocator = allocator;
+    allocator_node->remote_allocator = remote_allocator;
+    allocator_node->is_baseline = is_baseline;
     add_result.entry->head = allocator_node;
+
+    pas_log("Added allocator %p page_boundary %p node %p\n", allocator, (void*)page_boundary, allocator_node);
 }
 
 bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
@@ -741,7 +765,8 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
 
                     allocator = pas_thread_local_cache_get_local_allocator_direct(tlc, allocator_index);
                     
-                    consider_allocator(enumerator, &context, allocator);
+                    consider_allocator(enumerator, &context, allocator, 
+                        pas_thread_local_cache_get_local_allocator_direct_unchecked(tlc_node->cache, allocator_index), false);
                 }
 
                 ++node_index;
@@ -770,8 +795,10 @@ bool pas_enumerate_segregated_heaps(pas_enumerator* enumerator)
         if (!baseline_allocator_table)
             return false;
         
-        for (index = enumerator->root->num_baseline_allocators; index--;)
-            consider_allocator(enumerator, &context, &baseline_allocator_table[index].u.allocator);
+        for (index = enumerator->root->num_baseline_allocators; index--;) {
+            consider_allocator(enumerator, &context, &baseline_allocator_table[index].u.allocator,
+                &(*baseline_allocator_table_ptr)[index].u.allocator, true);
+        }
     }
 
     if (!pas_enumerator_for_each_heap(enumerator, collect_shared_page_directories_heap_callback, &context))

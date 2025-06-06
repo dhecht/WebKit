@@ -62,6 +62,7 @@ static inline void pas_local_allocator_reset_impl(pas_local_allocator* allocator
     allocator->current_offset = 0;
     allocator->end_offset = 0;
     allocator->current_word = 0;
+    // XXX view
     allocator->view = pas_segregated_size_directory_as_view(directory);
     allocator->config_kind = pas_local_allocator_config_kind_create_normal(kind);
 }
@@ -394,6 +395,7 @@ pas_local_allocator_set_up_free_bits(pas_local_allocator* allocator,
     
     full_alloc_bits = pas_full_alloc_bits_create_for_partial_but_not_primordial(partial_view_as_view);
     
+    // XXX view
     allocator->view = partial_view_as_view;
 
     pas_local_allocator_scan_bits_to_set_up_free_bits(
@@ -712,6 +714,7 @@ pas_local_allocator_start_allocating_in_primordial_partial_view(
             pas_local_allocator_primordial_bump_stash_whole_allocation,
             page_config);
 
+        // XXX view
         allocator->view = pas_segregated_partial_view_as_view_non_null(view);
 
         view->is_attached_to_shared_handle = true;

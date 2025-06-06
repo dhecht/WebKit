@@ -65,6 +65,7 @@ void pas_local_allocator_construct(pas_local_allocator* allocator,
     allocator->current_offset = 0;
     allocator->end_offset = 0;
     
+    // XXX view
     allocator->view = pas_segregated_size_directory_as_view(directory);
 
     if (pas_segregated_size_directory_is_bitfit(directory)) {
