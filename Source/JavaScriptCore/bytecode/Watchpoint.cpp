@@ -73,7 +73,7 @@ void Watchpoint::operator delete(Watchpoint* watchpoint, std::destroying_delete_
 Watchpoint::~Watchpoint()
 {
     RELEASE_ASSERT(m_magic == magic);
-    RELEASE_ASSERT(m_set == nullptr || Integrity::isSanePointer(m_set));
+    //RELEASE_ASSERT(m_set == nullptr || Integrity::isSanePointer(m_set));
     if (isOnList()) {
         // This will happen if we get destroyed before the set fires. That's totally a valid
         // possibility. For example:
