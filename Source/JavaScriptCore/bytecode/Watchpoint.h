@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "tools/Integrity.h"
 #include <wtf/Atomics.h>
 #include <wtf/DebugHeap.h>
 #include <wtf/FastMalloc.h>
@@ -120,6 +121,7 @@ class Watchpoint : public BasicRawSentinelNode<Watchpoint> {
     WTF_MAKE_NONMOVABLE(Watchpoint);
     WTF_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(Watchpoint);
 public:
+    using Base = BasicRawSentinelNode<Watchpoint>;
 #define JSC_DEFINE_WATCHPOINT_TYPES(type, _) type,
     enum class Type : uint8_t {
         JSC_WATCHPOINT_TYPES(JSC_DEFINE_WATCHPOINT_TYPES)
@@ -129,6 +131,8 @@ public:
     Watchpoint(Type type)
         : m_type(type)
     { }
+
+    void remove();
 
     void operator delete(Watchpoint*, std::destroying_delete_t);
 
@@ -144,6 +148,10 @@ private:
     void runWithDowncast(const Func&);
 
     Type m_type;
+    WatchpointSet* m_set { nullptr };
+
+    static constexpr uint64_t magic = 0xabcdef123;
+    uint64_t m_magic { magic };
 };
 
 // Make sure that the state can be represented in 2 bits.
@@ -263,7 +271,21 @@ public:
     JS_EXPORT_PRIVATE void fireAllSlow(VM&, const FireDetail&); // Call only if you've checked isWatched.
     JS_EXPORT_PRIVATE void fireAllSlow(VM&, DeferredWatchpointFire* deferredWatchpoints); // Ditto.
     JS_EXPORT_PRIVATE void fireAllSlow(VM&, const char* reason); // Ditto.
-    
+
+    void lock() WTF_ACQUIRES_LOCK(m_lock)
+    {
+        RELEASE_ASSERT(m_magic == magic);
+        RELEASE_ASSERT(Integrity::isSanePointer(this));
+        RELEASE_ASSERT(m_lock.tryLock());
+    }
+
+    void unlock() WTF_RELEASES_LOCK(m_lock) 
+    {
+        m_lock.unlock();
+        RELEASE_ASSERT(m_magic == magic);
+    }
+    Lock m_lock;
+
 protected:
     JS_EXPORT_PRIVATE WatchpointSet(WatchpointState);
 
@@ -277,6 +299,8 @@ private:
     int8_t m_setIsNotEmpty;
 
     SentinelLinkedList<Watchpoint, BasicRawSentinelNode<Watchpoint>> m_set;
+    static constexpr uint64_t magic = 0xA1103370;
+    uint64_t m_magic { magic };
 };
 
 // InlineWatchpointSet is a low-overhead, non-copyable watchpoint set in which

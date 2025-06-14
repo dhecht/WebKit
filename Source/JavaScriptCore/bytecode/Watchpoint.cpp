@@ -72,6 +72,8 @@ void Watchpoint::operator delete(Watchpoint* watchpoint, std::destroying_delete_
 
 Watchpoint::~Watchpoint()
 {
+    RELEASE_ASSERT(m_magic == magic);
+    RELEASE_ASSERT(m_set == nullptr || Integrity::isSanePointer(m_set));
     if (isOnList()) {
         // This will happen if we get destroyed before the set fires. That's totally a valid
         // possibility. For example:
@@ -80,6 +82,17 @@ Watchpoint::~Watchpoint()
         // happens, but the CodeBlock gets destroyed because of GC.
         remove();
     }
+    RELEASE_ASSERT(!m_set);
+    m_magic = 0xdeadbeef;
+}
+
+void Watchpoint::remove()
+{
+    RELEASE_ASSERT(m_set);
+    m_set->lock();
+    Base::remove();
+    m_set->unlock();
+    m_set = nullptr;
 }
 
 void Watchpoint::fire(VM& vm, const FireDetail& detail)
@@ -104,6 +117,7 @@ WatchpointSet::~WatchpointSet()
     // either keeping the watchpoint set's owner alive, or does some weak reference thing.
     while (!m_set.isEmpty())
         m_set.begin()->remove();
+    m_magic = 0xdeadbeef;
 }
 
 void WatchpointSet::add(Watchpoint* watchpoint)
@@ -112,9 +126,13 @@ void WatchpointSet::add(Watchpoint* watchpoint)
     ASSERT(state() != IsInvalidated);
     if (!watchpoint)
         return;
+    lock();
+    watchpoint->m_set = this;
     m_set.push(watchpoint);
+    RELEASE_ASSERT(watchpoint->isOnList());
     m_setIsNotEmpty = true;
     m_state = IsWatched;
+    unlock();
 }
 
 void WatchpointSet::fireAllSlow(VM& vm, const FireDetail& detail)
@@ -180,11 +198,13 @@ void WatchpointSet::fireAllWatchpoints(VM& vm, const FireDetail& detail)
 
 void WatchpointSet::take(WatchpointSet* other)
 {
+    other->lock();
     ASSERT(state() == ClearWatchpoint);
     m_set.takeFrom(other->m_set);
     m_setIsNotEmpty = other->m_setIsNotEmpty;
     m_state = other->m_state;
     other->m_setIsNotEmpty = false;
+    other->unlock();
 }
 
 void InlineWatchpointSet::add(Watchpoint* watchpoint)
