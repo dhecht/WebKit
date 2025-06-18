@@ -88,6 +88,13 @@ Watchpoint::~Watchpoint()
 
 void Watchpoint::remove()
 {
+    RELEASE_ASSERT(!isCompilationThread());
+
+    auto next = this->next();
+    auto prev = this->prev();
+    RELEASE_ASSERT(next->prev() == this);
+    RELEASE_ASSERT(prev->next() == this);
+
     RELEASE_ASSERT(m_set);
     m_set->lock();
     Base::remove();
@@ -122,8 +129,15 @@ WatchpointSet::~WatchpointSet()
 
 void WatchpointSet::add(Watchpoint* watchpoint)
 {
-    ASSERT(!isCompilationThread());
+    RELEASE_ASSERT(!isCompilationThread());
     ASSERT(state() != IsInvalidated);
+
+    auto& head = *m_set.begin();
+    auto prev = head.prev();
+    auto next = head.next();
+    RELEASE_ASSERT(prev->next() == &head);
+    RELEASE_ASSERT(next->prev() == &head);
+
     if (!watchpoint)
         return;
     lock();
