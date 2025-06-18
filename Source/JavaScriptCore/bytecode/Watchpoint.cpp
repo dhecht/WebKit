@@ -49,6 +49,11 @@ void StringFireDetail::dump(PrintStream& out) const
     out.print(m_string);
 }
 
+void Watchpoint::crashWithInfo(Watchpoint* adjacent)
+{
+    CRASH_WITH_INFO(this, m_type, prev(), next(), adjacent->m_type, adjacent->prev(), adjacent->next());
+}
+
 template<typename Func>
 inline void Watchpoint::runWithDowncast(const Func& func)
 {
@@ -110,6 +115,8 @@ void WatchpointSet::add(Watchpoint* watchpoint)
 {
     ASSERT(!isCompilationThread());
     ASSERT(state() != IsInvalidated);
+    if (!m_set.isEmpty())
+        m_set.begin()->validate();
     if (!watchpoint)
         return;
     m_set.push(watchpoint);

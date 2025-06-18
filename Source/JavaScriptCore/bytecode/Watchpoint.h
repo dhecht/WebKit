@@ -120,6 +120,8 @@ class Watchpoint : public BasicRawSentinelNode<Watchpoint> {
     WTF_MAKE_NONMOVABLE(Watchpoint);
     WTF_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(Watchpoint);
 public:
+    using Base = BasicRawSentinelNode<Watchpoint>;
+
 #define JSC_DEFINE_WATCHPOINT_TYPES(type, _) type,
     enum class Type : uint8_t {
         JSC_WATCHPOINT_TYPES(JSC_DEFINE_WATCHPOINT_TYPES)
@@ -129,6 +131,22 @@ public:
     Watchpoint(Type type)
         : m_type(type)
     { }
+
+    [[noreturn]] void crashWithInfo(Watchpoint* adjacent);
+
+    void validate()
+    {
+        if (next()->prev() != this) [[unlikely]]
+            crashWithInfo(next());
+        else if (prev()->next() != this) [[unlikely]]
+            crashWithInfo(prev());
+    }
+
+    void remove()
+    {
+        validate();
+        Base::remove();
+    }
 
     void operator delete(Watchpoint*, std::destroying_delete_t);
 
