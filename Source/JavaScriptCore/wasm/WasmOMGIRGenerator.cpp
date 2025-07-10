@@ -115,7 +115,7 @@ static constexpr bool traceExecutionIncludesConstructionSite = false;
 class OMGIRGenerator {
     WTF_MAKE_TZONE_ALLOCATED(OMGIRGenerator);
 public:
-    using ExpressionType = Variable*;
+    using ExpressionType = Value*;
     using ResultList = Vector<ExpressionType, 8>;
     using ArgumentList = Vector<ExpressionType, 8>;
     using CallType = CallLinkInfo::CallType;
@@ -380,7 +380,7 @@ public:
     }
 
     OMGIRGenerator(CompilationContext&, CalleeGroup&, const ModuleInformation&, OptimizingJITCallee&, Procedure&, Vector<UnlinkedWasmToWasmCall>&, FixedBitVector& outgoingDirectCallees, unsigned& osrEntryScratchBufferSize, MemoryMode, CompilationMode, unsigned functionIndex, std::optional<bool> hasExceptionHandlers, unsigned loopIndexForOSREntry);
-    OMGIRGenerator(CompilationContext&, OMGIRGenerator& inlineCaller, OMGIRGenerator& inlineRoot, CalleeGroup&, unsigned functionIndex, std::optional<bool> hasExceptionHandlers, BasicBlock* returnContinuation, Vector<Value*> args);
+    OMGIRGenerator(CompilationContext&, OMGIRGenerator& inlineCaller, OMGIRGenerator& inlineRoot, CalleeGroup&, unsigned functionIndex, std::optional<bool> hasExceptionHandlers, BasicBlock* returnContinuation, ArgumentList& args);
 
     void computeStackCheckSize(bool& needsOverflowCheck, int32_t& checkSize);
 
@@ -866,6 +866,8 @@ private:
 
     Origin origin();
 
+    // XXX: remove
+#if 0    
     ExpressionType getPushVariable(B3::Type type)
     {
         ++m_stackSize;
@@ -892,9 +894,12 @@ private:
         m_stack[m_stackSize - 1] = var;
         return var;
     }
-
+#endif
     ExpressionType push(Value* value)
     {
+        ++m_stackSize;
+        return value;
+#if 0
         Variable* var = getPushVariable(value->type());
         set(var, value);
         if constexpr (!WasmOMGIRGeneratorInternal::traceExecution)
@@ -906,17 +911,23 @@ private:
 #endif
         TRACE_VALUE(Wasm::Types::Void, get(var), "push to stack height ", m_stackSize.value(), " site: [", site, "] var ", *var);
         return var;
+#endif
     }
 
+    // XXX: remove
     Value* get(BasicBlock* block, Variable* variable)
     {
         return block->appendNew<VariableValue>(m_proc, B3::Get, origin(), variable);
     }
 
+    // XXX: remove
     Value* get(Variable* variable)
     {
         return get(m_currentBlock, variable);
     }
+
+    // XXX: remove
+    Value* get(Value* value) { return value; }
 
     Value* set(BasicBlock* block, Variable* dst, Value* src)
     {
@@ -967,7 +978,7 @@ private:
     BasicBlock* m_returnContinuation { nullptr };
     OMGIRGenerator* m_inlineRoot { nullptr };
     OMGIRGenerator* m_inlineParent { nullptr };
-    Vector<Value*> m_inlinedArgs;
+    ArgumentList m_inlinedArgs;
     Vector<Variable*> m_inlinedResults;
     unsigned m_inlineDepth { 0 };
     Checked<uint32_t> m_inlinedBytes { 0 };
@@ -1088,7 +1099,7 @@ void OMGIRGenerator::computeStackCheckSize(bool& needsOverflowCheck, int32_t& ch
     needsOverflowCheck = needsOverflowCheck || needUnderflowCheck;
 }
 
-OMGIRGenerator::OMGIRGenerator(CompilationContext& context, OMGIRGenerator& parentCaller, OMGIRGenerator& rootCaller, CalleeGroup& calleeGroup, unsigned functionIndex, std::optional<bool> hasExceptionHandlers, BasicBlock* returnContinuation, Vector<Value*> args)
+OMGIRGenerator::OMGIRGenerator(CompilationContext& context, OMGIRGenerator& parentCaller, OMGIRGenerator& rootCaller, CalleeGroup& calleeGroup, unsigned functionIndex, std::optional<bool> hasExceptionHandlers, BasicBlock* returnContinuation, ArgumentList& args)
     : m_context(context)
     , m_calleeGroup(calleeGroup)
     , m_info(rootCaller.m_info)
@@ -1101,7 +1112,7 @@ OMGIRGenerator::OMGIRGenerator(CompilationContext& context, OMGIRGenerator& pare
     , m_returnContinuation(returnContinuation)
     , m_inlineRoot(&rootCaller)
     , m_inlineParent(&parentCaller)
-    , m_inlinedArgs(WTFMove(args))
+    , m_inlinedArgs(args)
     , m_inlineDepth(parentCaller.m_inlineDepth + 1)
     , m_unlinkedWasmToWasmCalls(rootCaller.m_unlinkedWasmToWasmCalls)
     , m_directCallees(rootCaller.m_directCallees)
@@ -2035,12 +2046,14 @@ void OMGIRGenerator::traceCF(Args&&... info)
         dataLogLn("$$$$$$$$$$$$$$$$$$$");
         return;
     }
+#if 0    
     for (i = 0; i < (int) m_parser->expressionStack().size(); ++i) {
         if (m_parser->expressionStack()[m_parser->expressionStack().size() - i - 1] != m_stack[m_stackSize.value() - i - 1]) {
             dataLogLn("************************");
             return;
         }
     }
+#endif
 }
 
 auto OMGIRGenerator::setLocal(uint32_t index, ExpressionType value) -> PartialResult
@@ -3050,7 +3063,7 @@ auto OMGIRGenerator::addI31GetU(ExpressionType ref, ExpressionType& result) -> P
     return { };
 }
 
-Variable* OMGIRGenerator::pushArrayNew(uint32_t typeIndex, Value* initValue, ExpressionType size)
+Value* OMGIRGenerator::pushArrayNew(uint32_t typeIndex, Value* initValue, ExpressionType size)
 {
     StorageType elementType;
     getArrayElementType(typeIndex, elementType);
@@ -3128,7 +3141,7 @@ auto OMGIRGenerator::addArrayNew(uint32_t typeIndex, ExpressionType size, Expres
     return { };
 }
 
-Variable* OMGIRGenerator::pushArrayNewFromSegment(ArraySegmentOperation operation, uint32_t typeIndex, uint32_t segmentIndex, ExpressionType arraySize, ExpressionType offset, ExceptionType exceptionType)
+Value* OMGIRGenerator::pushArrayNewFromSegment(ArraySegmentOperation operation, uint32_t typeIndex, uint32_t segmentIndex, ExpressionType arraySize, ExpressionType offset, ExceptionType exceptionType)
 {
     Value* resultValue = callWasmOperation(m_currentBlock, toB3Type(Types::Arrayref), operation,
         instanceValue(), m_currentBlock->appendNew<Const32Value>(m_proc, origin(), typeIndex),
@@ -3138,7 +3151,7 @@ Variable* OMGIRGenerator::pushArrayNewFromSegment(ArraySegmentOperation operatio
     // Indicates out of bounds for the segment or allocation failure.
     emitArrayNullCheck(resultValue, exceptionType);
 
-    return push(resultValue);
+    return resultValue;
 }
 
 auto OMGIRGenerator::addArrayNewDefault(uint32_t typeIndex, ExpressionType size, ExpressionType& result) -> PartialResult
@@ -4146,8 +4159,10 @@ void OMGIRGenerator::connectControlAtEntrypoint(unsigned& indexInBuffer, Value* 
         auto* load = loadFromScratchBuffer(indexInBuffer, pointer, value->type());
         if (fillLoopPhis)
             m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), load, data.phis[i]);
-        else
-            m_currentBlock->appendNew<VariableValue>(m_proc, Set, origin(), value.value(), load);
+        else {
+            RELEASE_ASSERT_NOT_REACHED();
+            //m_currentBlock->appendNew<VariableValue>(m_proc, Set, origin(), value.value(), load);
+        }
     }
     if (ControlType::isAnyCatch(data) && &data != &currentData) {
         auto* load = loadFromScratchBuffer(indexInBuffer, pointer, pointerType());
@@ -4169,8 +4184,7 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
         Value* phi = block.phis[i];
         m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), get(value), phi);
         body->append(phi);
-        set(body, value, phi);
-        newStack.append(value);
+        newStack.constructAndAppend(value.type(), phi);
     }
     enclosingStack.shrink(offset);
 
@@ -4344,13 +4358,13 @@ PatchpointExceptionHandle OMGIRGenerator::preparePatchpointForExceptions(BasicBl
         for (unsigned controlIndex = 0; controlIndex < currentFrame->m_parser->controlStack().size(); ++controlIndex) {
             ControlData& data = currentFrame->m_parser->controlStack()[controlIndex].controlData;
             Stack& expressionStack = currentFrame->m_parser->controlStack()[controlIndex].enclosedExpressionStack;
-            for (Variable* value : expressionStack)
-                liveValues.append(get(block, value));
+            for (Value* value : expressionStack)
+                liveValues.append(value);
             if (ControlType::isAnyCatch(data))
                 liveValues.append(get(block, data.exception()));
         }
-        for (Variable* value : currentFrame->m_parser->expressionStack())
-            liveValues.append(get(block, value));
+        for (Value* value : currentFrame->m_parser->expressionStack())
+            liveValues.append(value);
     }
 
     patch->effects.exitsSideways = true;
@@ -4501,20 +4515,14 @@ auto OMGIRGenerator::emitCatchTableImpl(ControlData& data, const ControlData::Tr
         unsigned offset = 0;
         for (unsigned i = 0; i < signature->template as<FunctionSignature>()->argumentCount(); ++i) {
             Type type = signature->as<FunctionSignature>()->argumentType(i);
-            Variable* var = m_proc.addVariable(toB3Type(type));
             Value* value = m_currentBlock->appendNew<MemoryValue>(m_proc, Load, toB3Type(type), origin(), buffer, offset * sizeof(uint64_t));
-            set(var, value);
-            newStack.constructAndAppend(type, var);
+            newStack.constructAndAppend(type, value);
             offset += type.kind == TypeKind::V128 ? 2 : 1;
         }
     }
-
-    if (target.type == CatchKind::CatchRef || target.type == CatchKind::CatchAllRef) {
-        Variable* var = m_proc.addVariable(wasmRefType());
-        set(var, exception);
-        push(exception);
-        newStack.constructAndAppend(Type { TypeKind::RefNull, static_cast<TypeIndex>(TypeKind::Exn) }, var);
-    }
+    
+    if (target.type == CatchKind::CatchRef || target.type == CatchKind::CatchAllRef)
+        newStack.constructAndAppend(Type { TypeKind::RefNull, static_cast<TypeIndex>(TypeKind::Exn) }, exception);
 
     auto& targetControl = m_parser->resolveControlRef(target.target).controlData;
     unifyValuesWithBlock(newStack, targetControl);
@@ -4829,11 +4837,12 @@ auto OMGIRGenerator::addEndToUnreachable(ControlEntry& entry, const Stack& expre
 
 Vector<ConstrainedValue> OMGIRGenerator::createCallConstrainedArgs(BasicBlock* block, const CallInformation& wasmCalleeInfo, const ArgumentList& tmpArgs)
 {
+    UNUSED_PARAM(block); // XXX: remove
     Vector<ConstrainedValue> constrainedPatchArgs;
     constrainedPatchArgs.reserveCapacity(tmpArgs.size());
     for (unsigned i = 0; i < tmpArgs.size(); ++i) {
         auto dstLocation = wasmCalleeInfo.params[i];
-        constrainedPatchArgs.append(B3::ConstrainedValue(get(block, tmpArgs[i]), dstLocation));
+        constrainedPatchArgs.append(B3::ConstrainedValue(tmpArgs[i], dstLocation));
     }
 
     return constrainedPatchArgs;
@@ -5396,11 +5405,6 @@ bool OMGIRGenerator::canInline(FunctionSpaceIndex functionIndexSpace) const
 
 auto OMGIRGenerator::emitInlineDirectCall(FunctionCodeIndex calleeFunctionIndex, const TypeDefinition& calleeSignature, ArgumentList& args, ResultList& resultList) -> PartialResult
 {
-    Vector<Value*> getArgs;
-
-    for (auto* arg : args)
-        getArgs.append(m_currentBlock->appendNew<VariableValue>(m_proc, B3::Get, origin(), arg));
-
     BasicBlock* continuation = m_proc.addBlock();
     // Not all inine frames need to save state, but we still need to make sure that there is at least
     // one unique CallSiteIndex per inline frame for stack traces to work.
@@ -5413,7 +5417,7 @@ auto OMGIRGenerator::emitInlineDirectCall(FunctionCodeIndex calleeFunctionIndex,
         Locker locker { m_calleeGroup.m_lock };
         inlineeHasExceptionHandlers = m_calleeGroup.wasmEntrypointCalleeFromFunctionIndexSpace(locker, m_calleeGroup.toSpaceIndex(calleeFunctionIndex))->hasExceptionHandlers();
     }
-    m_protectedInlineeGenerators.append(makeUnique<OMGIRGenerator>(m_context, *this, *m_inlineRoot, m_calleeGroup, calleeFunctionIndex, inlineeHasExceptionHandlers, continuation, WTFMove(getArgs)));
+    m_protectedInlineeGenerators.append(makeUnique<OMGIRGenerator>(m_context, *this, *m_inlineRoot, m_calleeGroup, calleeFunctionIndex, inlineeHasExceptionHandlers, continuation, args));
     auto& irGenerator = *m_protectedInlineeGenerators.last();
     m_protectedInlineeParsers.append(makeUnique<FunctionParser<OMGIRGenerator>>(irGenerator, function.data, calleeSignature, m_info));
     auto& parser = *m_protectedInlineeParsers.last();
