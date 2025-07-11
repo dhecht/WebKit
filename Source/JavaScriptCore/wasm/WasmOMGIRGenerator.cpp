@@ -354,6 +354,13 @@ public:
 
     enum class CastKind { Cast, Test };
 
+    void verifyStack(Stack& stack)
+    {
+        for (auto& entry : stack) {
+            RELEASE_ASSERT(entry.value()->owner);
+        }
+    }
+
     template <typename ...Args>
     NEVER_INLINE UnexpectedResult WARN_UNUSED_RETURN fail(Args... args) const
     {
@@ -401,7 +408,7 @@ public:
 
     ExpressionType WARN_UNUSED_RETURN addConstant(v128_t value)
     {
-        return push(m_currentBlock->appendNew<Const128Value>(m_proc, origin(), value));
+        return push(constant(B3::V128, value));
     }
 
     // SIMD generated
@@ -4153,22 +4160,71 @@ Value* OMGIRGenerator::loadFromScratchBuffer(unsigned& indexInBuffer, Value* poi
 
 void OMGIRGenerator::connectControlAtEntrypoint(unsigned& indexInBuffer, Value* pointer, ControlData& data, Stack& expressionStack, ControlData& currentData, bool fillLoopPhis)
 {
-    TRACE_CF("Connect control at entrypoint");
-    for (unsigned i = 0; i < expressionStack.size(); i++) {
-        TypedExpression value = expressionStack[i];
-        auto* load = loadFromScratchBuffer(indexInBuffer, pointer, value->type());
-        if (fillLoopPhis)
-            m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), load, data.phis[i]);
-        else {
-            RELEASE_ASSERT_NOT_REACHED();
-            //m_currentBlock->appendNew<VariableValue>(m_proc, Set, origin(), value.value(), load);
+    RELEASE_ASSERT(!fillLoopPhis);
+
+    BasicBlock* stackValueBlock = nullptr;
+    unsigned stackValueBlockIndex = 0;
+    B3::InsertionSet insertionSet(m_proc);
+
+    auto findBlockIndexForStackValue = [&](Value* value) {
+        if (value->owner != stackValueBlock) {
+            if (stackValueBlock)
+                insertionSet.execute(stackValueBlock);
+
+            RELEASE_ASSERT(value->owner);
+            stackValueBlock = value->owner;
+            stackValueBlockIndex = 0;
+            ASSERT(insertionSet.isEmpty());
         }
+
+        while (stackValueBlock->at(stackValueBlockIndex++) != value)
+            ASSERT(stackValueBlockIndex < stackValueBlock->size());
+        ASSERT(stackValueBlock->at(stackValueBlockIndex - 1) == value);
+    };
+
+    for (unsigned i = 0; i < expressionStack.size(); i++) {
+        TypedExpression stackValue = expressionStack[i];
+
+        // Constants won't have an owning basic block since they're pooled, but the value will be the same so
+        // we don't need to inject them from the alternate entry point.
+        if (stackValue->isConstant()) {
+            ++indexInBuffer;
+            continue;
+        }
+        ASSERT(stackValue->owner); // So we know where to insert the Upsilon
+
+        Value* phi = data.continuation->appendNew<Value>(m_proc, Phi, stackValue->type(), stackValue->origin());
+        expressionStack[i] = TypedExpression { stackValue.type(), phi };
+
+        Value* injectedValue = loadFromScratchBuffer(indexInBuffer, pointer, stackValue->type());
+        m_currentBlock->appendNew<UpsilonValue>(m_proc, stackValue->origin(), injectedValue, phi);
+
+        findBlockIndexForStackValue(stackValue);
+        insertionSet.insertValue(stackValueBlockIndex, m_proc.add<UpsilonValue>(stackValue->origin(), stackValue, phi));
     }
+    if (stackValueBlock)
+        insertionSet.execute(stackValueBlock);
+
     if (ControlType::isAnyCatch(data) && &data != &currentData) {
         auto* load = loadFromScratchBuffer(indexInBuffer, pointer, pointerType());
         m_currentBlock->appendNew<VariableValue>(m_proc, Set, origin(), data.exception(), load);
     }
+}
+
+#if 0
+void OMGIRGenerator::connectControlAtEntrypoint(unsigned& indexInBuffer, Value* pointer, ControlData& data, Stack& expressionStack, ControlData& currentData, bool fillLoopPhis)
+{
+    TRACE_CF("Connect control at entrypoint");
+    RELEASE_ASSERT(!fillLoopPhis);
+    RELEASE_ASSERT_NOT_REACHED();
+    for (unsigned i = 0; i < expressionStack.size(); i++) {
+        //TypedExpression value = expressionStack[i];
+        //auto* load = loadFromScratchBuffer(indexInBuffer, pointer, value->type());
+        //m_currentBlock->appendNew<VariableValue>(m_proc, Set, origin(), value.value(), load);
+    }
+
 };
+#endif
 
 auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, ControlType& block, Stack& newStack, uint32_t loopIndex) -> PartialResult
 {
@@ -4208,7 +4264,12 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
                 ++indexInBuffer;
         }
         connectControlAtEntrypoint(indexInBuffer, pointer, block, enclosingStack, block);
-        connectControlAtEntrypoint(indexInBuffer, pointer, block, newStack, block, true);
+
+        for (unsigned i = 0; i < newStack.size(); i++) {
+            TypedExpression& value = newStack[i];
+            auto* load = loadFromScratchBuffer(indexInBuffer, pointer, value->type());
+            m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), load, block.phis[i]);
+        }
 
         ASSERT(!m_proc.usesSIMD() || m_compilationMode == CompilationMode::OMGForOSREntryMode);
         unsigned valueSize = m_proc.usesSIMD() ? 2 : 1;
@@ -4232,6 +4293,7 @@ auto OMGIRGenerator::addBlock(BlockSignature signature, Stack& enclosingStack, C
     TRACE_CF("Block: ", *signature.m_signature);
     BasicBlock* continuation = m_proc.addBlock();
 
+    verifyStack(enclosingStack);
     splitStack(signature, enclosingStack, newStack);
     newBlock = ControlData(m_proc, origin(), signature, BlockType::Block, m_stackSize, continuation);
     return { };
@@ -4266,6 +4328,7 @@ auto OMGIRGenerator::addIf(ExpressionType condition, BlockSignature signature, S
 
     m_currentBlock = taken;
     TRACE_CF("IF");
+    verifyStack(enclosingStack);
     splitStack(signature, enclosingStack, newStack);
     result = ControlData(m_proc, origin(), signature, BlockType::If, m_stackSize, continuation, notTaken);
     return { };
@@ -4294,6 +4357,7 @@ auto OMGIRGenerator::addTry(BlockSignature signature, Stack& enclosingStack, Con
     TRACE_CF("TRY");
 
     BasicBlock* continuation = m_proc.addBlock();
+    verifyStack(enclosingStack);
     splitStack(signature, enclosingStack, newStack);
     result = ControlData(m_proc, origin(), signature, BlockType::Try, m_stackSize, continuation, advanceCallSiteIndex(), m_tryCatchDepth);
     return { };
@@ -4316,6 +4380,7 @@ auto OMGIRGenerator::addTryTable(BlockSignature signature, Stack& enclosingStack
     );
 
     BasicBlock* continuation = m_proc.addBlock();
+    verifyStack(enclosingStack);
     splitStack(signature, enclosingStack, newStack);
     result = ControlData(m_proc, origin(), signature, BlockType::TryTable, m_stackSize, continuation, advanceCallSiteIndex(), m_tryCatchDepth);
     result.setTryTableTargets(WTFMove(targetList));
