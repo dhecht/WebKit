@@ -356,9 +356,11 @@ public:
 
     void verifyStack(Stack& stack)
     {
+#if 1
         for (auto& entry : stack) {
-            RELEASE_ASSERT(entry.value()->owner);
+            RELEASE_ASSERT(entry.value()->isConstant() ||  entry.value()->owner);
         }
+#endif
     }
 
     template <typename ...Args>
@@ -4155,11 +4157,15 @@ Value* OMGIRGenerator::loadFromScratchBuffer(unsigned& indexInBuffer, Value* poi
     unsigned valueSize = m_proc.usesSIMD() ? 2 : 1;
     size_t offset = valueSize * sizeof(uint64_t) * (indexInBuffer++);
     RELEASE_ASSERT(type.isNumeric());
-    return m_currentBlock->appendNew<MemoryValue>(m_proc, Load, type, origin(), pointer, offset);
+    auto v = m_currentBlock->appendNew<MemoryValue>(m_proc, Load, type, origin(), pointer, offset);
+    dataLogLn("loadFromScratchBuffer ", indexInBuffer, " v=", *v);
+    return v;
 }
 
 void OMGIRGenerator::connectControlAtEntrypoint(unsigned& indexInBuffer, Value* pointer, ControlData& data, Stack& expressionStack, ControlData& currentData, bool fillLoopPhis)
 {
+    constexpr bool verbose = true;
+
     RELEASE_ASSERT(!fillLoopPhis);
 
     BasicBlock* stackValueBlock = nullptr;
@@ -4189,6 +4195,7 @@ void OMGIRGenerator::connectControlAtEntrypoint(unsigned& indexInBuffer, Value* 
         // we don't need to inject them from the alternate entry point.
         if (stackValue->isConstant()) {
             ++indexInBuffer;
+            dataLogLnIf(verbose, "stack[", i, "] is const: ", *stackValue);
             continue;
         }
         ASSERT(stackValue->owner); // So we know where to insert the Upsilon
@@ -4197,10 +4204,15 @@ void OMGIRGenerator::connectControlAtEntrypoint(unsigned& indexInBuffer, Value* 
         expressionStack[i] = TypedExpression { stackValue.type(), phi };
 
         Value* injectedValue = loadFromScratchBuffer(indexInBuffer, pointer, stackValue->type());
-        m_currentBlock->appendNew<UpsilonValue>(m_proc, stackValue->origin(), injectedValue, phi);
+        Value* upsilon = m_currentBlock->appendNew<UpsilonValue>(m_proc, stackValue->origin(), injectedValue, phi);
 
         findBlockIndexForStackValue(stackValue);
-        insertionSet.insertValue(stackValueBlockIndex, m_proc.add<UpsilonValue>(stackValue->origin(), stackValue, phi));
+        Value* originalUpsilon = m_proc.add<UpsilonValue>(stackValue->origin(), stackValue, phi);
+        insertionSet.insertValue(stackValueBlockIndex, originalUpsilon);
+
+        dataLogLnIf(verbose, "stack[", i, "] value=", *stackValue, "\n\tphi=", *phi, " in BB", *data.continuation,
+            "\n\tinjectedValue=", *injectedValue, " upslon=", *upsilon, " in BB", *m_currentBlock,
+            "\n\toriginalUpsilon=", originalUpsilon, " to BB", stackValueBlock, " at index ", stackValueBlockIndex);
     }
     if (stackValueBlock)
         insertionSet.execute(stackValueBlock);
@@ -4208,6 +4220,7 @@ void OMGIRGenerator::connectControlAtEntrypoint(unsigned& indexInBuffer, Value* 
     if (ControlType::isAnyCatch(data) && &data != &currentData) {
         auto* load = loadFromScratchBuffer(indexInBuffer, pointer, pointerType());
         m_currentBlock->appendNew<VariableValue>(m_proc, Set, origin(), data.exception(), load);
+        dataLogLnIf(verbose, "set exception=", *data.exception(), " to ", *load);
     }
 }
 
@@ -4472,6 +4485,8 @@ Value* OMGIRGenerator::emitCatchImpl(CatchKind kind, ControlType& data, unsigned
     m_rootBlocks.append({ m_currentBlock, usesSIMD() });
     m_stackSize = data.stackSize();
 
+    dataLogLn("emitCatchImpl");
+
     if (ControlType::isTry(data)) {
         if (kind == CatchKind::Catch)
             data.convertTryToCatch(advanceCallSiteIndex(), m_proc.addVariable(pointerType()));
@@ -4511,6 +4526,7 @@ Value* OMGIRGenerator::emitCatchImpl(CatchKind kind, ControlType& data, unsigned
 
         auto& topControlData = currentFrame->m_parser->controlStack().last().controlData;
         auto& topExpressionStack = currentFrame->m_parser->expressionStack();
+        RELEASE_ASSERT(currentFrame != this || topExpressionStack.isEmpty());
         connectControlAtEntrypoint(indexInBuffer, pointer, topControlData, topExpressionStack, data);
     }
 
@@ -4571,6 +4587,7 @@ auto OMGIRGenerator::emitCatchTableImpl(ControlData& data, const ControlData::Tr
 
         auto& topControlData = currentFrame->m_parser->controlStack().last().controlData;
         auto& topExpressionStack = currentFrame->m_parser->expressionStack();
+        //RELEASE_ASSERT(currentFrame != this || topExpressionStack.isEmpty());
         connectControlAtEntrypoint(indexInBuffer, pointer, topControlData, topExpressionStack, data);
     }
 
