@@ -4159,7 +4159,7 @@ Value* OMGIRGenerator::loadFromScratchBuffer(unsigned& indexInBuffer, Value* poi
     size_t offset = valueSize * sizeof(uint64_t) * (indexInBuffer++);
     RELEASE_ASSERT(type.isNumeric());
     auto v = m_currentBlock->appendNew<MemoryValue>(m_proc, Load, type, origin(), pointer, offset);
-    dataLogLn("loadFromScratchBuffer ", indexInBuffer, " v=", *v);
+    //dataLogLn("loadFromScratchBuffer ", indexInBuffer, " v=", *v);
     return v;
 }
 
@@ -4213,7 +4213,7 @@ void OMGIRGenerator::connectControlAtEntrypoint(unsigned& indexInBuffer, Value* 
 
         dataLogLnIf(verbose, "stack[", i, "] value=", *stackValue, "\n\tphi=", *phi, " in BB", *data.continuation,
             "\n\tinjectedValue=", *injectedValue, " upslon=", *upsilon, " in BB", *m_currentBlock,
-            "\n\toriginalUpsilon=", originalUpsilon, " to BB", stackValueBlock, " at index ", stackValueBlockIndex);
+            "\n\toriginalUpsilon=", *originalUpsilon, " to BB", *stackValueBlock, " at index ", stackValueBlockIndex);
     }
     if (stackValueBlock)
         insertionSet.execute(stackValueBlock);
@@ -4481,6 +4481,7 @@ void OMGIRGenerator::connectValuesForCatchEntrypoint(ControlData& catchData, Val
         if (currentFrame != this) {
             auto& topControlData = currentFrame->m_parser->controlStack().last().controlData;
             auto& topExpressionStack = currentFrame->m_parser->expressionStack();
+            RELEASE_ASSERT(topExpressionStack.isEmpty()); // XXX: fix this case, topControlData is not the right place.
             connectControlAtEntrypoint(indexInBuffer, pointer, topControlData, topExpressionStack, false);
         }
     }
@@ -5984,7 +5985,8 @@ Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileOMG(Compilati
     procedure.resetReachability();
     if (ASSERT_ENABLED)
         validate(procedure, "After parsing:\n");
-
+    //dataLogLn("parseAndCompileOMG ", procedure);
+    dataLogLn("num variables=", procedure.variables().size());
     estimateStaticExecutionCounts(procedure);
 
     dataLogIf(WasmOMGIRGeneratorInternal::verbose, "Pre SSA: ", procedure);
