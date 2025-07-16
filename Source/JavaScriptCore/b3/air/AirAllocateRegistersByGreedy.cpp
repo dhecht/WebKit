@@ -155,6 +155,7 @@ public:
             m_intervals.first() |= interval;
         }
         m_size += interval.distance();
+        m_cover |= interval;
         validate();
     }
 
@@ -169,6 +170,7 @@ public:
             m_intervals.last() |= interval;
         }
         m_size += interval.distance();
+        m_cover |= interval;
         validate();
     }
 
@@ -182,8 +184,16 @@ public:
         return m_size;
     }
 
+    Interval cover() const
+    {
+        return m_cover;
+    }
+
     bool overlaps(LiveRange& other)
     {
+        if (!m_cover.overlaps(other.m_cover))
+            return false;
+
         auto otherIter = other.intervals().begin();
         auto otherEnd = other.intervals().end();
         for (auto interval : intervals()) {
@@ -288,6 +298,7 @@ public:
     }
 
 private:
+    Interval m_cover;
     Deque<Interval> m_intervals;
     size_t m_size { 0 }; // Sum of the distances over m_intervals
 };
@@ -395,27 +406,36 @@ public:
         }
     };
 
-    using AllocatedIntervalSet = StdSet<AllocatedInterval>;
+    struct AllocatedIntervalSet {
+        using SetType = StdSet<AllocatedInterval>;
+        using iterator = SetType::iterator;
+
+        Interval cover;
+        SetType set;
+    };
 
     void add(Tmp tmp, LiveRange& range)
     {
         ASSERT(!hasConflict(range, Width64)); // Can't add overlapping LiveRanges
         for (auto& interval : range.intervals()) {
             ASSERT(interval != Interval()); // Strict ordering requires no empty intervals.
-            m_allocations.insert({ tmp, interval });
+            m_allocations.cover |= interval;
+            m_allocations.set.insert({ tmp, interval });
         }
     }
 
     void addClobberHigh64(Reg reg, Point point)
     {
         ASSERT(reg.isFPR());
-        m_allocationsHigh64.insert({ Tmp(reg), Interval(point) });
+        m_allocationsHigh64.cover |= Interval(point);
+        m_allocationsHigh64.set.insert({ Tmp(reg), Interval(point) });
     }
 
     void evict(Tmp tmp, LiveRange& range)
     {
         for (auto& interval : range.intervals()) {
-            auto r = m_allocations.erase({ tmp, interval });
+            auto r = m_allocations.set.erase({ tmp, interval });
+            // XXX: set recompute?
             ASSERT_UNUSED(r, r == 1);
         }
     }
@@ -447,7 +467,7 @@ public:
 
     bool isEmpty() const
     {
-        return m_allocations.empty() && m_allocationsHigh64.empty();
+        return m_allocations.set.empty() && m_allocationsHigh64.set.empty();
     }
 
     void dump(PrintStream& out) const
@@ -455,7 +475,7 @@ public:
         auto dumpSet = [&out](const AllocatedIntervalSet& allocationSet) {
             CommaPrinter comma;
             out.print("[");
-            for (auto& alloc : allocationSet) {
+            for (auto& alloc : allocationSet.set) {
                 out.print(comma);
                 out.print(alloc);
             }
@@ -463,7 +483,7 @@ public:
         };
 
         dumpSet(m_allocations);
-        if (!m_allocationsHigh64.empty()) {
+        if (!m_allocationsHigh64.set.empty()) {
             out.print(", ↑");
             dumpSet(m_allocationsHigh64);
         }
@@ -473,6 +493,9 @@ private:
     template<typename Func>
     static IterationStatus forEachConflictImpl(AllocatedIntervalSet& allocatedSet, const LiveRange& range, const Func& func)
     {
+        if (!allocatedSet.cover.overlaps(range.cover()))
+            return IterationStatus::Continue;
+
         auto rangeIter = range.intervals().begin();
         auto rangeEnd = range.intervals().end();
 
@@ -484,7 +507,7 @@ private:
             AllocatedInterval conflict;
             {
                 auto conflictIter = findFirstIntervalEndingAfter(allocatedSet, nextSearch);
-                if (conflictIter == allocatedSet.end())
+                if (conflictIter == allocatedSet.set.end())
                     return IterationStatus::Continue; // End of 'm_allocations', so no more potential conflicts
                 if (rangeIter->end() <= conflictIter->interval.begin()) {
                     // No more conflicts with this 'range' interval. Move on to the next interval in 'range'.
@@ -511,7 +534,7 @@ private:
         // pos can be 0, yet we can't express a non-empty interval with end==0, so instead of looking
         // for the first interval ending after pos we find the first interval ending at or after pos+1.
         ASSERT(query.end() == point + 1);
-        auto iter = allocatedSet.lower_bound({ Tmp(), query });
+        auto iter = allocatedSet.set.lower_bound({ Tmp(), query });
         ASSERT(iter == allocatedSet.end() || iter->interval.end() > point);
         return iter;
     }
