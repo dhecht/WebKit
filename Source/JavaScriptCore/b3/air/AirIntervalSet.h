@@ -64,8 +64,12 @@ private:
     class LeafNode;
     class InnerNode;
     
+    class Node {
+        // Common base class for all nodes - provides type identity for NodePtr
+    };
+
     template<typename Payload, size_t N>
-    class NodeBase {
+    class NodeImpl : public Node {
     public:
 
         void insertAt(size_t size, size_t index, const Key& key, const Payload& value)
@@ -111,16 +115,16 @@ private:
 
         NodePtr() : m_bits(0) { }
         
-        NodePtr(void* ptr, size_t size) :
+        NodePtr(Node* ptr, size_t size) :
             m_bits(reinterpret_cast<uintptr_t>(ptr) | size)
         {
             ASSERT(!(reinterpret_cast<uintptr_t>(ptr) & size_mask));
             ASSERT(size <= size_mask);
         }
 
-        void* get() const
+        Node* get() const
         {
-            return reinterpret_cast<void*>(m_bits & ~size_mask);
+            return reinterpret_cast<Node*>(m_bits & ~size_mask);
         }
     
         size_t size() const
@@ -130,7 +134,6 @@ private:
         
         explicit operator bool() const { return m_bits; }
         
-        // Type-safe casting methods - caller knows the type based on tree depth
         LeafNode* asLeaf() const
         {
             return static_cast<LeafNode*>(get());
@@ -146,10 +149,10 @@ private:
         uintptr_t m_bits;
     };
 
-    class LeafNode : public NodeBase<Value, Order> {
+    class LeafNode : public NodeImpl<Value, Order> {
     };
 
-    class InnerNode : public NodeBase<NodePtr, Order> {
+    class InnerNode : public NodeImpl<NodePtr, Order> {
     };
 
     void insertIntoLeaf(LeafNode& leaf, size_t leafSize, const Key& key, const Value& value)
