@@ -150,111 +150,32 @@ private:
 
     class InnerNode : public NodeBase<NodePtr<Value, Order>, Order> {
     public:
-        // Find child index for a given end point
-        size_t findChildIndex(Point end) const
+        // Find child index for a given key
+        size_t findChildIndex(size_t size, const Key& key) const
         {
-            size_t i = 0;
-            while (i < this->size && end >= this->ends[i])
-                ++i;
-            return i;
+            return this->findInsertionPoint(size, key);
         }
         
-        NodePtr<Value, N>& childAt(size_t index) { return this->payloads[index]; }
-        const NodePtr<Value, N>& childAt(size_t index) const { return this->payloads[index]; }
+        NodePtr<Value, Order>& childAt(size_t index) { return this->payloads[index]; }
+        const NodePtr<Value, Order>& childAt(size_t index) const { return this->payloads[index]; }
     };
 
-    template<size_t N>
-    void insertIntoLeaf(LeafNode<N>& leaf, Point start, Point end, Tmp tmp)
+    void insertIntoLeaf(LeafNode& leaf, size_t leafSize, const Key& key, const Value& value)
     {
-        if (leaf.isFull()) {
+        if (leafSize >= Order) {
             // XXX overflow - need to split leaf
             RELEASE_ASSERT_NOT_REACHED();
         }
         
-        Value value { start, tmp };
-        size_t insertionPoint = leaf.findInsertionPoint(end);
-        leaf.insertAt(insertionPoint, end, value);
+        size_t insertionPoint = leaf.findInsertionPoint(leafSize, key);
+        leaf.insertAt(leafSize, insertionPoint, key, value);
     }
     
     // Root node pointer - for now just use a simple pointer
     // In a full implementation, this would be a NodePtr
     void* m_root { nullptr };
     bool m_rootIsLeaf { true };
-#if 0
-    bool add(Tmp tmp)
-    {
-        if (tmp.isGP())
-            return m_gp.add(tmp);
-        return m_fp.add(tmp);
-    }
-    
-    bool remove(Tmp tmp)
-    {
-        if (tmp.isGP())
-            return m_gp.remove(tmp);
-        return m_fp.remove(tmp);
-    }
-    
-    bool contains(Tmp tmp)
-    {
-        if (tmp.isGP())
-            return m_gp.contains(tmp);
-        return m_fp.contains(tmp);
-    }
-    
-    size_t size() const
-    {
-        return m_gp.size() + m_fp.size();
-    }
-    
-    bool isEmpty() const
-    {
-        return !size();
-    }
-
-    class iterator {
-    public:
-        iterator()
-        {
-        }
-        
-        iterator(BitVector::iterator gpIter, BitVector::iterator fpIter)
-            : m_gpIter(gpIter)
-            , m_fpIter(fpIter)
-        {
-        }
-        
-        Tmp operator*()
-        {
-            if (!m_gpIter.isAtEnd())
-                return Tmp::tmpForAbsoluteIndex(GP, *m_gpIter);
-            return Tmp::tmpForAbsoluteIndex(FP, *m_fpIter);
-        }
-        
-        iterator& operator++()
-        {
-            if (!m_gpIter.isAtEnd()) {
-                ++m_gpIter;
-                return *this;
-            }
-            ++m_fpIter;
-            return *this;
-        }
-        
-        friend bool operator==(const iterator&, const iterator&) = default;
-        
-    private:
-        BitVector::iterator m_gpIter;
-        BitVector::iterator m_fpIter;
-    };
-    
-    iterator begin() const LIFETIME_BOUND { return iterator(m_gp.indices().begin(), m_fp.indices().begin()); }
-    iterator end() const LIFETIME_BOUND { return iterator(m_gp.indices().end(), m_fp.indices().end()); }
-
-private:
-    IndexSet<Tmp::AbsolutelyIndexed<GP>> m_gp;
-    IndexSet<Tmp::AbsolutelyIndexed<FP>> m_fp;
-#endif
+    size_t m_rootSize { 0 };
 };
 
 } } } // namespace JSC::B3::Air
