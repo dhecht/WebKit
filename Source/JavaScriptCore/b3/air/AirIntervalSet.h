@@ -61,13 +61,15 @@ public:
             m_root = NodePtr(leaf, 0);
             m_height = 0;
         }
-        NodePtr newSubtree = insertImpl(m_root, key, value, 0);
-        if (newSubtree) {
+        NodePtr newChild = insertImpl(m_root, m_rootKey, key, value, 0);
+        if (newChild) {
             ASSERT(m_root.size() == Order); // Otherwise, root should have been updated.
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
-            newRoot->payloads[0] = m_root;
-            newRoot->payloads[1] = newSubtree;
+            newRoot->key(0) = m_rootKey;
+            newRoot->child(0) = m_root;
+            newRoot->key(1) = newChild.maxKey();
+            newRoot->child(1) = newChild;
             m_root = NodePtr(newRoot, 2);
             m_height++;
         }
@@ -103,6 +105,10 @@ private:
     template<typename Payload, size_t N>
     class NodeImpl : public Node {
     public:
+        Key& key(unsigned i)
+        {
+            return keys[i];
+        }
 
         // XXX: maybe move this to NodePtr so it can directly update size?
         void insertAt(size_t& size, size_t index, const Key& key, const Payload& value)
@@ -168,6 +174,18 @@ private:
             return m_bits & size_mask;
         }
         
+        void setSize(size_t newSize)
+        {
+            ASSERT(newSize <= size_mask);
+            m_bits = (m_bits & ~size_mask) | newSize;
+        }
+
+        const Key& maxKey() const
+        {
+            RELEASE_ASSERT(size());
+            return node()->key(size() - 1);
+        }
+
         explicit operator bool() const { return m_bits; }
 
         template<typename NodeType> requires std::is_base_of_v<Node, NodeType>
@@ -192,33 +210,43 @@ private:
     };
 
     class LeafNode : public NodeImpl<Value, Order> {
-    };
-
-    class InnerNode : public NodeImpl<NodePtr, Order> {
-        using NodeImpl<NodePtr, Order>::payloads;
-        
+        using NodeImpl<Value, Order>::payloads;
     public:
-        NodePtr child(unsigned i)
+        Value& value(unsigned i)
         {
             return payloads[i];
         }
     };
 
-    NodePtr insertImpl(NodePtr& node, const Key& key, const Value& value, unsigned depth)
-    {
-        size_t pos = node.node()->findInsertionPoint(node.size(), key);
-        if (depth == m_height) {
-            // Insert into the leaf node, and return any new leaf nodes.
-            return insertInNodeSplitIfNeeded(node, key, value, pos);
+    class InnerNode : public NodeImpl<NodePtr, Order> {
+        using NodeImpl<NodePtr, Order>::payloads;
+    public:
+        NodePtr& child(unsigned i)
+        {
+            return payloads[i];
         }
+    };
+
+    NodePtr insertImpl(NodePtr& subtree, Key& subtreeKey, const Key& key, const Value& value, unsigned depth)
+    {
+        size_t pos = subtree.node()->findInsertionPoint(subtree.size(), key);
+        if (depth == m_height) {
+            // subtree is really a leaf. Insert and return any new leaf nodes in case of split.
+            return insertInNodeSplitIfNeeded(subtree, subtreeKey, key, value, pos);
+        }
+        size_t oldSize = subtree.size();
         // Not a leaf so insert into this subtree.
-        InnerNode* inner = node.asInner();
-        NodePtr newNode = insertImpl(inner->payloads[pos], key, value, depth + 1);
-        if (newNode) {
-            ASSERT(inner->payloads[pos].size() == Order); // Otherwise, should have been inserted.
-            // A new child (could be either a leaf or inner node) was needed. Insert it and 
-            // potentially split this node.
-            return insertInNodeSplitIfNeeded(node, key, value, pos);
+        InnerNode* inner = subtree.asInner();
+        NodePtr newChild = insertImpl(inner->child(pos), inner->key(pos), key, value, depth + 1);
+        if (newChild) {
+            ASSERT_UNUSED(oldSize, oldSize == Order); // Otherwise, should have been inserted.
+            ASSERT_UNUSED(oldSize, inner->child(pos).size() + newChild.size() == oldSize + 1);
+            // Insert the new child into the subtree. The key for innert nodes is the maxium key of the children.            
+            const Key& newChildKey = newChild.maxKey();
+            NodePtr newInner = insertInNodeSplitIfNeeded(subtree, subtreeKey, newChildKey, newChild, pos + 1);
+            return newInner;
+        } else {
+            ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
         }
         // Nothing more to do, new key/value was inserted and the tree fully updated.
         return nullptr;
@@ -227,7 +255,7 @@ private:
     // Inserts key and value into the node referred to by NodePtr, and updates NodePtr with
     // the new size. If the node needed to be split returns a NodePtr for the new node.
     template<typename NodeType>
-    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Key& key, const Value& value, size_t insertionPoint)
+    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, Key& nodeKey, const Key& key, const Value& value, size_t insertionPoint)
     {
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
@@ -251,13 +279,17 @@ private:
                 insertionPoint -= splitPoint;
                 newNode->insertAt(newNodeSize, insertionPoint, key, value);
             }
+            // nodePtr node's size has changed so update the nodePtr to reflect the new size.
             nodePtr.setSize(nodeSize);
+            // nodePtr node's set of keys has changed, so need to propagate the new maximum key upwards.
+            nodeKey = nodePtr.maxKey();
             return NodePtr(newNode, newNodeSize);
         }
         
         // Node has space, simple insertion
         node->insertAt(nodeSize, insertionPoint, key, value);
         nodePtr.setSize(nodeSize);
+        nodeKey = nodePtr.maxKey(); // In case it was the right most.
         return nullptr;
     }
 
@@ -296,6 +328,7 @@ private:
 
     // Root node pointer
     NodePtr m_root;
+    Key m_rootKey;
     unsigned m_height { 0 };
 
     // Slab allocator state
