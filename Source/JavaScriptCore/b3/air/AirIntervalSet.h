@@ -246,7 +246,9 @@ private:
         size_t pos = subtree.node()->lowerBound(subtree.size(), key);
         if (depth == m_height) {
             // subtree is really a leaf. Insert and return any new leaf nodes in case of split.
-            return insertInNodeSplitIfNeeded(subtree, subtreeKey, key, value, pos);
+            NodePtr newLeaf = insertInNodeSplitIfNeeded<LeafNode>(subtree, key, value, pos);
+            subtreeKey = subtree.maxKey();
+            return newLeaf;
         }
         size_t oldSize = subtree.size();
         // Not a leaf so insert into this subtree.
@@ -257,12 +259,13 @@ private:
             ASSERT_UNUSED(oldSize, inner->child(pos).size() + newChild.size() == oldSize + 1);
             // Insert the new child into the subtree. The key for inner nodes is the maxium key of the children.
             const Key& newChildKey = newChild.maxKey();
-            NodePtr newInner = insertInNodeSplitIfNeeded(subtree, subtreeKey, newChildKey, newChild, pos + 1);
+            NodePtr newInner = insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildKey, newChild, pos + 1);
+            subtreeKey = subtree.maxKey();
             return newInner;
         }
         ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
         // Update subtreeKey in case the maximum key of this subtree changed
-        // XXX only do this if necessary?
+        // XXX only do this if necessary (here and elsewhere)?
         subtreeKey = subtree.maxKey();
         // Nothing more to do, new key/value was inserted and the tree fully updated.
         return nullptr;
@@ -289,7 +292,7 @@ private:
     // Inserts key and value into the node referred to by NodePtr, and updates NodePtr with
     // the new size. If the node needed to be split returns a NodePtr for the new node.
     template<typename NodeType>
-    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, Key& nodeKey, const Key& key, const Value& value, size_t insertionPoint)
+    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Key& key, const Value& value, size_t insertionPoint)
     {
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
@@ -315,15 +318,12 @@ private:
             }
             // nodePtr node's size has changed so update the nodePtr to reflect the new size.
             nodePtr.setSize(nodeSize);
-            // nodePtr node's set of keys has changed, so need to propagate the new maximum key upwards.
-            nodeKey = nodePtr.maxKey();
             return NodePtr(newNode, newNodeSize);
         }
         
         // Node has space, simple insertion
         node->insertAt(nodeSize, insertionPoint, key, value);
         nodePtr.setSize(nodeSize);
-        nodeKey = nodePtr.maxKey(); // In case it was the right most.
         return nullptr;
     }
 
