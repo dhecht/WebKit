@@ -27,15 +27,28 @@
 
 #if ENABLE(B3_JIT)
 
+#include <wtf/Vector.h>
+#include <wtf/FastMalloc.h>
+
 namespace JSC { namespace B3 { namespace Air {
 
+// Consider making this specialized to Range<>, then searches can end early without traversing downward when no overlap.
+
 template<typename Key, typename Value, size_t Order>
+    requires std::is_trivially_destructible_v<Key> && std::is_trivially_destructible_v<Value>
 class BPlusTree {
 public:
+    static constexpr size_t cpuCacheSize = 64;
+    
     class iterator;
 
     BPlusTree()
     {
+    }
+
+    ~BPlusTree()
+    {
+        freeAllocations();
     }
 
     // Insert a key-value pair into the B+ tree
@@ -155,6 +168,23 @@ private:
     class InnerNode : public NodeImpl<NodePtr, Order> {
     };
 
+    Node* allocNode()
+    {
+        // FIXME: should probably make this more flexible.
+        static_assert(sizeof(InnerNode) == sizeof(LeafNode));
+        // FIXME: make it a slab allocator?
+        char* mem = static_cast<char*>(WTF::fastAlignedMalloc(cpuCacheSize, sizeof(LeafNode)));
+        m_allocations.append(mem);
+        return reinterpret_cast<Node*>(mem);
+    }
+
+    void freeAllocations()
+    {
+        for (auto& mem: m_allocations)
+            WTF::fastAlignedFree(mem);
+        m_allocations.clear();
+    }
+
     void insertIntoLeaf(LeafNode& leaf, size_t leafSize, const Key& key, const Value& value)
     {
         if (leafSize >= Order) {
@@ -171,6 +201,8 @@ private:
     void* m_root { nullptr };
     bool m_rootIsLeaf { true };
     size_t m_rootSize { 0 };
+
+    Vector<char*, 8> m_allocations;
 };
 
 } } } // namespace JSC::B3::Air
