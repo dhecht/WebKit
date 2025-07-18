@@ -53,7 +53,17 @@ public:
     }
 
     // Insert a key-value pair into the B+ tree
-    void insert(const Key& key, const Value& value);
+    void insert(const Key& key, const Value& value)
+    {
+        if (!m_root) {
+            // Create initial root as a leaf
+            LeafNode* leaf = allocNode<LeafNode>();
+            m_root = NodePtr(leaf, 0);
+            m_height = 0;
+        }
+        
+        insertImpl(m_root, key, value, 0);
+    }
 
     // Remove a key from the B+ tree
     void erase(const Key& key);
@@ -167,7 +177,27 @@ private:
     };
 
     class InnerNode : public NodeImpl<NodePtr, Order> {
+        using NodeImpl<NodePtr, Order>::payloads;
+        
+    public:
+        NodePtr child(unsigned i)
+        {
+            return payloads[i];
+        }
     };
+
+    void insertImpl(NodePtr node, const Key& key, const Value& value, unsigned depth)
+    {
+        if (depth == m_height) {
+            // Reached the bottom of the tree, this is the leaf.
+            LeafNode* leaf = node.asLeaf();
+            insertIntoLeaf(*leaf, node.size(), key, value);
+            return;
+        }
+        InnerNode* inner = node.asInner();
+        auto pos = inner->findInsertionPoint(node.size(), key);
+        insertImpl(inner->child(pos), key, value, depth + 1);
+    }
 
     template<typename NodeType>
     NodeType* allocNode()
@@ -213,11 +243,9 @@ private:
         leaf.insertAt(leafSize, insertionPoint, key, value);
     }
     
-    // Root node pointer - for now just use a simple pointer
-    // In a full implementation, this would be a NodePtr
-    void* m_root { nullptr };
-    bool m_rootIsLeaf { true };
-    size_t m_rootSize { 0 };
+    // Root node pointer
+    NodePtr m_root;
+    unsigned m_height { 0 };
 
     // Slab allocator state
     Vector<char*, 8> m_slabs;
