@@ -151,6 +151,8 @@ private:
             size--;
         }
 
+        // Find the first position with a key greater than or equal to the given key.
+        // This is like std::lower_bound but uses linear search since Order is small.
         size_t lowerBound(size_t size, const Key& key) const
         {
             size_t i = 0;
@@ -270,6 +272,8 @@ private:
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = node.asInner();
             size_t pos = inner->lowerBound(node.size(), key);
+            if (pos == node.size())
+                return nullptr;
             node = inner->child(pos);
         }
         LeafNode* leaf = node.asLeaf();
