@@ -79,8 +79,20 @@ public:
     void erase(const Key& key);
 
     // Find value by key
-    Value* find(const Key& key);
-    const Value* find(const Key& key) const;
+    Value* find(const Key& key) {
+        if (!m_root)
+            return nullptr;
+        
+        return findImpl(m_root, key);
+    }
+
+    const Value* find(const Key& key) const
+    {
+        if (!m_root)
+            return nullptr;
+        
+        return findImpl(m_root, key);
+    }
 
     iterator findFirstAfter(const Key& key);
 
@@ -139,7 +151,7 @@ private:
             size--;
         }
 
-        size_t findInsertionPoint(size_t size, const Key& key) const
+        size_t lowerBound(size_t size, const Key& key) const
         {
             size_t i = 0;
             while (i < size && keys[i] < key)
@@ -229,7 +241,7 @@ private:
 
     NodePtr insertImpl(NodePtr& subtree, Key& subtreeKey, const Key& key, const Value& value, unsigned depth)
     {
-        size_t pos = subtree.node()->findInsertionPoint(subtree.size(), key);
+        size_t pos = subtree.node()->lowerBound(subtree.size(), key);
         if (depth == m_height) {
             // subtree is really a leaf. Insert and return any new leaf nodes in case of split.
             return insertInNodeSplitIfNeeded(subtree, subtreeKey, key, value, pos);
@@ -250,6 +262,22 @@ private:
         }
         // Nothing more to do, new key/value was inserted and the tree fully updated.
         return nullptr;
+    }
+
+    Value* findImpl(NodePtr node, const Key& key) const
+    {
+        // Traverse down to the leaf
+        for (unsigned depth = 0; depth < m_height; ++depth) {
+            InnerNode* inner = node.asInner();
+            size_t pos = inner->lowerBound(node.size(), key);
+            node = inner->child(pos);
+        }
+        LeafNode* leaf = node.asLeaf();
+        for (size_t i = 0; i < node.size(); ++i) {
+            if (leaf->key(i) == key)
+                return &leaf->value(i);
+        }
+        return nullptr; // Key not found
     }
 
     // Inserts key and value into the node referred to by NodePtr, and updates NodePtr with
