@@ -63,18 +63,10 @@ public:
     };
 
 private:
-    // Forward declarations
-    template<typename Payload, size_t N> class NodeBase;
-    template<typename V, size_t N> class NodePtr;
-    class LeafNode;
-    class InnerNode;
-
     template<typename Payload, size_t N>
     class NodeBase {
     public:
-        Key keys[N];
-        Payload payloads[N];
-        
+
         void insertAt(size_t size, size_t index, const Key& key, const Payload& value)
         {
             ASSERT(index <= size);
@@ -107,6 +99,9 @@ private:
                 ++i;
             return i;
         }
+
+        Key keys[N];
+        Payload payloads[N];
     };
 
     template<typename V, size_t N>
@@ -135,7 +130,7 @@ private:
             return m_bits & size_mask;
         }
         
-        bool isNull() const { return !m_bits; }
+        explicit operator bool() const { return m_bits; }
         
         Node* operator->() const { return get(); }
         Node& operator*() const { return *get(); }
@@ -149,15 +144,6 @@ private:
     };
 
     class InnerNode : public NodeBase<NodePtr<Value, Order>, Order> {
-    public:
-        // Find child index for a given key
-        size_t findChildIndex(size_t size, const Key& key) const
-        {
-            return this->findInsertionPoint(size, key);
-        }
-        
-        NodePtr<Value, Order>& childAt(size_t index) { return this->payloads[index]; }
-        const NodePtr<Value, Order>& childAt(size_t index) const { return this->payloads[index]; }
     };
 
     void insertIntoLeaf(LeafNode& leaf, size_t leafSize, const Key& key, const Value& value)
