@@ -28,69 +28,133 @@
 #if ENABLE(B3_JIT)
 
 #include "AirTmp.h"
-#include <wtf/IndexSet.h>
 
 namespace JSC { namespace B3 { namespace Air {
 
-class IntervalSet {
+template<typename Key, typename Value>
+class BPlusTree {
 public:
     class iterator;
+    
+    static constexpr size_t DefaultOrder = 16;
 
-    IntervalSet()
+    BPlusTree()
     {
     }
 
-    // XXX: use end as key, start, tmp as value?
-    void insert(Point start, Point end, Tmp tmp);
+    // Insert a key-value pair into the B+ tree
+    void insert(const Key& key, const Value& value);
 
-    // XXX: should it only take end?
-    void erase(Point start, Point end, Tmp tmp);
+    // Remove a key from the B+ tree
+    void erase(const Key& key);
 
-    iterator findFirstEndingAfter(Point point);
+    // Find value by key
+    Value* find(const Key& key);
+    const Value* find(const Key& key) const;
+
+    iterator findFirstAfter(const Key& key);
 
     class iterator {
-
+    public:
+        iterator() = default;
+        
+        // TODO: Implement iterator for traversing intervals
+        bool operator==(const iterator& other) const = default;
+        iterator& operator++() { return *this; }
+        // TODO: Add dereference operators
     };
 
 private:
-    template<typename Value, size_t N>
+    // Forward declarations
+    template<typename Payload, size_t N> class NodeBase;
+    template<typename V, size_t N> class NodePtr;
+    template<size_t N> class LeafNode;
+    template<size_t N> class InnerNode;
+    struct KeyValuePair;
+    template<typename Payload, size_t N>
     class NodeBase {
-    
-    private:
-        Point ends[N];
-        Value values[N];
+    public:
+        Key keys[N];
+        Payload values[N];
+        size_t size { 0 };
+        
+        bool isFull() const { return size == N; }
+        bool isEmpty() const { return size == 0; }
+        
+        void insertAt(size_t index, const Key& key, const Payload& value)
+        {
+            ASSERT(index <= size);
+            ASSERT(size < N);
+            
+            // Shift elements to the right
+            for (size_t i = size; i > index; --i) {
+                keys[i] = keys[i - 1];
+                values[i] = values[i - 1];
+            }
+            
+            keys[index] = key;
+            values[index] = value;
+            ++size;
+        }
+        
+        void removeAt(size_t index)
+        {
+            ASSERT(index < size);
+            
+            // Shift elements to the left
+            for (size_t i = index; i < size - 1; ++i) {
+                keys[i] = keys[i + 1];
+                values[i] = values[i + 1];
+            }
+            --size;
+        }
+        
+        size_t findInsertionPoint(const Key& key) const
+        {
+            size_t i = 0;
+            while (i < size && key >= keys[i])
+                ++i;
+            return i;
+        }
     };
 
     template<typename V, size_t N>
     class NodePtr {
-
+    public:
         using Node = NodeBase<V, N>;
 
         static constexpr uintptr_t size_mask = 0xf;
 
+        NodePtr() : m_bits(0) { }
+        
         NodePtr(NodeBase<V, N>* ptr, size_t size) :
-            m_bits(static_cast<uintptr_t>(ptr) | size)
+            m_bits(reinterpret_cast<uintptr_t>(ptr) | size)
         {
-            ASSERT(!(static_cast<uintptr_t>(ptr) & size_mask));
-            ASSERT(size < size_mask);
+            ASSERT(!(reinterpret_cast<uintptr_t>(ptr) & size_mask));
+            ASSERT(size <= size_mask);
         }
 
-        Node* get()
+        Node* get() const
         {
             return reinterpret_cast<Node*>(m_bits & ~size_mask);
         }
     
-        size_t size()
+        size_t size() const
         {
             return m_bits & size_mask;
         }
+        
+        bool isNull() const { return !m_bits; }
+        
+        Node* operator->() const { return get(); }
+        Node& operator*() const { return *get(); }
 
     private:
         // Low 4 bits contains the size, remaining bits contains the pointer.
         uintptr_t m_bits;
     };
 
-    struct Value {
+    struct KeyValuePair {
         Point start;
         Tmp tmp;
     };
@@ -100,29 +164,38 @@ private:
     };
 
     template <size_t N>
-    class InnerNode : public NodeBase<NodePtr<>, N> {
-        using Base = NodeBase<N>;
-    
-    private:
-        Base* children[N];
+    class InnerNode : public NodeBase<NodePtr<Value, N>, N> {
+    public:
+        // Find child index for a given end point
+        size_t findChildIndex(Point end) const
+        {
+            size_t i = 0;
+            while (i < this->size && end >= this->ends[i])
+                ++i;
+            return i;
+        }
+        
+        NodePtr<Value, N>& childAt(size_t index) { return this->values[index]; }
+        const NodePtr<Value, N>& childAt(size_t index) const { return this->values[index]; }
     };
 
     template<size_t N>
-    void insertIntoLeaf(LeafNode<N>& leaf, size_t size, Point start, Point end, Tmp tmp)
+    void insertIntoLeaf(LeafNode<N>& leaf, Point start, Point end, Tmp tmp)
     {
-        if (size == N) {
-            // XXX overflow
+        if (leaf.isFull()) {
+            // XXX overflow - need to split leaf
             RELEASE_ASSERT_NOT_REACHED();
         }
-        unsigned i = 0;
-        for (; i < size; i++) {
-            if (end < leaf.ends[i])
-                break;
-        }
-        leaf.ends[i] = end;
-        leaf.starts[i] = start;
-        leaf.tmps[i] = tmp;
+        
+        Value value { start, tmp };
+        size_t insertionPoint = leaf.findInsertionPoint(end);
+        leaf.insertAt(insertionPoint, end, value);
     }
+    
+    // Root node pointer - for now just use a simple pointer
+    // In a full implementation, this would be a NodePtr
+    void* m_root { nullptr };
+    bool m_rootIsLeaf { true };
 #if 0
     bool add(Tmp tmp)
     {
