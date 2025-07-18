@@ -39,6 +39,7 @@ template<typename Key, typename Value, size_t Order>
 class BPlusTree {
 public:
     static constexpr size_t cpuCacheSize = 64;
+    static constexpr size_t nodesPerSlab = 8;
     
     class iterator;
 
@@ -170,19 +171,30 @@ private:
 
     Node* allocNode()
     {
-        // FIXME: should probably make this more flexible.
         static_assert(sizeof(InnerNode) == sizeof(LeafNode));
-        // FIXME: make it a slab allocator?
-        char* mem = static_cast<char*>(WTF::fastAlignedMalloc(cpuCacheSize, sizeof(LeafNode)));
-        m_allocations.append(mem);
-        return reinterpret_cast<Node*>(mem);
+        
+        if (m_slabs.isEmpty() || m_slabOffset >= nodesPerSlab)
+            allocateSlab();
+        
+        Node* node = reinterpret_cast<Node*>(m_slabs.last() + m_slabOffset * sizeof(LeafNode));
+        ++m_slabOffset;
+        return node;
+    }
+
+    void allocateSlab()
+    {
+        size_t slabSize = sizeof(LeafNode) * nodesPerSlab;
+        char* slab = static_cast<char*>(WTF::fastAlignedMalloc(cpuCacheSize, slabSize));
+        m_slabs.append(slab);
+        m_slabOffset = 0;
     }
 
     void freeAllocations()
     {
-        for (auto& mem: m_allocations)
-            WTF::fastAlignedFree(mem);
-        m_allocations.clear();
+        for (auto& slab : m_slabs)
+            WTF::fastAlignedFree(slab);
+        m_slabs.clear();
+        m_slabOffset = 0;
     }
 
     void insertIntoLeaf(LeafNode& leaf, size_t leafSize, const Key& key, const Value& value)
@@ -202,7 +214,9 @@ private:
     bool m_rootIsLeaf { true };
     size_t m_rootSize { 0 };
 
-    Vector<char*, 8> m_allocations;
+    // Slab allocator state
+    Vector<char*, 8> m_slabs;
+    size_t m_slabOffset { 0 };
 };
 
 } } } // namespace JSC::B3::Air
