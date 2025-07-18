@@ -253,6 +253,10 @@ private:
         size_t oldSize = subtree.size();
         // Not a leaf so insert into this subtree.
         InnerNode* inner = subtree.asInner();
+        
+        if (pos == subtree.size())
+            pos = subtree.size() - 1;
+
         NodePtr newChild = insertImpl(inner->child(pos), inner->key(pos), key, value, depth + 1);
         if (newChild) {
             ASSERT_UNUSED(oldSize, oldSize == Order); // Otherwise, should have been inserted.
