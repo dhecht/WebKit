@@ -38,7 +38,7 @@ template<typename Key, typename Value, size_t Order>
     requires std::is_trivially_destructible_v<Key> && std::is_trivially_destructible_v<Value>
 class BPlusTree {
 public:
-    static constexpr size_t cpuCacheSize = 64;
+    static constexpr size_t cpuCacheLineSize = 64;
     static constexpr size_t nodesPerSlab = 8;
     
     class iterator;
@@ -169,14 +169,19 @@ private:
     class InnerNode : public NodeImpl<NodePtr, Order> {
     };
 
-    Node* allocNode()
+    template<typename NodeType>
+    NodeType* allocNode()
     {
+        static_assert(std::is_base_of_v<Node, NodeType>);
+        // FIXME: should be made more flexible.
         static_assert(sizeof(InnerNode) == sizeof(LeafNode));
+        static_assert(sizeof(NodeType) == sizeof(LeafNode));
         
         if (m_slabs.isEmpty() || m_slabOffset >= nodesPerSlab)
             allocateSlab();
         
-        Node* node = reinterpret_cast<Node*>(m_slabs.last() + m_slabOffset * sizeof(LeafNode));
+        NodeType* node = reinterpret_cast<NodeType*>(m_slabs.last() + m_slabOffset * sizeof(LeafNode));
+        ASSERT(!(reinterpret_cast<uintptr_t>(node) % cpuCacheLineSize)); // Ensure cache line alignment
         ++m_slabOffset;
         return node;
     }
@@ -184,7 +189,7 @@ private:
     void allocateSlab()
     {
         size_t slabSize = sizeof(LeafNode) * nodesPerSlab;
-        char* slab = static_cast<char*>(WTF::fastAlignedMalloc(cpuCacheSize, slabSize));
+        char* slab = static_cast<char*>(WTF::fastAlignedMalloc(cpuCacheLineSize, slabSize));
         m_slabs.append(slab);
         m_slabOffset = 0;
     }
