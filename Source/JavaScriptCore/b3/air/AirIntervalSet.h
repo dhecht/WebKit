@@ -255,12 +255,15 @@ private:
         if (newChild) {
             ASSERT_UNUSED(oldSize, oldSize == Order); // Otherwise, should have been inserted.
             ASSERT_UNUSED(oldSize, inner->child(pos).size() + newChild.size() == oldSize + 1);
-            // Insert the new child into the subtree. The key for innert nodes is the maxium key of the children.            
+            // Insert the new child into the subtree. The key for inner nodes is the maxium key of the children.
             const Key& newChildKey = newChild.maxKey();
             NodePtr newInner = insertInNodeSplitIfNeeded(subtree, subtreeKey, newChildKey, newChild, pos + 1);
             return newInner;
         }
         ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
+        // Update subtreeKey in case the maximum key of this subtree changed
+        // XXX only do this if necessary?
+        subtreeKey = subtree.maxKey();
         // Nothing more to do, new key/value was inserted and the tree fully updated.
         return nullptr;
     }
