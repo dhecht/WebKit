@@ -27,8 +27,6 @@
 
 #if ENABLE(B3_JIT)
 
-#include "AirTmp.h"
-
 namespace JSC { namespace B3 { namespace Air {
 
 template<typename Key, typename Value, size_t Order>
@@ -63,6 +61,9 @@ public:
     };
 
 private:
+    class LeafNode;
+    class InnerNode;
+    
     template<typename Payload, size_t N>
     class NodeBase {
     public:
@@ -104,25 +105,22 @@ private:
         Payload payloads[N];
     };
 
-    template<typename V, size_t N>
     class NodePtr {
     public:
-        using Node = NodeBase<V, N>;
-
         static constexpr uintptr_t size_mask = 0xf;
 
         NodePtr() : m_bits(0) { }
         
-        NodePtr(NodeBase<V, N>* ptr, size_t size) :
+        NodePtr(void* ptr, size_t size) :
             m_bits(reinterpret_cast<uintptr_t>(ptr) | size)
         {
             ASSERT(!(reinterpret_cast<uintptr_t>(ptr) & size_mask));
             ASSERT(size <= size_mask);
         }
 
-        Node* get() const
+        void* get() const
         {
-            return reinterpret_cast<Node*>(m_bits & ~size_mask);
+            return reinterpret_cast<void*>(m_bits & ~size_mask);
         }
     
         size_t size() const
@@ -132,8 +130,16 @@ private:
         
         explicit operator bool() const { return m_bits; }
         
-        Node* operator->() const { return get(); }
-        Node& operator*() const { return *get(); }
+        // Type-safe casting methods - caller knows the type based on tree depth
+        LeafNode* asLeaf() const
+        {
+            return static_cast<LeafNode*>(get());
+        }
+        
+        InnerNode* asInner() const
+        {
+            return static_cast<InnerNode*>(get());
+        }
 
     private:
         // Low 4 bits contains the size, remaining bits contains the pointer.
@@ -143,7 +149,7 @@ private:
     class LeafNode : public NodeBase<Value, Order> {
     };
 
-    class InnerNode : public NodeBase<NodePtr<Value, Order>, Order> {
+    class InnerNode : public NodeBase<NodePtr, Order> {
     };
 
     void insertIntoLeaf(LeafNode& leaf, size_t leafSize, const Key& key, const Value& value)
