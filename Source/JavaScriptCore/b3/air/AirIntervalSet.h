@@ -96,29 +96,33 @@ private:
     class NodeImpl : public Node {
     public:
 
-        void insertAt(size_t size, size_t index, const Key& key, const Payload& value)
+        // XXX: maybe move this to NodePtr so it can directly update size?
+        void insertAt(size_t& size, size_t index, const Key& key, const Payload& value)
         {
-            ASSERT(index <= size);
             ASSERT(size < N);
-            
+            ASSERT(index <= size);
             // Shift elements to the right
+            // FIXME: use memmove?
             for (size_t i = size; i > index; --i) {
                 keys[i] = keys[i - 1];
                 payloads[i] = payloads[i - 1];
             }
             keys[index] = key;
             payloads[index] = value;
+            size++;
         }
         
-        void removeAt(size_t size, size_t index)
+        void removeAt(size_t& size, size_t index)
         {
+            ASSERT(size <= N);
             ASSERT(index < size);
-            
-            // Shift elements to the left
+            // Shift elements to the left 
+            // FIXME: use memmove?
             for (size_t i = index; i < size - 1; ++i) {
                 keys[i] = keys[i + 1];
                 payloads[i] = payloads[i + 1];
             }
+            size--;
         }
         
         size_t findInsertionPoint(size_t size, const Key& key) const
@@ -191,12 +195,49 @@ private:
         if (depth == m_height) {
             // Reached the bottom of the tree, this is the leaf.
             LeafNode* leaf = node.asLeaf();
-            insertIntoLeaf(*leaf, node.size(), key, value);
+            LeafNode* newLeaf = insertIntoLeaf(leaf, node.size(), key, value);
+            if (newLeaf) {
+                // TODO: Handle leaf split - need to propagate split up the tree
+                // For now, just assert to indicate this needs implementation
+                RELEASE_ASSERT_NOT_REACHED();
+            }
             return;
         }
         InnerNode* inner = node.asInner();
         auto pos = inner->findInsertionPoint(node.size(), key);
         insertImpl(inner->child(pos), key, value, depth + 1);
+    }
+
+    NodePtr insertIntoLeaf(LeafNode* leaf, size_t size, const Key& key, const Value& value)
+    {
+        size_t insertionPoint = leaf->findInsertionPoint(size, key);
+
+        if (size >= Order) {            
+            constexpr size_t splitPoint = Order / 2;            
+            // Leaf is full, need to split
+            LeafNode* newLeaf = allocNode<LeafNode>();
+            size_t newLeafSize = size - splitPoint;
+
+            for (size_t i = splitPoint; i < size; ++i) {
+                newLeaf->keys[i - splitPoint] = leaf->keys[i];
+                newLeaf->payloads[i - splitPoint] = leaf->payloads[i];
+            }
+            
+            if (insertionPoint < splitPoint) {
+                leaf->insertAt(splitPoint, insertionPoint, key, value);
+            } else {
+                // Insert into new leaf (recalculate insertion point for new leaf)
+                insertionPoint -= splitPoint;
+                newLeaf->insertAt(newLeafSize, insertionPoint, key, value);
+            }
+            
+            return NodePtr(newLeaf, newLeafSize);
+        }
+        
+        // Leaf has space, simple insertion
+        size_t insertionPoint = leaf->findInsertionPoint(size, key);
+        leaf->insertAt(size, insertionPoint, key, value);
+        return nullptr;
     }
 
     template<typename NodeType>
@@ -232,17 +273,6 @@ private:
         m_slabOffset = 0;
     }
 
-    void insertIntoLeaf(LeafNode& leaf, size_t leafSize, const Key& key, const Value& value)
-    {
-        if (leafSize >= Order) {
-            // XXX overflow - need to split leaf
-            RELEASE_ASSERT_NOT_REACHED();
-        }
-        
-        size_t insertionPoint = leaf.findInsertionPoint(leafSize, key);
-        leaf.insertAt(leafSize, insertionPoint, key, value);
-    }
-    
     // Root node pointer
     NodePtr m_root;
     unsigned m_height { 0 };
