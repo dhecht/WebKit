@@ -46,6 +46,13 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numStoreSpill)                        \
     macro(numMoveSpillSpillInsts)               \
     macro(numRematerializeConst)                \
+    macro(tryAllocate)                \
+    macro(tryAllocateToReg)                \
+    macro(tryEvict)                \
+    macro(trySplit)                \
+    macro(assign)                \
+    macro(evict)                \
+    macro(spill)                \
 
 class AirAllocateRegistersStats {
     WTF_MAKE_NONCOPYABLE(AirAllocateRegistersStats);

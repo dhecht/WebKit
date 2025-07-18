@@ -1462,6 +1462,8 @@ private:
         ASSERT(!assignedReg(tmp));
         ASSERT(!tmpData.parentGroup);
 
+        m_stats[bank].tryAllocate++;
+
         Width width = widthForConflicts<bank>(tmp);
 
         auto tryAllocateToReg = [&](Reg r) {
@@ -1514,6 +1516,7 @@ private:
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             if (alreadyAttempted.contains(r, IgnoreVectors))
                 continue;
+            m_stats[bank].tryAllocateToReg++;
             if (tryAllocateToReg(r))
                 return true;
         }
@@ -1526,6 +1529,8 @@ private:
         ASSERT(&m_map[tmp] == &tmpData);
         ASSERT(tmp.bank() == bank);
 
+        m_stats[bank].tryEvict++;
+        
         auto failOutOfRegisters = [this](Tmp tmp) {
             insertFixupCode(); // So that the log shows the fixup code too
             StringPrintStream out;
@@ -1603,6 +1608,8 @@ private:
 
     void assign(Tmp tmp, TmpData& tmpData, Reg reg)
     {
+        m_stats[tmp.bank()].assign++;
+
         m_regRanges[reg].add(tmp, tmpData.liveRange);
         ASSERT(tmpData.stage != Stage::Assigned && tmpData.stage != Stage::Spilled);
         tmpData.stage = Stage::Assigned;
@@ -1613,6 +1620,8 @@ private:
 
     void evict(Tmp tmp, TmpData& tmpData, Reg reg)
     {
+        m_stats[tmp.bank()].evict++;
+
         ASSERT(tmpData.stage == Stage::Assigned);
         ASSERT(tmpData.spillCost() != unspillableCost);
         ASSERT(tmpData.assigned == reg);
@@ -1626,6 +1635,8 @@ private:
     template<Bank bank>
     bool trySplit(Tmp tmp, TmpData& tmpData)
     {
+        m_stats[tmp.bank()].trySplit++;
+
         ASSERT(tmpData.spillCost() != unspillableCost); // Should have evicted.
         if (trySplitGroup(tmp, tmpData))
             return true;
@@ -1760,6 +1771,8 @@ private:
 
     void spill(Tmp tmp, TmpData& tmpData)
     {
+        m_stats[tmp.bank()].spill++;
+
         RELEASE_ASSERT(tmpData.spillCost() != unspillableCost);
         ASSERT(tmpData.assigned == Reg());
         ASSERT(!tmpData.isGroup()); // Should have been split

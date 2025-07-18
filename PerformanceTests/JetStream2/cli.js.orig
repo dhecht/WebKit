@@ -57,7 +57,7 @@ async function runJetStream() {
     }
 }
 
-const iterations = iters ?? 100;
+const iterations = 100;
 
 (async () => {
     for (let i = 0; i < iterations; i++) {
