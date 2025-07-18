@@ -61,8 +61,16 @@ public:
             m_root = NodePtr(leaf, 0);
             m_height = 0;
         }
-        
-        insertImpl(m_root, key, value, 0);
+        NodePtr newSubtree = insertImpl(m_root, key, value, 0);
+        if (newSubtree) {
+            ASSERT(m_root.size() == Order); // Otherwise, root should have been updated.
+            // Need to add another level to the tree.
+            InnerNode* newRoot = allocNode<InnerNode>();
+            newRoot->payloads[0] = m_root;
+            newRoot->payloads[1] = newSubtree;
+            m_root = NodePtr(newRoot, 2);
+            m_height++;
+        }
     }
 
     // Remove a key from the B+ tree
@@ -124,7 +132,7 @@ private:
             }
             size--;
         }
-        
+
         size_t findInsertionPoint(size_t size, const Key& key) const
         {
             size_t i = 0;
@@ -150,7 +158,7 @@ private:
             ASSERT(size <= size_mask);
         }
 
-        Node* get() const
+        Node* node() const
         {
             return reinterpret_cast<Node*>(m_bits & ~size_mask);
         }
@@ -161,15 +169,21 @@ private:
         }
         
         explicit operator bool() const { return m_bits; }
-        
+
+        template<typename NodeType> requires std::is_base_of_v<Node, NodeType>
+        NodeType* as() const
+        {
+            return static_cast<NodeType*>(node());
+        }
+
         LeafNode* asLeaf() const
         {
-            return static_cast<LeafNode*>(get());
+            return static_cast<LeafNode*>(node());
         }
         
         InnerNode* asInner() const
         {
-            return static_cast<InnerNode*>(get());
+            return static_cast<InnerNode*>(node());
         }
 
     private:
@@ -190,53 +204,60 @@ private:
         }
     };
 
-    void insertImpl(NodePtr node, const Key& key, const Value& value, unsigned depth)
+    NodePtr insertImpl(NodePtr& node, const Key& key, const Value& value, unsigned depth)
     {
+        size_t pos = node.node()->findInsertionPoint(node.size(), key);
         if (depth == m_height) {
-            // Reached the bottom of the tree, this is the leaf.
-            LeafNode* leaf = node.asLeaf();
-            LeafNode* newLeaf = insertIntoLeaf(leaf, node.size(), key, value);
-            if (newLeaf) {
-                // TODO: Handle leaf split - need to propagate split up the tree
-                // For now, just assert to indicate this needs implementation
-                RELEASE_ASSERT_NOT_REACHED();
-            }
-            return;
+            // Insert into the leaf node, and return any new leaf nodes.
+            return insertInNodeSplitIfNeeded(node, key, value, pos);
         }
+        // Not a leaf so insert into this subtree.
         InnerNode* inner = node.asInner();
-        auto pos = inner->findInsertionPoint(node.size(), key);
-        insertImpl(inner->child(pos), key, value, depth + 1);
+        NodePtr newNode = insertImpl(inner->payloads[pos], key, value, depth + 1);
+        if (newNode) {
+            ASSERT(inner->payloads[pos].size() == Order); // Otherwise, should have been inserted.
+            // A new child (could be either a leaf or inner node) was needed. Insert it and 
+            // potentially split this node.
+            return insertInNodeSplitIfNeeded(node, key, value, pos);
+        }
+        // Nothing more to do, new key/value was inserted and the tree fully updated.
+        return nullptr;
     }
 
-    NodePtr insertIntoLeaf(LeafNode* leaf, size_t size, const Key& key, const Value& value)
+    // Inserts key and value into the node referred to by NodePtr, and updates NodePtr with
+    // the new size. If the node needed to be split returns a NodePtr for the new node.
+    template<typename NodeType>
+    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Key& key, const Value& value, size_t insertionPoint)
     {
-        size_t insertionPoint = leaf->findInsertionPoint(size, key);
+        auto node = nodePtr.template as<NodeType>();
+        size_t nodeSize = nodePtr.size();
 
-        if (size >= Order) {            
+        if (nodeSize == Order) {
             constexpr size_t splitPoint = Order / 2;            
             // Leaf is full, need to split
-            LeafNode* newLeaf = allocNode<LeafNode>();
-            size_t newLeafSize = size - splitPoint;
+            auto newNode = allocNode<NodeType>();
 
-            for (size_t i = splitPoint; i < size; ++i) {
-                newLeaf->keys[i - splitPoint] = leaf->keys[i];
-                newLeaf->payloads[i - splitPoint] = leaf->payloads[i];
+            for (size_t i = splitPoint; i < nodeSize; ++i) {
+                newNode->keys[i - splitPoint] = node->keys[i];
+                newNode->payloads[i - splitPoint] = node->payloads[i];
             }
+            size_t newNodeSize = nodeSize - splitPoint;
+            nodeSize = splitPoint;
             
             if (insertionPoint < splitPoint) {
-                leaf->insertAt(splitPoint, insertionPoint, key, value);
+                node->insertAt(splitPoint, insertionPoint, key, value);
             } else {
                 // Insert into new leaf (recalculate insertion point for new leaf)
                 insertionPoint -= splitPoint;
-                newLeaf->insertAt(newLeafSize, insertionPoint, key, value);
+                newNode->insertAt(newNodeSize, insertionPoint, key, value);
             }
-            
-            return NodePtr(newLeaf, newLeafSize);
+            nodePtr.setSize(nodeSize);
+            return NodePtr(newNode, newNodeSize);
         }
         
-        // Leaf has space, simple insertion
-        size_t insertionPoint = leaf->findInsertionPoint(size, key);
-        leaf->insertAt(size, insertionPoint, key, value);
+        // Node has space, simple insertion
+        node->insertAt(nodeSize, insertionPoint, key, value);
+        nodePtr.setSize(nodeSize);
         return nullptr;
     }
 
