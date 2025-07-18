@@ -31,12 +31,10 @@
 
 namespace JSC { namespace B3 { namespace Air {
 
-template<typename Key, typename Value>
+template<typename Key, typename Value, size_t Order>
 class BPlusTree {
 public:
     class iterator;
-    
-    static constexpr size_t DefaultOrder = 16;
 
     BPlusTree()
     {
@@ -68,20 +66,16 @@ private:
     // Forward declarations
     template<typename Payload, size_t N> class NodeBase;
     template<typename V, size_t N> class NodePtr;
-    template<size_t N> class LeafNode;
-    template<size_t N> class InnerNode;
-    struct KeyValuePair;
+    class LeafNode;
+    class InnerNode;
+
     template<typename Payload, size_t N>
     class NodeBase {
     public:
         Key keys[N];
-        Payload values[N];
-        size_t size { 0 };
+        Payload payloads[N];
         
-        bool isFull() const { return size == N; }
-        bool isEmpty() const { return size == 0; }
-        
-        void insertAt(size_t index, const Key& key, const Payload& value)
+        void insertAt(size_t size, size_t index, const Key& key, const Payload& value)
         {
             ASSERT(index <= size);
             ASSERT(size < N);
@@ -89,30 +83,27 @@ private:
             // Shift elements to the right
             for (size_t i = size; i > index; --i) {
                 keys[i] = keys[i - 1];
-                values[i] = values[i - 1];
+                payloads[i] = payloads[i - 1];
             }
-            
             keys[index] = key;
-            values[index] = value;
-            ++size;
+            payloads[index] = value;
         }
         
-        void removeAt(size_t index)
+        void removeAt(size_t size, size_t index)
         {
             ASSERT(index < size);
             
             // Shift elements to the left
             for (size_t i = index; i < size - 1; ++i) {
                 keys[i] = keys[i + 1];
-                values[i] = values[i + 1];
+                payloads[i] = payloads[i + 1];
             }
-            --size;
         }
         
-        size_t findInsertionPoint(const Key& key) const
+        size_t findInsertionPoint(size_t size, const Key& key) const
         {
             size_t i = 0;
-            while (i < size && key >= keys[i])
+            while (i < size && keys[i] < key)
                 ++i;
             return i;
         }
@@ -154,17 +145,10 @@ private:
         uintptr_t m_bits;
     };
 
-    struct KeyValuePair {
-        Point start;
-        Tmp tmp;
+    class LeafNode : public NodeBase<Value, Order> {
     };
 
-    template<size_t N>
-    class LeafNode : public NodeBase<Value, N> {
-    };
-
-    template <size_t N>
-    class InnerNode : public NodeBase<NodePtr<Value, N>, N> {
+    class InnerNode : public NodeBase<NodePtr<Value, Order>, Order> {
     public:
         // Find child index for a given end point
         size_t findChildIndex(Point end) const
@@ -175,8 +159,8 @@ private:
             return i;
         }
         
-        NodePtr<Value, N>& childAt(size_t index) { return this->values[index]; }
-        const NodePtr<Value, N>& childAt(size_t index) const { return this->values[index]; }
+        NodePtr<Value, N>& childAt(size_t index) { return this->payloads[index]; }
+        const NodePtr<Value, N>& childAt(size_t index) const { return this->payloads[index]; }
     };
 
     template<size_t N>
