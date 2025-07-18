@@ -259,9 +259,8 @@ private:
             const Key& newChildKey = newChild.maxKey();
             NodePtr newInner = insertInNodeSplitIfNeeded(subtree, subtreeKey, newChildKey, newChild, pos + 1);
             return newInner;
-        } else {
-            ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
         }
+        ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
         // Nothing more to do, new key/value was inserted and the tree fully updated.
         return nullptr;
     }
