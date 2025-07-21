@@ -65,7 +65,7 @@ public:
             m_root = NodePtr(leaf, 0);
             m_height = 0;
         }
-        NodePtr newChild = insertImpl(m_root, interval, value, 0);
+        NodePtr newChild = insertIntoSubtree(m_root, interval, value, 0);
         if (newChild) {
             ASSERT(newChild.size() + m_root.size() == Order + 1);
             // Need to add another level to the tree.
@@ -304,7 +304,7 @@ private:
         return true;
     }
 
-    NodePtr insertImpl(NodePtr& subtree, const Interval& interval, const Value& value, unsigned depth)
+    NodePtr insertIntoSubtree(NodePtr& subtree, const Interval& interval, const Value& value, unsigned depth)
     {
         size_t pos = subtree.node()->lowerBound(subtree.size(), interval.end());
 
@@ -316,7 +316,7 @@ private:
 
         InnerNode* inner = subtree.asInner();        
 
-        NodePtr newChild = insertImpl(inner->child(pos), interval, value, depth + 1);
+        NodePtr newChild = insertIntoSubtree(inner->child(pos), interval, value, depth + 1);
         inner->interval(pos) = inner->child(pos).coverage();
 
         if (newChild) {
