@@ -67,7 +67,7 @@ public:
         }
         NodePtr newChild = insertImpl(m_root, m_rootInterval, interval, value, 0);
         if (newChild) {
-            ASSERT(m_root.size() == Order); // Otherwise, root should have been updated.
+            ASSERT(newChild.size() + m_root.size() == Order + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
             newRoot->interval(0) = m_rootInterval;
