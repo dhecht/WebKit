@@ -251,39 +251,6 @@ private:
         }
     };
 
-    NodePtr insertImpl(NodePtr& subtree, Interval& subtreeInterval, const Interval& interval, const Value& value, unsigned depth)
-    {
-        size_t pos = subtree.node()->lowerBound(subtree.size(), interval.end());
-        if (depth == m_height) {
-            // subtree is really a leaf. Insert and, if the node was split, return the new leaf node.
-            NodePtr newLeaf = insertInNodeSplitIfNeeded<LeafNode>(subtree, interval, value, pos);
-            subtreeInterval = subtree.coverage();
-            return newLeaf;
-        }
-        size_t oldSize = subtree.size();
-        // Not a leaf so insert into this subtree.
-        InnerNode* inner = subtree.asInner();
-        
-        if (pos == subtree.size())
-            pos = subtree.size() - 1;
-
-        NodePtr newChild = insertImpl(inner->child(pos), inner->interval(pos), interval, value, depth + 1);
-        if (newChild) {
-            ASSERT_UNUSED(oldSize, oldSize == Order); // Otherwise, should have been inserted.
-            ASSERT_UNUSED(oldSize, inner->child(pos).size() + newChild.size() == oldSize + 1);
-            // Insert the new child into the subtree. The key for inner nodes is the coverage interval of the children.
-            const Interval& newChildInterval = newChild.coverage();
-            NodePtr newInner = insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildInterval, newChild, pos + 1);
-            subtreeInterval = subtree.coverage();
-            return newInner;
-        }
-        ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
-        // Update subtreeInterval in case the maximum interval of this subtree changed
-        subtreeInterval = subtree.coverage();
-        // Nothing more to do, new interval/value was inserted and the tree fully updated.
-        return nullptr;
-    }
-
     Value* findImpl(NodePtr node, const Interval& interval) const
     {
         // Traverse down to the leaf
@@ -332,6 +299,39 @@ private:
             return false;
         ASSERT(query.overlaps(leaf->interval(pos)));
         return true;
+    }
+
+    NodePtr insertImpl(NodePtr& subtree, Interval& subtreeInterval, const Interval& interval, const Value& value, unsigned depth)
+    {
+        size_t pos = subtree.node()->lowerBound(subtree.size(), interval.end());
+        if (depth == m_height) {
+            // subtree is really a leaf. Insert and, if the node was split, return the new leaf node.
+            NodePtr newLeaf = insertInNodeSplitIfNeeded<LeafNode>(subtree, interval, value, pos);
+            subtreeInterval = subtree.coverage();
+            return newLeaf;
+        }
+        size_t oldSize = subtree.size();
+        // Not a leaf so insert into this subtree.
+        InnerNode* inner = subtree.asInner();
+        
+        if (pos == subtree.size())
+            pos = subtree.size() - 1;
+
+        NodePtr newChild = insertImpl(inner->child(pos), inner->interval(pos), interval, value, depth + 1);
+        if (newChild) {
+            ASSERT_UNUSED(oldSize, oldSize == Order); // Otherwise, should have been inserted.
+            ASSERT_UNUSED(oldSize, inner->child(pos).size() + newChild.size() == oldSize + 1);
+            // Insert the new child into the subtree. The key for inner nodes is the coverage interval of the children.
+            const Interval& newChildInterval = newChild.coverage();
+            NodePtr newInner = insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildInterval, newChild, pos + 1);
+            subtreeInterval = subtree.coverage();
+            return newInner;
+        }
+        ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
+        // Update subtreeInterval in case the maximum interval of this subtree changed
+        subtreeInterval = subtree.coverage();
+        // Nothing more to do, new interval/value was inserted and the tree fully updated.
+        return nullptr;
     }
 
     // Inserts interval and value into the node referred to by NodePtr, and updates NodePtr with
