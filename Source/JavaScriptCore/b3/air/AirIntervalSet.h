@@ -163,10 +163,10 @@ private:
 
         // Find the first position with an interval whose end is greater than the given start.
         // This is used for interval-based routing in the specialized B+ tree.
-        size_t lowerBound(size_t size, T start) const
+        size_t lowerBound(size_t size, T end) const
         {
             size_t i = 0;
-            while (i < size && intervals[i].end() <= start)
+            while (i < size && intervals[i].end() <= end)
                 ++i;
             return i;
         }
@@ -307,38 +307,31 @@ private:
     {
         if (!m_root)
             return false;
-            
-        NodePtr node = m_root;
 
-        // Traverse down to leaf, using coverage intervals for pruning
+        auto maybeOverlaps = [&query](NodePtr node, size_t position) ALWAYS_INLINE {
+            if (position == node.size())
+                return false; // Query starts after all coverage intervals
+            if (query.end() <= node.node()->interval(position).start())
+                return false; // Does not overlap the subtree
+            return true;
+        };
+
+        NodePtr node = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = node.asInner();
-            
-            // Find first child whose coverage might contain overlapping intervals
-            size_t pos = inner->lowerBound(node.size(), query.begin());
-            if (pos == node.size())
-                return false; // Query starts after all coverage intervals
-                
-            // Check if this child's coverage actually overlaps the query
-            if (!inner->interval(pos).overlaps(query))
-                return false; // No overlap possible
-                
+            size_t pos = inner->lowerBound(node.size(), query.end());
+            if (!maybeOverlaps(node, pos))
+                return false; // Subtree contains no overlapping interval
+            // Subtree might overlap, continue traversing down.
             node = inner->child(pos);
         }
-        
-        // At leaf level - since intervals are sorted and don't overlap,
-        // we just need to check if any interval overlaps the query
+
         LeafNode* leaf = node.asLeaf();
-        for (size_t i = 0; i < node.size(); ++i) {
-            if (leaf->interval(i).overlaps(query))
-                return true;
-            // Since intervals are sorted by start and don't overlap,
-            // if this interval starts after query ends, no more can overlap
-            if (leaf->interval(i).begin() >= query.end())
-                break;
-        }
-        
-        return false;
+        size_t pos = leaf->lowerBound(node.size(), query.end());
+        if (!maybeOverlaps(node, pos))
+            return false;
+        ASSERT(query.overlaps(leaf->interval(pos)));
+        return true;
     }
 
     // Inserts interval and value into the node referred to by NodePtr, and updates NodePtr with
