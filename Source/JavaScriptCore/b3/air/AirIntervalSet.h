@@ -333,6 +333,7 @@ private:
     {
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
+        ASSERT(nodeSize <= Order);
 
         if (nodeSize == Order) {
             constexpr size_t splitPoint = Order / 2;            
@@ -358,7 +359,7 @@ private:
             return NodePtr(newNode, newNodeSize);
         }
         
-        // Node has space, simple insertion
+        // Node has space, insert without splitting
         node->insertAt(nodeSize, insertionPoint, interval, value);
         nodePtr.setSize(nodeSize);
         return nullptr;
