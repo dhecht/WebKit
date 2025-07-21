@@ -72,7 +72,7 @@ public:
             InnerNode* newRoot = allocNode<InnerNode>();
             newRoot->key(0) = m_rootInterval;
             newRoot->child(0) = m_root;
-            newRoot->key(1) = newChild.maxKey();
+            newRoot->key(1) = newChild.coverage();
             newRoot->child(1) = newChild;
             m_root = NodePtr(newRoot, 2);
             m_height++;
@@ -204,10 +204,10 @@ private:
             m_bits = (m_bits & ~size_mask) | newSize;
         }
 
-        const Interval& maxKey() const
+        const Interval coverage() const
         {
             RELEASE_ASSERT(size());
-            return node()->key(size() - 1);
+            return { node()->key(0).start(), node()->key(size() - 1).end() };
         }
 
         explicit operator bool() const { return m_bits; }
@@ -255,9 +255,9 @@ private:
     {
         size_t pos = subtree.node()->lowerBound(subtree.size(), interval.end());
         if (depth == m_height) {
-            // subtree is really a leaf. Insert and return any new leaf nodes in case of split.
+            // subtree is really a leaf. Insert and, if the node was split, return the new leaf node.
             NodePtr newLeaf = insertInNodeSplitIfNeeded<LeafNode>(subtree, interval, value, pos);
-            subtreeInterval = subtree.maxKey();
+            subtreeInterval = subtree.coverage();
             return newLeaf;
         }
         size_t oldSize = subtree.size();
@@ -272,14 +272,14 @@ private:
             ASSERT_UNUSED(oldSize, oldSize == Order); // Otherwise, should have been inserted.
             ASSERT_UNUSED(oldSize, inner->child(pos).size() + newChild.size() == oldSize + 1);
             // Insert the new child into the subtree. The key for inner nodes is the coverage interval of the children.
-            const Interval& newChildInterval = newChild.maxKey();
+            const Interval& newChildInterval = newChild.coverage();
             NodePtr newInner = insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildInterval, newChild, pos + 1);
-            subtreeInterval = subtree.maxKey();
+            subtreeInterval = subtree.coverage();
             return newInner;
         }
         ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
         // Update subtreeInterval in case the maximum interval of this subtree changed
-        subtreeInterval = subtree.maxKey();
+        subtreeInterval = subtree.coverage();
         // Nothing more to do, new interval/value was inserted and the tree fully updated.
         return nullptr;
     }
