@@ -253,7 +253,7 @@ private:
 
     NodePtr insertImpl(NodePtr& subtree, Interval& subtreeInterval, const Interval& interval, const Value& value, unsigned depth)
     {
-        size_t pos = subtree.node()->lowerBound(subtree.size(), interval.begin());
+        size_t pos = subtree.node()->lowerBound(subtree.size(), interval.end());
         if (depth == m_height) {
             // subtree is really a leaf. Insert and return any new leaf nodes in case of split.
             NodePtr newLeaf = insertInNodeSplitIfNeeded<LeafNode>(subtree, interval, value, pos);
