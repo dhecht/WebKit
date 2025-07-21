@@ -86,19 +86,26 @@ public:
     void erase(const Interval& interval);
 
     // Find value by interval
-    Value* find(const Interval& interval) {
-        if (!m_root)
-            return nullptr;
-        
-        return findImpl(m_root, interval);
-    }
-
-    const Value* find(const Interval& interval) const
+    const Value* find(const Interval& query) const
     {
-        if (!m_root)
+        if (!query.overlaps(m_rootInterval))
             return nullptr;
-        
-        return findImpl(m_root, interval);
+
+        ASSERT(m_root);
+        NodePtr node = m_root;
+        for (unsigned depth = 0; depth < m_height; ++depth) {
+            InnerNode* inner = node.asInner();
+            size_t pos = inner->lowerBound(node.size(), query.begin());
+            if (pos == node.size())
+                return nullptr;
+            if (query.end() <= inner->interval(pos).start())
+                return nullptr; // query is entirely in the gap before this subtree
+            node = inner->child(pos);
+        }
+        LeafNode* leaf = node.asLeaf();
+        size_t pos = leaf->lowerBound(node.size(), query.end());
+        ASSERT(query.start() < leaf->interval(pos).end());
+        return leaf->interval(pos).start() < query.end() ? &leaf->value(pos) : nullptr;
     }
 
     // Check if any stored interval overlaps with the query interval
@@ -278,24 +285,6 @@ private:
             return payloads[i];
         }
     };
-
-    Value* findImpl(NodePtr node, const Interval& interval) const
-    {
-        // Traverse down to the leaf
-        for (unsigned depth = 0; depth < m_height; ++depth) {
-            InnerNode* inner = node.asInner();
-            size_t pos = inner->lowerBound(node.size(), interval.begin());
-            if (pos == node.size())
-                return nullptr;
-            node = inner->child(pos);
-        }
-        LeafNode* leaf = node.asLeaf();
-        for (size_t i = 0; i < node.size(); ++i) {
-            if (leaf->interval(i) == interval)
-                return &leaf->value(i);
-        }
-        return nullptr; // Interval not found
-    }
 
     NodePtr insertIntoSubtree(NodePtr& subtree, const Interval& interval, const Value& value, unsigned depth)
     {
