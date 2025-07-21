@@ -106,32 +106,31 @@ public:
     {
         if (!query.overlaps(m_rootInterval))
             return false;
+
         ASSERT(m_root);
-
-        auto maybeOverlaps = [&query](NodePtr node, size_t position) -> bool {
-            if (position == node.size())
-                return false; // Query starts after all coverage intervals
-            if (query.end() <= node.node()->interval(position).start())
-                return false; // Does not overlap the subtree
-            return true;
-        };
-
         NodePtr node = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = node.asInner();
-            size_t pos = inner->lowerBound(node.size(), query.end());
-            if (!maybeOverlaps(node, pos))
-                return false; // Subtree contains no overlapping interval
-            // Subtree might overlap, continue traversing down.
+            size_t pos = inner->lowerBound(node.size(), query.start());
+            if (pos == node.size())
+                return false; // query starts after all intervals
+            // query start lands either within the pos subtree or the gap immediately preceding that subtree
+            ASSERT(query.start() < inner->interval(pos).end());
+            if (query.end() <= inner->interval(pos).start())
+                return false; // query is entirely in the gap before this subtree
+            if (inner->interval(pos).end() <= query.end())
+                return true; // query spans subtree end point so it must overlap the last interval
+            if (query.start() <= inner->interval(pos).start())
+                return true; // query spans subtree start point so it must overlap the first interval
+            // Otherwise, subtree encompasses query so need to search subtree
+            ASSERT(inner->interval(pos).start() < query.start() && query.end() < inner->interval(pos).end());
             node = inner->child(pos);
         }
 
         LeafNode* leaf = node.asLeaf();
         size_t pos = leaf->lowerBound(node.size(), query.end());
-        if (!maybeOverlaps(node, pos))
-            return false;
-        ASSERT(query.overlaps(leaf->interval(pos)));
-        return true;
+        ASSERT(query.start() < leaf->interval(pos).end());
+        return leaf->interval(pos).start() < query.end();
     }
 
     iterator findFirstAfter(const Interval& interval);
@@ -191,12 +190,11 @@ private:
             size--;
         }
 
-        // Find the first position with an interval whose end is greater than the given start.
-        // This is used for interval-based routing in the specialized B+ tree.
-        size_t lowerBound(size_t size, T end) const
+        // Find the first position with an interval whose end is greater than the given point.
+        size_t lowerBound(size_t size, T point) const
         {
             size_t i = 0;
-            while (i < size && intervals[i].end() <= end)
+            while (i < size && intervals[i].end() <= point)
                 ++i;
             return i;
         }
