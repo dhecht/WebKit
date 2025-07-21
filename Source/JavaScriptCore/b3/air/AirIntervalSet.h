@@ -309,7 +309,7 @@ private:
             return false;
             
         NodePtr node = m_root;
-        
+
         // Traverse down to leaf, using coverage intervals for pruning
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = node.asInner();
@@ -355,7 +355,7 @@ private:
             auto newNode = allocNode<NodeType>();
 
             for (size_t i = splitPoint; i < nodeSize; ++i) {
-                newNode->keys[i - splitPoint] = node->intervals[i];
+                newNode->intervals[i - splitPoint] = node->intervals[i];
                 newNode->payloads[i - splitPoint] = node->payloads[i];
             }
             size_t newNodeSize = nodeSize - splitPoint;
