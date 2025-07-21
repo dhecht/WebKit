@@ -104,7 +104,34 @@ public:
     // Check if any stored interval overlaps with the query interval
     bool hasOverlap(const Interval& query) const
     {
-        return hasOverlapImpl(query);
+        if (!query.overlaps(m_rootInterval))
+            return false;
+        ASSERT(m_root);
+
+        auto maybeOverlaps = [&query](NodePtr node, size_t position) -> bool {
+            if (position == node.size())
+                return false; // Query starts after all coverage intervals
+            if (query.end() <= node.node()->interval(position).start())
+                return false; // Does not overlap the subtree
+            return true;
+        };
+
+        NodePtr node = m_root;
+        for (unsigned depth = 0; depth < m_height; ++depth) {
+            InnerNode* inner = node.asInner();
+            size_t pos = inner->lowerBound(node.size(), query.end());
+            if (!maybeOverlaps(node, pos))
+                return false; // Subtree contains no overlapping interval
+            // Subtree might overlap, continue traversing down.
+            node = inner->child(pos);
+        }
+
+        LeafNode* leaf = node.asLeaf();
+        size_t pos = leaf->lowerBound(node.size(), query.end());
+        if (!maybeOverlaps(node, pos))
+            return false;
+        ASSERT(query.overlaps(leaf->interval(pos)));
+        return true;
     }
 
     iterator findFirstAfter(const Interval& interval);
@@ -270,38 +297,6 @@ private:
                 return &leaf->value(i);
         }
         return nullptr; // Interval not found
-    }
-
-    // Check if any stored interval overlaps with the query interval
-    bool hasOverlapImpl(const Interval& query) const
-    {
-        if (!m_root)
-            return false;
-
-        auto maybeOverlaps = [&query](NodePtr node, size_t position) -> bool {
-            if (position == node.size())
-                return false; // Query starts after all coverage intervals
-            if (query.end() <= node.node()->interval(position).start())
-                return false; // Does not overlap the subtree
-            return true;
-        };
-
-        NodePtr node = m_root;
-        for (unsigned depth = 0; depth < m_height; ++depth) {
-            InnerNode* inner = node.asInner();
-            size_t pos = inner->lowerBound(node.size(), query.end());
-            if (!maybeOverlaps(node, pos))
-                return false; // Subtree contains no overlapping interval
-            // Subtree might overlap, continue traversing down.
-            node = inner->child(pos);
-        }
-
-        LeafNode* leaf = node.asLeaf();
-        size_t pos = leaf->lowerBound(node.size(), query.end());
-        if (!maybeOverlaps(node, pos))
-            return false;
-        ASSERT(query.overlaps(leaf->interval(pos)));
-        return true;
     }
 
     NodePtr insertIntoSubtree(NodePtr& subtree, const Interval& interval, const Value& value, unsigned depth)
