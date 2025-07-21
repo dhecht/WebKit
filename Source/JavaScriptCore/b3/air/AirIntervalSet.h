@@ -33,9 +33,12 @@
 
 namespace JSC { namespace B3 { namespace Air {
 
+// IntervalSet: A specialized B+ tree for storing non-overlapping intervals with efficient overlap queries.
+// Uses WTF::Range<T> for interval representation and supports gap-based load balancing.
+
 template<typename T, typename Value, size_t Order>
     requires std::is_trivially_destructible_v<T> && std::is_trivially_destructible_v<Value>
-class BPlusTree {
+class IntervalSet {
 public:
     using Interval = WTF::Range<T>;
     
@@ -44,11 +47,11 @@ public:
     
     class iterator;
 
-    BPlusTree()
+    IntervalSet()
     {
     }
 
-    ~BPlusTree()
+    ~IntervalSet()
     {
         freeAllocations();
     }
