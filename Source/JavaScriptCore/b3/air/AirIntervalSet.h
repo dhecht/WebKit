@@ -29,15 +29,16 @@
 
 #include <wtf/Vector.h>
 #include <wtf/FastMalloc.h>
+#include <wtf/Range.h>
 
 namespace JSC { namespace B3 { namespace Air {
 
-// Consider making this specialized to Range<>, then searches can end early without traversing downward when no overlap.
-
-template<typename Key, typename Value, size_t Order>
-    requires std::is_trivially_destructible_v<Key> && std::is_trivially_destructible_v<Value>
+template<typename T, typename Value, size_t Order>
+    requires std::is_trivially_destructible_v<T> && std::is_trivially_destructible_v<Value>
 class BPlusTree {
 public:
+    using Interval = WTF::Range<T>;
+    
     static constexpr size_t cpuCacheLineSize = 64;
     static constexpr size_t nodesPerSlab = 8;
     
@@ -52,8 +53,8 @@ public:
         freeAllocations();
     }
 
-    // Insert a key-value pair into the B+ tree
-    void insert(const Key& key, const Value& value)
+    // Insert an interval-value pair into the B+ tree
+    void insert(const Interval& interval, const Value& value)
     {
         if (!m_root) {
             // Create initial root as a leaf
@@ -61,12 +62,12 @@ public:
             m_root = NodePtr(leaf, 0);
             m_height = 0;
         }
-        NodePtr newChild = insertImpl(m_root, m_rootKey, key, value, 0);
+        NodePtr newChild = insertImpl(m_root, m_rootInterval, interval, value, 0);
         if (newChild) {
             ASSERT(m_root.size() == Order); // Otherwise, root should have been updated.
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
-            newRoot->key(0) = m_rootKey;
+            newRoot->key(0) = m_rootInterval;
             newRoot->child(0) = m_root;
             newRoot->key(1) = newChild.maxKey();
             newRoot->child(1) = newChild;
@@ -75,26 +76,32 @@ public:
         }
     }
 
-    // Remove a key from the B+ tree
-    void erase(const Key& key);
+    // Remove an interval from the B+ tree
+    void erase(const Interval& interval);
 
-    // Find value by key
-    Value* find(const Key& key) {
+    // Find value by interval
+    Value* find(const Interval& interval) {
         if (!m_root)
             return nullptr;
         
-        return findImpl(m_root, key);
+        return findImpl(m_root, interval);
     }
 
-    const Value* find(const Key& key) const
+    const Value* find(const Interval& interval) const
     {
         if (!m_root)
             return nullptr;
         
-        return findImpl(m_root, key);
+        return findImpl(m_root, interval);
     }
 
-    iterator findFirstAfter(const Key& key);
+    // Check if any stored interval overlaps with the query interval
+    bool hasOverlap(const Interval& query) const
+    {
+        return hasOverlapImpl(query);
+    }
+
+    iterator findFirstAfter(const Interval& interval);
 
     class iterator {
     public:
@@ -117,13 +124,13 @@ private:
     template<typename Payload, size_t N>
     class NodeImpl : public Node {
     public:
-        Key& key(unsigned i)
+        Interval& key(unsigned i)
         {
             return keys[i];
         }
 
         // XXX: maybe move this to NodePtr so it can directly update size?
-        void insertAt(size_t& size, size_t index, const Key& key, const Payload& value)
+        void insertAt(size_t& size, size_t index, const Interval& interval, const Payload& value)
         {
             ASSERT(size < N);
             ASSERT(index <= size);
@@ -133,7 +140,7 @@ private:
                 keys[i] = keys[i - 1];
                 payloads[i] = payloads[i - 1];
             }
-            keys[index] = key;
+            keys[index] = interval;
             payloads[index] = value;
             size++;
         }
@@ -142,7 +149,7 @@ private:
         {
             ASSERT(size <= N);
             ASSERT(index < size);
-            // Shift elements to the left 
+            // Shift elements to the left
             // FIXME: use memmove?
             for (size_t i = index; i < size - 1; ++i) {
                 keys[i] = keys[i + 1];
@@ -151,17 +158,17 @@ private:
             size--;
         }
 
-        // Find the first position with a key greater than or equal to the given key.
-        // This is like std::lower_bound but uses linear search since Order is small.
-        size_t lowerBound(size_t size, const Key& key) const
+        // Find the first position with an interval whose end is greater than the given start.
+        // This is used for interval-based routing in the specialized B+ tree.
+        size_t lowerBound(size_t size, T start) const
         {
             size_t i = 0;
-            while (i < size && keys[i] < key)
+            while (i < size && keys[i].end() <= start)
                 ++i;
             return i;
         }
 
-        Key keys[N];
+        Interval keys[N];
         Payload payloads[N];
     };
 
@@ -194,7 +201,7 @@ private:
             m_bits = (m_bits & ~size_mask) | newSize;
         }
 
-        const Key& maxKey() const
+        const Interval& maxKey() const
         {
             RELEASE_ASSERT(size());
             return node()->key(size() - 1);
@@ -241,13 +248,13 @@ private:
         }
     };
 
-    NodePtr insertImpl(NodePtr& subtree, Key& subtreeKey, const Key& key, const Value& value, unsigned depth)
+    NodePtr insertImpl(NodePtr& subtree, Interval& subtreeInterval, const Interval& interval, const Value& value, unsigned depth)
     {
-        size_t pos = subtree.node()->lowerBound(subtree.size(), key);
+        size_t pos = subtree.node()->lowerBound(subtree.size(), interval.begin());
         if (depth == m_height) {
             // subtree is really a leaf. Insert and return any new leaf nodes in case of split.
-            NodePtr newLeaf = insertInNodeSplitIfNeeded<LeafNode>(subtree, key, value, pos);
-            subtreeKey = subtree.maxKey();
+            NodePtr newLeaf = insertInNodeSplitIfNeeded<LeafNode>(subtree, interval, value, pos);
+            subtreeInterval = subtree.maxKey();
             return newLeaf;
         }
         size_t oldSize = subtree.size();
@@ -257,46 +264,84 @@ private:
         if (pos == subtree.size())
             pos = subtree.size() - 1;
 
-        NodePtr newChild = insertImpl(inner->child(pos), inner->key(pos), key, value, depth + 1);
+        NodePtr newChild = insertImpl(inner->child(pos), inner->key(pos), interval, value, depth + 1);
         if (newChild) {
             ASSERT_UNUSED(oldSize, oldSize == Order); // Otherwise, should have been inserted.
             ASSERT_UNUSED(oldSize, inner->child(pos).size() + newChild.size() == oldSize + 1);
-            // Insert the new child into the subtree. The key for inner nodes is the maxium key of the children.
-            const Key& newChildKey = newChild.maxKey();
-            NodePtr newInner = insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildKey, newChild, pos + 1);
-            subtreeKey = subtree.maxKey();
+            // Insert the new child into the subtree. The key for inner nodes is the coverage interval of the children.
+            const Interval& newChildInterval = newChild.maxKey();
+            NodePtr newInner = insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildInterval, newChild, pos + 1);
+            subtreeInterval = subtree.maxKey();
             return newInner;
         }
         ASSERT_UNUSED(oldSize, inner->child(pos).size() == oldSize + 1);
-        // Update subtreeKey in case the maximum key of this subtree changed
-        // XXX only do this if necessary (here and elsewhere)?
-        subtreeKey = subtree.maxKey();
-        // Nothing more to do, new key/value was inserted and the tree fully updated.
+        // Update subtreeInterval in case the maximum interval of this subtree changed
+        subtreeInterval = subtree.maxKey();
+        // Nothing more to do, new interval/value was inserted and the tree fully updated.
         return nullptr;
     }
 
-    Value* findImpl(NodePtr node, const Key& key) const
+    Value* findImpl(NodePtr node, const Interval& interval) const
     {
         // Traverse down to the leaf
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = node.asInner();
-            size_t pos = inner->lowerBound(node.size(), key);
+            size_t pos = inner->lowerBound(node.size(), interval.begin());
             if (pos == node.size())
                 return nullptr;
             node = inner->child(pos);
         }
         LeafNode* leaf = node.asLeaf();
         for (size_t i = 0; i < node.size(); ++i) {
-            if (leaf->key(i) == key)
+            if (leaf->key(i) == interval)
                 return &leaf->value(i);
         }
-        return nullptr; // Key not found
+        return nullptr; // Interval not found
     }
 
-    // Inserts key and value into the node referred to by NodePtr, and updates NodePtr with
+    // Check if any stored interval overlaps with the query interval
+    bool hasOverlapImpl(const Interval& query) const
+    {
+        if (!m_root)
+            return false;
+            
+        NodePtr node = m_root;
+        
+        // Traverse down to leaf, using coverage intervals for pruning
+        for (unsigned depth = 0; depth < m_height; ++depth) {
+            InnerNode* inner = node.asInner();
+            
+            // Find first child whose coverage might contain overlapping intervals
+            size_t pos = inner->lowerBound(node.size(), query.begin());
+            if (pos == node.size())
+                return false; // Query starts after all coverage intervals
+                
+            // Check if this child's coverage actually overlaps the query
+            if (!inner->key(pos).overlaps(query))
+                return false; // No overlap possible
+                
+            node = inner->child(pos);
+        }
+        
+        // At leaf level - since intervals are sorted and don't overlap,
+        // we just need to check if any interval overlaps the query
+        LeafNode* leaf = node.asLeaf();
+        for (size_t i = 0; i < node.size(); ++i) {
+            if (leaf->key(i).overlaps(query))
+                return true;
+            // Since intervals are sorted by start and don't overlap,
+            // if this interval starts after query ends, no more can overlap
+            if (leaf->key(i).begin() >= query.end())
+                break;
+        }
+        
+        return false;
+    }
+
+    // Inserts interval and value into the node referred to by NodePtr, and updates NodePtr with
     // the new size. If the node needed to be split returns a NodePtr for the new node.
     template<typename NodeType>
-    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Key& key, const Value& value, size_t insertionPoint)
+    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Interval& interval, const Value& value, size_t insertionPoint)
     {
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
@@ -314,11 +359,11 @@ private:
             nodeSize = splitPoint;
             
             if (insertionPoint < splitPoint) {
-                node->insertAt(splitPoint, insertionPoint, key, value);
+                node->insertAt(splitPoint, insertionPoint, interval, value);
             } else {
                 // Insert into new leaf (recalculate insertion point for new leaf)
                 insertionPoint -= splitPoint;
-                newNode->insertAt(newNodeSize, insertionPoint, key, value);
+                newNode->insertAt(newNodeSize, insertionPoint, interval, value);
             }
             // nodePtr node's size has changed so update the nodePtr to reflect the new size.
             nodePtr.setSize(nodeSize);
@@ -326,7 +371,7 @@ private:
         }
         
         // Node has space, simple insertion
-        node->insertAt(nodeSize, insertionPoint, key, value);
+        node->insertAt(nodeSize, insertionPoint, interval, value);
         nodePtr.setSize(nodeSize);
         return nullptr;
     }
@@ -366,7 +411,7 @@ private:
 
     // Root node pointer
     NodePtr m_root;
-    Key m_rootKey;
+    Interval m_rootInterval;
     unsigned m_height { 0 };
 
     // Slab allocator state
