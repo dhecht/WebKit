@@ -70,9 +70,9 @@ public:
             ASSERT(m_root.size() == Order); // Otherwise, root should have been updated.
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
-            newRoot->key(0) = m_rootInterval;
+            newRoot->interval(0) = m_rootInterval;
             newRoot->child(0) = m_root;
-            newRoot->key(1) = newChild.coverage();
+            newRoot->interval(1) = newChild.coverage();
             newRoot->child(1) = newChild;
             m_root = NodePtr(newRoot, 2);
             m_height++;
@@ -127,9 +127,9 @@ private:
     template<typename Payload, size_t N>
     class NodeImpl : public Node {
     public:
-        Interval& key(unsigned i)
+        Interval& interval(unsigned i)
         {
-            return keys[i];
+            return intervals[i];
         }
 
         // XXX: maybe move this to NodePtr so it can directly update size?
@@ -140,10 +140,10 @@ private:
             // Shift elements to the right
             // FIXME: use memmove?
             for (size_t i = size; i > index; --i) {
-                keys[i] = keys[i - 1];
+                intervals[i] = intervals[i - 1];
                 payloads[i] = payloads[i - 1];
             }
-            keys[index] = interval;
+            intervals[index] = interval;
             payloads[index] = value;
             size++;
         }
@@ -155,7 +155,7 @@ private:
             // Shift elements to the left
             // FIXME: use memmove?
             for (size_t i = index; i < size - 1; ++i) {
-                keys[i] = keys[i + 1];
+                intervals[i] = intervals[i + 1];
                 payloads[i] = payloads[i + 1];
             }
             size--;
@@ -166,12 +166,12 @@ private:
         size_t lowerBound(size_t size, T start) const
         {
             size_t i = 0;
-            while (i < size && keys[i].end() <= start)
+            while (i < size && intervals[i].end() <= start)
                 ++i;
             return i;
         }
 
-        Interval keys[N];
+        Interval intervals[N];
         Payload payloads[N];
     };
 
@@ -207,7 +207,7 @@ private:
         const Interval coverage() const
         {
             RELEASE_ASSERT(size());
-            return { node()->key(0).start(), node()->key(size() - 1).end() };
+            return { node()->interval(0).start(), node()->interval(size() - 1).end() };
         }
 
         explicit operator bool() const { return m_bits; }
@@ -267,7 +267,7 @@ private:
         if (pos == subtree.size())
             pos = subtree.size() - 1;
 
-        NodePtr newChild = insertImpl(inner->child(pos), inner->key(pos), interval, value, depth + 1);
+        NodePtr newChild = insertImpl(inner->child(pos), inner->interval(pos), interval, value, depth + 1);
         if (newChild) {
             ASSERT_UNUSED(oldSize, oldSize == Order); // Otherwise, should have been inserted.
             ASSERT_UNUSED(oldSize, inner->child(pos).size() + newChild.size() == oldSize + 1);
@@ -296,7 +296,7 @@ private:
         }
         LeafNode* leaf = node.asLeaf();
         for (size_t i = 0; i < node.size(); ++i) {
-            if (leaf->key(i) == interval)
+            if (leaf->interval(i) == interval)
                 return &leaf->value(i);
         }
         return nullptr; // Interval not found
@@ -320,7 +320,7 @@ private:
                 return false; // Query starts after all coverage intervals
                 
             // Check if this child's coverage actually overlaps the query
-            if (!inner->key(pos).overlaps(query))
+            if (!inner->interval(pos).overlaps(query))
                 return false; // No overlap possible
                 
             node = inner->child(pos);
@@ -330,11 +330,11 @@ private:
         // we just need to check if any interval overlaps the query
         LeafNode* leaf = node.asLeaf();
         for (size_t i = 0; i < node.size(); ++i) {
-            if (leaf->key(i).overlaps(query))
+            if (leaf->interval(i).overlaps(query))
                 return true;
             // Since intervals are sorted by start and don't overlap,
             // if this interval starts after query ends, no more can overlap
-            if (leaf->key(i).begin() >= query.end())
+            if (leaf->interval(i).begin() >= query.end())
                 break;
         }
         
@@ -355,7 +355,7 @@ private:
             auto newNode = allocNode<NodeType>();
 
             for (size_t i = splitPoint; i < nodeSize; ++i) {
-                newNode->keys[i - splitPoint] = node->keys[i];
+                newNode->keys[i - splitPoint] = node->intervals[i];
                 newNode->payloads[i - splitPoint] = node->payloads[i];
             }
             size_t newNodeSize = nodeSize - splitPoint;
