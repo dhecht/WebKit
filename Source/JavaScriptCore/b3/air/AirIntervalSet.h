@@ -142,16 +142,6 @@ public:
 
     iterator findFirstAfter(const Interval& interval);
 
-    class iterator {
-    public:
-        iterator() = default;
-        
-        // TODO: Implement iterator for traversing intervals
-        bool operator==(const iterator& other) const = default;
-        iterator& operator++() { return *this; }
-        // TODO: Add dereference operators
-    };
-
 private:
     class LeafNode;
     class InnerNode;
@@ -275,6 +265,9 @@ private:
         {
             return payloads[i];
         }
+        
+        LeafNode* next { nullptr };
+        LeafNode* prev { nullptr };
     };
 
     class InnerNode : public NodeImpl<NodePtr, Order> {
@@ -286,6 +279,46 @@ private:
         }
     };
 
+public:
+    class iterator {
+    public:
+        iterator() : m_leaf(nullptr), m_position(0) { }
+        
+        iterator(LeafNode* leaf, size_t position) : m_leaf(leaf), m_position(position) { }
+        
+        std::pair<Interval, Value> operator*() const
+        {
+            ASSERT(m_leaf && m_position < m_leaf->size());
+            return { m_leaf->interval(m_position), m_leaf->value(m_position) };
+        }
+        
+        iterator& operator++()
+        {
+            ASSERT(m_leaf);
+            ++m_position;
+            if (m_position >= m_leaf->size()) {
+                m_leaf = m_leaf->next;
+                m_position = 0;
+            }
+            return *this;
+        }
+        
+        bool operator==(const iterator& other) const
+        {
+            return m_leaf == other.m_leaf && m_position == other.m_position;
+        }
+        
+        bool operator!=(const iterator& other) const
+        {
+            return !(*this == other);
+        }
+        
+    private:
+        LeafNode* m_leaf;
+        size_t m_position;
+    };
+
+private:
     NodePtr insertIntoSubtree(NodePtr& subtree, const Interval& interval, const Value& value, unsigned depth)
     {
         size_t pos = subtree.node()->lowerBound(subtree.size(), interval.end());
@@ -318,8 +351,8 @@ private:
         ASSERT(nodeSize <= Order);
 
         if (nodeSize == Order) {
-            constexpr size_t splitPoint = Order / 2;            
-            // Leaf is full, need to split
+            constexpr size_t splitPoint = Order / 2;
+            // Node is full, need to split
             auto newNode = allocNode<NodeType>();
 
             for (size_t i = splitPoint; i < nodeSize; ++i) {
@@ -332,10 +365,22 @@ private:
             if (insertionPoint < splitPoint) {
                 node->insertAt(splitPoint, insertionPoint, interval, value);
             } else {
-                // Insert into new leaf (recalculate insertion point for new leaf)
+                // Insert into new node (recalculate insertion point for new node)
                 insertionPoint -= splitPoint;
                 newNode->insertAt(newNodeSize, insertionPoint, interval, value);
             }
+            
+            // If this is a leaf node split, maintain the linked list
+            if constexpr (std::is_same_v<NodeType, LeafNode>) {
+                // Insert newNode after node in the linked list
+                newNode->next = node->next;
+                newNode->prev = node;
+                
+                if (node->next)
+                    node->next->prev = newNode;
+                node->next = newNode;
+            }
+            
             // nodePtr node's size has changed so update the nodePtr to reflect the new size.
             nodePtr.setSize(nodeSize);
             return NodePtr(newNode, newNodeSize);
@@ -380,6 +425,34 @@ private:
         m_slabOffset = 0;
     }
 
+    LeafNode* findFirstLeaf() const
+    {
+        if (!m_root)
+            return nullptr;
+            
+        NodePtr node = m_root;
+        for (unsigned depth = 0; depth < m_height; ++depth) {
+            InnerNode* inner = node.asInner();
+            node = inner->child(0);
+        }
+        return node.asLeaf();
+    }
+
+public:
+    iterator begin() const
+    {
+        LeafNode* firstLeaf = findFirstLeaf();
+        if (!firstLeaf || firstLeaf->size() == 0)
+            return end();
+        return iterator(firstLeaf, 0);
+    }
+    
+    iterator end() const
+    {
+        return iterator(nullptr, 0);
+    }
+
+private:
     // Root node pointer
     NodePtr m_root;
     Interval m_rootInterval;
