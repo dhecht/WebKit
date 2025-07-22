@@ -48,6 +48,7 @@ public:
     class iterator;
 
     IntervalSet()
+    : m_rootInterval(T{}, T{})
     {
     }
 
@@ -270,6 +271,7 @@ private:
         
         LeafNode* next { nullptr };
         LeafNode* prev { nullptr };
+        size_t size { 0 }; // FIXME: redudant with size in the NodePtr
     };
 
     class InnerNode : public NodeImpl<NodePtr, Order> {
@@ -290,7 +292,7 @@ public:
         
         std::pair<Interval, Value> operator*() const
         {
-            ASSERT(m_leaf && m_position < m_leaf->size());
+            ASSERT(m_leaf && m_position < m_leaf->size);
             return { m_leaf->interval(m_position), m_leaf->value(m_position) };
         }
         
@@ -298,7 +300,7 @@ public:
         {
             ASSERT(m_leaf);
             ++m_position;
-            if (m_position >= m_leaf->size()) {
+            if (m_position >= m_leaf->size) {
                 m_leaf = m_leaf->next;
                 m_position = 0;
             }
@@ -372,7 +374,7 @@ private:
                 newNode->insertAt(newNodeSize, insertionPoint, interval, value);
             }
             
-            // If this is a leaf node split, maintain the linked list
+            // If this is a leaf node split, maintain the linked list and size
             if constexpr (std::is_same_v<NodeType, LeafNode>) {
                 // Insert newNode after node in the linked list
                 newNode->next = node->next;
@@ -381,6 +383,9 @@ private:
                 if (node->next)
                     node->next->prev = newNode;
                 node->next = newNode;
+                
+                node->size = nodeSize;
+                newNode->size = newNodeSize;
             }
             
             // nodePtr node's size has changed so update the nodePtr to reflect the new size.
@@ -391,6 +396,12 @@ private:
         // Node has space, insert without splitting
         node->insertAt(nodeSize, insertionPoint, interval, value);
         nodePtr.setSize(nodeSize);
+        
+        // Update leaf size if this is a leaf node
+        if constexpr (std::is_same_v<NodeType, LeafNode>) {
+            node->size = nodeSize;
+        }
+        
         return nullptr;
     }
 
