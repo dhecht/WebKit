@@ -25,13 +25,11 @@
 
 #pragma once
 
-#if ENABLE(B3_JIT)
-
 #include <wtf/Vector.h>
 #include <wtf/FastMalloc.h>
 #include <wtf/Range.h>
 
-namespace JSC { namespace B3 { namespace Air {
+namespace WTF {
 
 // IntervalSet: A specialized B+ tree for storing non-overlapping intervals with efficient overlap queries.
 // Uses WTF::Range<T> for interval representation and supports gap-based load balancing.
@@ -40,7 +38,7 @@ template<typename T, typename Value, size_t Order>
     requires std::is_trivially_destructible_v<T> && std::is_trivially_destructible_v<Value>
 class IntervalSet {
 public:
-    using Interval = WTF::Range<T>;
+    using Interval = Range<T>;
     
     static constexpr size_t cpuCacheLineSize = 64;
     static constexpr size_t nodesPerSlab = 8;
@@ -425,7 +423,7 @@ private:
     void allocateSlab()
     {
         size_t slabSize = sizeof(LeafNode) * nodesPerSlab;
-        char* slab = static_cast<char*>(WTF::fastAlignedMalloc(cpuCacheLineSize, slabSize));
+        char* slab = static_cast<char*>(fastAlignedMalloc(cpuCacheLineSize, slabSize));
         m_slabs.append(slab);
         m_slabOffset = 0;
     }
@@ -433,7 +431,7 @@ private:
     void freeAllocations()
     {
         for (auto& slab : m_slabs)
-            WTF::fastAlignedFree(slab);
+            fastAlignedFree(slab);
         m_slabs.clear();
         m_slabOffset = 0;
     }
@@ -476,7 +474,7 @@ private:
     size_t m_slabOffset { 0 };
 };
 
-} } } // namespace JSC::B3::Air
+} // namespace WTF
 
-#endif // ENABLE(B3_JIT)
+using WTF::IntervalSet;
 
