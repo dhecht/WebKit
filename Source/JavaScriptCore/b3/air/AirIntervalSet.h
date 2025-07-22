@@ -95,15 +95,16 @@ public:
         NodePtr node = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = node.asInner();
-            size_t pos = inner->lowerBound(node.size(), query.begin());
+            size_t pos = inner->firstIntervalEndAfter(node.size(), query.begin());
             if (pos == node.size())
-                return nullptr;
+                return nullptr; // query is entirely after this subtree
             if (query.end() <= inner->interval(pos).start())
-                return nullptr; // query is entirely in the gap before this subtree
+                return nullptr; // query is entirely before this subtree
+            // Otherwise, there may exist an overlapping interval in this subtree 
             node = inner->child(pos);
         }
         LeafNode* leaf = node.asLeaf();
-        size_t pos = leaf->lowerBound(node.size(), query.end());
+        size_t pos = leaf->firstIntervalEndAfter(node.size(), query.end());
         ASSERT(query.start() < leaf->interval(pos).end());
         return leaf->interval(pos).start() < query.end() ? &leaf->value(pos) : nullptr;
     }
@@ -118,7 +119,7 @@ public:
         NodePtr node = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = node.asInner();
-            size_t pos = inner->lowerBound(node.size(), query.start());
+            size_t pos = inner->firstIntervalEndAfter(node.size(), query.start());
             if (pos == node.size())
                 return false; // query starts after all intervals
             // query start lands either within the pos subtree or the gap immediately preceding that subtree
@@ -135,7 +136,7 @@ public:
         }
 
         LeafNode* leaf = node.asLeaf();
-        size_t pos = leaf->lowerBound(node.size(), query.end());
+        size_t pos = leaf->firstIntervalEndAfter(node.size(), query.end());
         ASSERT(query.start() < leaf->interval(pos).end());
         return leaf->interval(pos).start() < query.end();
     }
@@ -187,8 +188,9 @@ private:
             size--;
         }
 
-        // Find the first position with an interval whose end is greater than the given point.
-        size_t lowerBound(size_t size, T point) const
+        // Find the least interval with end greater than the given point, and return the position,
+        // or size if no such interval exists.
+        size_t firstIntervalEndAfter(size_t size, T point) const
         {
             size_t i = 0;
             while (i < size && intervals[i].end() <= point)
@@ -321,7 +323,7 @@ public:
 private:
     NodePtr insertIntoSubtree(NodePtr& subtree, const Interval& interval, const Value& value, unsigned depth)
     {
-        size_t pos = subtree.node()->lowerBound(subtree.size(), interval.end());
+        size_t pos = subtree.node()->firstIntervalEndAfter(subtree.size(), interval.end());
 
         if (depth == m_height)
             return insertInNodeSplitIfNeeded<LeafNode>(subtree, interval, value, pos);
