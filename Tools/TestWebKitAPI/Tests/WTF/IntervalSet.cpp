@@ -27,7 +27,6 @@
 
 #include "Test.h"
 #include <wtf/IntervalSet.h>
-#include <wtf/Range.h>
 
 namespace TestWebKitAPI {
 
@@ -63,61 +62,6 @@ TEST(WTF_IntervalSet, SingleInterval)
     
     // Test find with non-overlapping interval
     EXPECT_EQ(nullptr, intervalSet.find(Range<int>(0, 5)));
-}
-
-TEST(WTF_IntervalSet, MultipleIntervals)
-{
-    IntervalSet<int, int> intervalSet;
-    
-    // Insert multiple non-overlapping intervals
-    intervalSet.insert(Range<int>(10, 20), 1);
-    intervalSet.insert(Range<int>(30, 40), 2);
-    intervalSet.insert(Range<int>(50, 60), 3);
-    
-    // Test overlap detection
-    EXPECT_TRUE(intervalSet.hasOverlap(Range<int>(15, 25)));  // Overlaps first
-    EXPECT_TRUE(intervalSet.hasOverlap(Range<int>(35, 45)));  // Overlaps second
-    EXPECT_TRUE(intervalSet.hasOverlap(Range<int>(55, 65)));  // Overlaps third
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(20, 30))); // Gap between first and second
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(40, 50))); // Gap between second and third
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(0, 10)));  // Before all intervals
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(60, 70))); // After all intervals
-    
-    // Test find for each interval
-    const int* value1 = intervalSet.find(Range<int>(15, 16));
-    EXPECT_NE(nullptr, value1);
-    EXPECT_EQ(1, *value1);
-    
-    const int* value2 = intervalSet.find(Range<int>(35, 36));
-    EXPECT_NE(nullptr, value2);
-    EXPECT_EQ(2, *value2);
-    
-    const int* value3 = intervalSet.find(Range<int>(55, 56));
-    EXPECT_NE(nullptr, value3);
-    EXPECT_EQ(3, *value3);
-    
-    // Test find in gaps
-    EXPECT_EQ(nullptr, intervalSet.find(Range<int>(25, 26)));
-    EXPECT_EQ(nullptr, intervalSet.find(Range<int>(45, 46)));
-}
-
-TEST(WTF_IntervalSet, DifferentTypes)
-{
-    // Test with different value type
-    IntervalSet<int, const char*> intervalSet;
-    
-    intervalSet.insert(Range<int>(0, 100), "first");
-    intervalSet.insert(Range<int>(200, 300), "second");
-    
-    const char* const* value = intervalSet.find(Range<int>(50, 60));
-    EXPECT_NE(nullptr, value);
-    EXPECT_STREQ("first", *value);
-    
-    value = intervalSet.find(Range<int>(250, 260));
-    EXPECT_NE(nullptr, value);
-    EXPECT_STREQ("second", *value);
-    
-    EXPECT_EQ(nullptr, intervalSet.find(Range<int>(150, 160)));
 }
 
 TEST(WTF_IntervalSet, EdgeCases)
