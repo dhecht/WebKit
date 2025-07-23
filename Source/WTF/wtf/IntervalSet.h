@@ -153,6 +153,7 @@ private:
     class NodeImpl : public Node {
     public:
         using PayloadType = Payload;
+        static constexpr size_t capacity = N;
         Interval& interval(unsigned i)
         {
             return intervals[i];
@@ -359,10 +360,10 @@ private:
     {
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
-        ASSERT(nodeSize <= Order);
+        ASSERT(nodeSize <= NodeType::capacity);
 
-        if (nodeSize == Order) [[unlikely]] {
-            constexpr size_t splitPoint = Order / 2;
+        if (nodeSize == NodeType::capacity) [[unlikely]] {
+            constexpr size_t splitPoint = NodeType::capacity / 2;
             // Node is full, need to split
             auto newNode = allocNode<NodeType>();
 
