@@ -34,14 +34,38 @@ namespace WTF {
 // IntervalSet: A specialized B+ tree for storing non-overlapping intervals with efficient overlap queries.
 // Uses WTF::Range<T> for interval representation and supports gap-based load balancing.
 
-template<typename T, typename Value, size_t Order = 4>
+template<typename T, typename Value, size_t CacheLinesPerNode = 1>
     requires std::is_trivially_destructible_v<T> && std::is_trivially_destructible_v<Value>
 class IntervalSet {
 public:
     using Interval = Range<T>;
     
     static constexpr size_t cpuCacheLineSize = 64;
+    static constexpr size_t targetNodeSize = CacheLinesPerNode * cpuCacheLineSize;
     static constexpr size_t nodesPerSlab = 8;
+    
+    // Calculate optimal order for each node type based on target cache line usage
+    static constexpr size_t calculateLeafOrder() {
+        // Base size includes: next/prev pointers, size field, and any padding
+        constexpr size_t baseSize = sizeof(void*) * 2 + sizeof(size_t);
+        constexpr size_t elementSize = sizeof(Interval) + sizeof(Value);
+        constexpr size_t availableSpace = targetNodeSize > baseSize ? targetNodeSize - baseSize : 0;
+        return availableSpace / elementSize;
+    }
+    
+    static constexpr size_t calculateInnerOrder() {
+        // Inner nodes only have the arrays, no additional fields
+        // FIXME: NodePtr is essentially a uintptr_t, so use that size
+        constexpr size_t elementSize = sizeof(Interval) + sizeof(uintptr_t);
+        return targetNodeSize / elementSize;
+    }
+    
+    static constexpr size_t LeafOrder = calculateLeafOrder();
+    static constexpr size_t InnerOrder = calculateInnerOrder();
+    
+    // Ensure CacheLinesPerNode parameter is large enough for valid B+ tree orders
+    static_assert(LeafOrder >= 2, "CacheLinesPerNode parameter too small: LeafNode order must be at least 2 for a valid B+ tree");
+    static_assert(InnerOrder >= 2, "CacheLinesPerNode parameter too small: InnerNode order must be at least 2 for a valid B+ tree");
     
     class iterator;
 
@@ -66,7 +90,7 @@ public:
         }
         NodePtr newChild = insertIntoSubtree(m_root, interval, value, 0);
         if (newChild) [[unlikely]] {
-            ASSERT(newChild.size() + m_root.size() == Order + 1);
+            ASSERT(newChild.size() + m_root.size() == (m_height ? InnerOrder : LeafOrder) + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
             newRoot->interval(0) = m_root.coverage(m_height);
@@ -266,9 +290,9 @@ private:
         uintptr_t m_bits;
     };
 
-    class LeafNode : public NodeImpl<Value, Order> {
+    class LeafNode : public NodeImpl<Value, LeafOrder> {
     public:
-        using NodeImpl<Value, Order>::payloads;
+        using NodeImpl<Value, LeafOrder>::payloads;
         Value& value(unsigned i)
         {
             return payloads[i];
@@ -279,9 +303,9 @@ private:
         size_t size { 0 }; // FIXME: redudant with size in the NodePtr
     };
 
-    class InnerNode : public NodeImpl<NodePtr, Order> {
+    class InnerNode : public NodeImpl<NodePtr, InnerOrder> {
     public:
-        using NodeImpl<NodePtr, Order>::payloads;
+        using NodeImpl<NodePtr, InnerOrder>::payloads;
         NodePtr& child(unsigned i)
         {
             return payloads[i];
@@ -346,7 +370,7 @@ private:
         inner->interval(pos) = inner->child(pos).coverage(m_height - childDepth);
 
         if (newChild) [[unlikely]] {
-            ASSERT(inner->child(pos).size() + newChild.size() == Order + 1);
+            ASSERT(inner->child(pos).size() + newChild.size() == (childDepth == m_height ? LeafOrder : InnerOrder) + 1);
             Interval newChildCoverage = newChild.coverage(m_height - childDepth);
             return insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildCoverage, newChild, pos + 1);
         }
