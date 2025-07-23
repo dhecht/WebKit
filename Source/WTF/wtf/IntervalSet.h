@@ -25,16 +25,16 @@
 
 #pragma once
 
-#include <wtf/Vector.h>
 #include <wtf/FastMalloc.h>
 #include <wtf/Range.h>
+#include <wtf/Vector.h>
 
 namespace WTF {
 
 // IntervalSet: A specialized B+ tree for storing non-overlapping intervals with efficient overlap queries.
 // Uses WTF::Range<T> for interval representation and supports gap-based load balancing.
 
-template<typename T, typename Value, size_t Order>
+template<typename T, typename Value, size_t Order = 4>
     requires std::is_trivially_destructible_v<T> && std::is_trivially_destructible_v<Value>
 class IntervalSet {
 public:
