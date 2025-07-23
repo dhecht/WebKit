@@ -65,7 +65,7 @@ public:
             m_height = 0;
         }
         NodePtr newChild = insertIntoSubtree(m_root, interval, value, 0);
-        if (newChild) {
+        if (newChild) [[unlikely]] {
             ASSERT(newChild.size() + m_root.size() == Order + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
@@ -75,10 +75,8 @@ public:
             newRoot->child(1) = newChild;
             m_height++;
             m_root = NodePtr(newRoot, 2);
-            m_rootInterval = m_root.coverage(m_height);
-        } else {
-            m_rootInterval = m_root.coverage(m_height);
         }
+        m_rootInterval = m_root.coverage(m_height);
     }
 
     // Remove an interval from the B+ tree
@@ -346,7 +344,7 @@ private:
         NodePtr newChild = insertIntoSubtree(inner->child(pos), interval, value, childDepth);
         inner->interval(pos) = inner->child(pos).coverage(m_height - childDepth);
 
-        if (newChild) {
+        if (newChild) [[unlikely]] {
             ASSERT(inner->child(pos).size() + newChild.size() == Order + 1);
             Interval newChildCoverage = newChild.coverage(m_height - childDepth);
             return insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildCoverage, newChild, pos + 1);
@@ -363,7 +361,7 @@ private:
         size_t nodeSize = nodePtr.size();
         ASSERT(nodeSize <= Order);
 
-        if (nodeSize == Order) {
+        if (nodeSize == Order) [[unlikely]] {
             constexpr size_t splitPoint = Order / 2;
             // Node is full, need to split
             auto newNode = allocNode<NodeType>();
