@@ -69,15 +69,15 @@ public:
             ASSERT(newChild.size() + m_root.size() == Order + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
-            newRoot->interval(0) = m_root.coverage();
+            newRoot->interval(0) = m_root.coverage(m_height);
             newRoot->child(0) = m_root;
-            newRoot->interval(1) = newChild.coverage();
+            newRoot->interval(1) = newChild.coverage(m_height);
             newRoot->child(1) = newChild;
-            m_root = NodePtr(newRoot, 2);
-            m_rootInterval = m_root.coverage();
             m_height++;
+            m_root = NodePtr(newRoot, 2);
+            m_rootInterval = m_root.coverage(m_height);
         } else {
-            m_rootInterval = m_root.coverage();
+            m_rootInterval = m_root.coverage(m_height);
         }
     }
 
@@ -153,6 +153,7 @@ private:
     template<typename Payload, size_t N>
     class NodeImpl : public Node {
     public:
+        using PayloadType = Payload;
         Interval& interval(unsigned i)
         {
             return intervals[i];
@@ -230,10 +231,17 @@ private:
             m_bits = (m_bits & ~size_mask) | newSize;
         }
 
-        const Interval coverage() const
+        const Interval coverage(unsigned distanceToLeaf) const
         {
             RELEASE_ASSERT(size());
-            return { node()->interval(0).begin(), node()->interval(size() - 1).end() };
+            ASSERT(distancetoLeaf <= m_height);
+            if (distanceToLeaf) {
+                auto inner = asInner();
+                return { inner->interval(0).begin(), inner->interval(size() - 1).end() };
+             } else {
+                auto leaf = asLeaf();
+                return { leaf->interval(0).begin(), leaf->interval(size() - 1).end() };
+            }
         }
 
         explicit operator bool() const { return m_bits; }
@@ -334,12 +342,14 @@ private:
         if (pos == subtree.size())
             pos = subtree.size() - 1;
 
-        NodePtr newChild = insertIntoSubtree(inner->child(pos), interval, value, depth + 1);
-        inner->interval(pos) = inner->child(pos).coverage();
+        unsigned childDepth = depth + 1;
+        NodePtr newChild = insertIntoSubtree(inner->child(pos), interval, value, childDepth);
+        inner->interval(pos) = inner->child(pos).coverage(m_height - childDepth);
 
         if (newChild) {
             ASSERT(inner->child(pos).size() + newChild.size() == Order + 1);
-            return insertInNodeSplitIfNeeded<InnerNode>(subtree, newChild.coverage(), newChild, pos + 1);
+            Interval newChildCoverage = newChild.coverage(m_height - childDepth);
+            return insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildCoverage, newChild, pos + 1);
         }
         return NodePtr(); // Inserted without needing to split
     }
@@ -347,7 +357,7 @@ private:
     // Inserts interval and value into the node referred to by NodePtr, and updates NodePtr with
     // the new size. If the node needed to be split returns a NodePtr for the new node.
     template<typename NodeType>
-    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Interval& interval, const Value& value, size_t insertionPoint)
+    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Interval& interval, const typename NodeType::PayloadType& value, size_t insertionPoint)
     {
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
