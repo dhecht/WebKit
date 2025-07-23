@@ -24,63 +24,67 @@
  */
 
 #include "config.h"
-
 #include "Test.h"
+
 #include <wtf/IntervalSet.h>
 
 namespace TestWebKitAPI {
 
+using Point = uint32_t;
+using Value = int;
+using Interval = Range<Point>;
+
 TEST(WTF_IntervalSet, Basic)
 {
-    IntervalSet<int, int> intervalSet;
+    IntervalSet<Point, Value> intervalSet;
     
     // Test empty set
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(0, 10)));
-    EXPECT_EQ(nullptr, intervalSet.find(Range<int>(0, 10)));
+    EXPECT_FALSE(intervalSet.hasOverlap({ 0, 10 }));
+    EXPECT_EQ(nullptr, intervalSet.find({ 0, 10 }));
 }
 
 TEST(WTF_IntervalSet, SingleInterval)
 {
-    IntervalSet<int, int> intervalSet;
+    IntervalSet<Point, Value> intervalSet;
     
     // Insert a single interval [10, 20) with value 42
-    intervalSet.insert(Range<int>(10, 20), 42);
+    intervalSet.insert({ 10, 20 }, 42);
     
     // Test overlap detection
-    EXPECT_TRUE(intervalSet.hasOverlap(Range<int>(15, 25)));  // Overlaps
-    EXPECT_TRUE(intervalSet.hasOverlap(Range<int>(5, 15)));   // Overlaps
-    EXPECT_TRUE(intervalSet.hasOverlap(Range<int>(10, 20)));  // Exact match
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(0, 10)));  // No overlap (adjacent)
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(20, 30))); // No overlap (adjacent)
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(0, 5)));   // No overlap (before)
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(25, 30))); // No overlap (after)
+    EXPECT_TRUE(intervalSet.hasOverlap({ 15, 25 }));  // Overlaps
+    EXPECT_TRUE(intervalSet.hasOverlap({ 5, 15 }));   // Overlaps
+    EXPECT_TRUE(intervalSet.hasOverlap({ 10, 20 }));  // Exact match
+    EXPECT_FALSE(intervalSet.hasOverlap({ 0, 10 }));  // No overlap (adjacent)
+    EXPECT_FALSE(intervalSet.hasOverlap({ 20, 30 })); // No overlap (adjacent)
+    EXPECT_FALSE(intervalSet.hasOverlap({ 0, 5 }));   // No overlap (before)
+    EXPECT_FALSE(intervalSet.hasOverlap({ 25, 30 })); // No overlap (after)
     
     // Test find
-    const int* value = intervalSet.find(Range<int>(15, 16));
+    const Value* value = intervalSet.find({ 15, 16 });
     EXPECT_NE(nullptr, value);
     EXPECT_EQ(42, *value);
     
     // Test find with non-overlapping interval
-    EXPECT_EQ(nullptr, intervalSet.find(Range<int>(0, 5)));
+    EXPECT_EQ(nullptr, intervalSet.find({ 0, 5 }));
 }
 
 TEST(WTF_IntervalSet, EdgeCases)
 {
-    IntervalSet<int, int> intervalSet;
+    IntervalSet<Point, Value> intervalSet;
     
     // Insert interval [0, 1) - single unit interval
-    intervalSet.insert(Range<int>(0, 1), 100);
+    intervalSet.insert({ 0, 1 }, 100);
     
-    EXPECT_TRUE(intervalSet.hasOverlap(Range<int>(0, 1)));
-    EXPECT_FALSE(intervalSet.hasOverlap(Range<int>(1, 2)));
+    EXPECT_TRUE(intervalSet.hasOverlap({ 0, 1 }));
+    EXPECT_FALSE(intervalSet.hasOverlap({ 1, 2 }));
     
-    const int* value = intervalSet.find(Range<int>(0, 1));
+    const Value* value = intervalSet.find({ 0, 1 });
     EXPECT_NE(nullptr, value);
     EXPECT_EQ(100, *value);
     
     // Test with larger intervals that span the small one
-    EXPECT_TRUE(intervalSet.hasOverlap(Range<int>(-10, 10)));
-    value = intervalSet.find(Range<int>(-10, 10));
+    EXPECT_TRUE(intervalSet.hasOverlap({ 0, 10 }));
+    value = intervalSet.find({ 0, 10 });
     EXPECT_NE(nullptr, value);
     EXPECT_EQ(100, *value);
 }
