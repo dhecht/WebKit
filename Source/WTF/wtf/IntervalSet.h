@@ -246,12 +246,12 @@ private:
 
         LeafNode* asLeaf() const
         {
-            return as<LeafNode>(node());
+            return as<LeafNode>();
         }
         
         InnerNode* asInner() const
         {
-            return as<InnerNode>(node());
+            return as<InnerNode>();
         }
 
     private:
@@ -260,8 +260,8 @@ private:
     };
 
     class LeafNode : public NodeImpl<Value, Order> {
-        using NodeImpl<Value, Order>::payloads;
     public:
+        using NodeImpl<Value, Order>::payloads;
         Value& value(unsigned i)
         {
             return payloads[i];
@@ -273,8 +273,8 @@ private:
     };
 
     class InnerNode : public NodeImpl<NodePtr, Order> {
-        using NodeImpl<NodePtr, Order>::payloads;
     public:
+        using NodeImpl<NodePtr, Order>::payloads;
         NodePtr& child(unsigned i)
         {
             return payloads[i];
@@ -323,15 +323,16 @@ public:
 private:
     NodePtr insertIntoSubtree(NodePtr& subtree, const Interval& interval, const Value& value, unsigned depth)
     {
-        size_t pos = subtree.node()->firstIntervalEndAfter(subtree.size(), interval.end());
-
-        if (depth == m_height)
+        if (depth == m_height) {
+            size_t pos = subtree.asLeaf()->firstIntervalEndAfter(subtree.size(), interval.end());
             return insertInNodeSplitIfNeeded<LeafNode>(subtree, interval, value, pos);
+        }
+
+        InnerNode* inner = subtree.asInner();        
+        size_t pos = inner->firstIntervalEndAfter(subtree.size(), interval.end());
 
         if (pos == subtree.size())
             pos = subtree.size() - 1;
-
-        InnerNode* inner = subtree.asInner();        
 
         NodePtr newChild = insertIntoSubtree(inner->child(pos), interval, value, depth + 1);
         inner->interval(pos) = inner->child(pos).coverage();
@@ -340,7 +341,7 @@ private:
             ASSERT(inner->child(pos).size() + newChild.size() == Order + 1);
             return insertInNodeSplitIfNeeded<InnerNode>(subtree, newChild.coverage(), newChild, pos + 1);
         }
-        return nullptr; // Inserted without needing to split
+        return NodePtr(); // Inserted without needing to split
     }
 
     // Inserts interval and value into the node referred to by NodePtr, and updates NodePtr with
@@ -365,7 +366,7 @@ private:
             nodeSize = splitPoint;
             
             if (insertionPoint < splitPoint) {
-                node->insertAt(splitPoint, insertionPoint, interval, value);
+                node->insertAt(nodeSize, insertionPoint, interval, value);
             } else {
                 // Insert into new node (recalculate insertion point for new node)
                 insertionPoint -= splitPoint;
@@ -400,7 +401,7 @@ private:
             node->size = nodeSize;
         }
         
-        return nullptr;
+        return NodePtr();
     }
 
     // FIXME: should be made more flexible.
