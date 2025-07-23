@@ -27,6 +27,10 @@
 #include "Test.h"
 
 #include <wtf/IntervalSet.h>
+#include <wtf/Vector.h>
+
+#include <random>
+#include <algorithm>
 
 namespace TestWebKitAPI {
 
@@ -87,6 +91,77 @@ TEST(WTF_IntervalSet, EdgeCases)
     value = intervalSet.find({ 0, 10 });
     EXPECT_NE(nullptr, value);
     EXPECT_EQ(100, *value);
+}
+
+TEST(WTF_IntervalSet, RandomStressTest)
+{
+    constexpr size_t numberTestIntervals = 10000;
+    constexpr size_t maxGap = 1000;
+    constexpr size_t maxSize = 1000;
+    constexpr size_t maxPoint = numberTestIntervals * (maxGap + maxSize);
+
+    IntervalSet<Point, Value> intervalSet;
+    
+    // Use UnitTest seed like Int128.cpp for reproducible randomness
+    std::mt19937 gen(testing::UnitTest::GetInstance()->random_seed());
+    std::uniform_int_distribution<size_t> gapDist(0, maxGap);
+    std::uniform_int_distribution<size_t> sizeDist(1, maxSize);
+    std::uniform_int_distribution<Value> valueDist(0, 10000);
+    
+    // Generate non-overlapping intervals by sorting start points
+    Vector<Interval> testIntervals;
+    Point end = 0;
+    for (unsigned i = 0; i < numberTestIntervals; ++i) {
+        Point start = end + gapDist(gen);
+        end = start + sizeDist(gen);
+        testIntervals.append({ start, end });
+    }
+    
+    // Shuffle the intervals to insert them in random order
+    std::shuffle(testIntervals.begin(), testIntervals.end(), gen);
+    
+    Vector<std::pair<Interval, Value>> insertedData;
+    for (const auto& interval : testIntervals) {
+        Value value = valueDist(gen);
+        insertedData.append({ interval, value });
+
+        intervalSet.insert(interval, value);
+    }
+    
+    // Test that all inserted intervals can be found with correct values
+    for (const auto& data : insertedData) {
+        EXPECT_TRUE(intervalSet.hasOverlap(data.first));
+        const Value* found = intervalSet.find(data.first);
+        EXPECT_NE(nullptr, found);
+        EXPECT_EQ(data.second, *found);
+    }
+    
+    std::uniform_int_distribution<size_t> pointDist(0, maxPoint);
+    // Test random queries
+    for (unsigned i = 0; i < 500; ++i) {
+        Point start = pointDist(gen);
+        Point end = start + sizeDist(gen);
+        Interval query = { start, end };
+        
+        bool shouldOverlap = false;
+        Value expectedValue = 0;
+        for (const auto& data : insertedData) {
+            if (query.overlaps(data.first)) {
+                shouldOverlap = true;
+                expectedValue = data.second;
+                break;
+            }
+        }
+        
+        EXPECT_EQ(shouldOverlap, intervalSet.hasOverlap(query));
+        const Value* found = intervalSet.find(query);
+        if (shouldOverlap) {
+            EXPECT_NE(nullptr, found);
+            EXPECT_EQ(expectedValue, *found);
+        } else {
+            EXPECT_EQ(nullptr, found);
+        }
+    }
 }
 
 } // namespace TestWebKitAPI
