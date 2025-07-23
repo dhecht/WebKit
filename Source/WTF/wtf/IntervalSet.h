@@ -155,7 +155,7 @@ public:
         }
 
         LeafNode* leaf = node.asLeaf();
-        size_t pos = leaf->firstIntervalEndAfter(node.size(), query.end());
+        size_t pos = leaf->firstIntervalEndAfter(node.size(), query.begin());
         ASSERT(query.begin() < leaf->interval(pos).end());
         return leaf->interval(pos).begin() < query.end();
     }
