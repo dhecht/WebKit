@@ -97,15 +97,15 @@ public:
             size_t pos = inner->firstIntervalEndAfter(node.size(), query.begin());
             if (pos == node.size())
                 return nullptr; // query is entirely after this subtree
-            if (query.end() <= inner->interval(pos).start())
+            if (query.end() <= inner->interval(pos).begin())
                 return nullptr; // query is entirely before this subtree
             // Otherwise, there may exist an overlapping interval in this subtree 
             node = inner->child(pos);
         }
         LeafNode* leaf = node.asLeaf();
         size_t pos = leaf->firstIntervalEndAfter(node.size(), query.end());
-        ASSERT(query.start() < leaf->interval(pos).end());
-        return leaf->interval(pos).start() < query.end() ? &leaf->value(pos) : nullptr;
+        ASSERT(query.begin() < leaf->interval(pos).end());
+        return leaf->interval(pos).begin() < query.end() ? &leaf->value(pos) : nullptr;
     }
 
     // Check if any stored interval overlaps with the query interval
@@ -118,26 +118,26 @@ public:
         NodePtr node = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = node.asInner();
-            size_t pos = inner->firstIntervalEndAfter(node.size(), query.start());
+            size_t pos = inner->firstIntervalEndAfter(node.size(), query.begin());
             if (pos == node.size())
                 return false; // query starts after all intervals
             // query start lands either within the pos subtree or the gap immediately preceding that subtree
-            ASSERT(query.start() < inner->interval(pos).end());
-            if (query.end() <= inner->interval(pos).start())
+            ASSERT(query.begin() < inner->interval(pos).end());
+            if (query.end() <= inner->interval(pos).begin())
                 return false; // query is entirely in the gap before this subtree
             if (inner->interval(pos).end() <= query.end())
                 return true; // query spans subtree end point so it must overlap the last interval
-            if (query.start() <= inner->interval(pos).start())
+            if (query.begin() <= inner->interval(pos).begin())
                 return true; // query spans subtree start point so it must overlap the first interval
             // Otherwise, subtree encompasses query so need to search subtree
-            ASSERT(inner->interval(pos).start() < query.start() && query.end() < inner->interval(pos).end());
+            ASSERT(inner->interval(pos).begin() < query.begin() && query.end() < inner->interval(pos).end());
             node = inner->child(pos);
         }
 
         LeafNode* leaf = node.asLeaf();
         size_t pos = leaf->firstIntervalEndAfter(node.size(), query.end());
-        ASSERT(query.start() < leaf->interval(pos).end());
-        return leaf->interval(pos).start() < query.end();
+        ASSERT(query.begin() < leaf->interval(pos).end());
+        return leaf->interval(pos).begin() < query.end();
     }
 
     iterator findFirstAfter(const Interval& interval);
@@ -233,7 +233,7 @@ private:
         const Interval coverage() const
         {
             RELEASE_ASSERT(size());
-            return { node()->interval(0).start(), node()->interval(size() - 1).end() };
+            return { node()->interval(0).begin(), node()->interval(size() - 1).end() };
         }
 
         explicit operator bool() const { return m_bits; }
@@ -246,12 +246,12 @@ private:
 
         LeafNode* asLeaf() const
         {
-            return static_cast<LeafNode*>(node());
+            return as<LeafNode>(node());
         }
         
         InnerNode* asInner() const
         {
-            return static_cast<InnerNode*>(node());
+            return as<InnerNode>(node());
         }
 
     private:
@@ -403,18 +403,17 @@ private:
         return nullptr;
     }
 
+    // FIXME: should be made more flexible.
+    static constexpr size_t allocSize = std::max(sizeof(InnerNode), sizeof(LeafNode));
+
     template<typename NodeType>
     NodeType* allocNode()
     {
-        static_assert(std::is_base_of_v<Node, NodeType>);
-        // FIXME: should be made more flexible.
-        static_assert(sizeof(InnerNode) == sizeof(LeafNode));
-        static_assert(sizeof(NodeType) == sizeof(LeafNode));
-        
+        static_assert(std::is_base_of_v<Node, NodeType>);        
         if (m_slabs.isEmpty() || m_slabOffset >= nodesPerSlab)
             allocateSlab();
         
-        NodeType* node = reinterpret_cast<NodeType*>(m_slabs.last() + m_slabOffset * sizeof(LeafNode));
+        NodeType* node = reinterpret_cast<NodeType*>(m_slabs.last() + m_slabOffset * allocSize);
         ASSERT(!(reinterpret_cast<uintptr_t>(node) % cpuCacheLineSize)); // Ensure cache line alignment
         ++m_slabOffset;
         return node;
@@ -422,7 +421,7 @@ private:
 
     void allocateSlab()
     {
-        size_t slabSize = sizeof(LeafNode) * nodesPerSlab;
+        size_t slabSize = allocSize * nodesPerSlab;
         char* slab = static_cast<char*>(fastAlignedMalloc(cpuCacheLineSize, slabSize));
         m_slabs.append(slab);
         m_slabOffset = 0;
