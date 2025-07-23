@@ -69,10 +69,7 @@ public:
     
     class iterator;
 
-    IntervalSet()
-    : m_rootInterval(T{}, T{})
-    {
-    }
+    IntervalSet() = default;
 
     ~IntervalSet()
     {
@@ -166,18 +163,18 @@ public:
     iterator findFirstAfter(const Interval& interval);
 
 private:
-    class LeafNode;
-    class InnerNode;
+    struct LeafNode;
+    struct InnerNode;
     
-    class Node {
+    struct Node {
         // Common base class for all nodes - provides type identity for NodePtr
     };
 
     template<typename Payload, size_t N>
-    class NodeImpl : public Node {
-    public:
+    struct NodeImpl : public Node {
         using PayloadType = Payload;
         static constexpr size_t capacity = N;
+        
         Interval& interval(unsigned i)
         {
             return intervals[i];
@@ -290,12 +287,10 @@ private:
         uintptr_t m_bits;
     };
 
-    class LeafNode : public NodeImpl<Value, LeafOrder> {
-    public:
-        using NodeImpl<Value, LeafOrder>::payloads;
+    struct LeafNode : public NodeImpl<Value, LeafOrder> {
         Value& value(unsigned i)
         {
-            return payloads[i];
+            return this->payloads[i];
         }
         
         LeafNode* next { nullptr };
@@ -303,12 +298,10 @@ private:
         size_t size { 0 }; // FIXME: redudant with size in the NodePtr
     };
 
-    class InnerNode : public NodeImpl<NodePtr, InnerOrder> {
-    public:
-        using NodeImpl<NodePtr, InnerOrder>::payloads;
+    struct InnerNode : public NodeImpl<NodePtr, InnerOrder> {
         NodePtr& child(unsigned i)
         {
-            return payloads[i];
+            return this->payloads[i];
         }
     };
 
@@ -499,8 +492,8 @@ public:
 
 private:
     // Root node pointer
-    NodePtr m_root;
-    Interval m_rootInterval;
+    NodePtr m_root { };
+    Interval m_rootInterval { T{}, T{} };
     unsigned m_height { 0 };
 
     // Slab allocator state
