@@ -480,7 +480,7 @@ public:
     iterator begin() const
     {
         LeafNode* firstLeaf = findFirstLeaf();
-        if (!firstLeaf || firstLeaf->size() == 0)
+        if (!firstLeaf || !firstLeaf->size)
             return end();
         return iterator(firstLeaf, 0);
     }
