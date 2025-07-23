@@ -234,7 +234,6 @@ private:
         const Interval coverage(unsigned distanceToLeaf) const
         {
             RELEASE_ASSERT(size());
-            ASSERT(distancetoLeaf <= m_height);
             if (distanceToLeaf) {
                 auto inner = asInner();
                 return { inner->interval(0).begin(), inner->interval(size() - 1).end() };
@@ -404,6 +403,7 @@ private:
         
         // Node has space, insert without splitting
         node->insertAt(nodeSize, insertionPoint, interval, value);
+        // nodeSize was incremented by insertAt, so update the NodePtr
         nodePtr.setSize(nodeSize);
         
         // Update leaf size if this is a leaf node
