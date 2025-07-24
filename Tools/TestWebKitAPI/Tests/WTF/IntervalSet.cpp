@@ -37,11 +37,8 @@
 namespace TestWebKitAPI {
 
 struct IntervalSetTest {
-    static constexpr bool verbose = true;
-    static bool skip;
+    static constexpr bool verbose = false;
 };
-
-bool IntervalSetTest::skip = true;
 
 using Point = uint32_t;
 using Value = int;
@@ -104,7 +101,7 @@ TEST(WTF_IntervalSet, EdgeCases)
 
 TEST(WTF_IntervalSet, RandomStressTest)
 {
-    constexpr size_t numberTestIntervals = 10;//10000;
+    constexpr size_t numberTestIntervals = 10000;
     constexpr size_t maxGap = 1000;
     constexpr size_t maxSize = 1000;
     constexpr size_t maxPoint = numberTestIntervals * (maxGap + maxSize);
@@ -121,7 +118,6 @@ TEST(WTF_IntervalSet, RandomStressTest)
 
     IntervalSet<Point, Value> intervalSet;
     
-    // Use UnitTest seed like Int128.cpp for reproducible randomness
     std::mt19937 gen(testing::UnitTest::GetInstance()->random_seed());
     std::uniform_int_distribution<size_t> gapDist(0, maxGap);
     std::uniform_int_distribution<size_t> sizeDist(1, maxSize);
@@ -136,12 +132,12 @@ TEST(WTF_IntervalSet, RandomStressTest)
         Value value = valueDist(gen);
         testData.append(TestCase({ start, end }, value));
     }
-    
-    dataLogLnIf(IntervalSetTest::verbose, "Before shuffle: ", WTF::listDump(testData));
+    dataLogLnIf(IntervalSetTest::verbose, "Test data: ", WTF::listDump(testData));
 
     // Shuffle the intervals to insert them in random order
-    std::shuffle(testData.begin(), testData.end(), gen);
-    dataLogLnIf(IntervalSetTest::verbose, "After shuffle: ", WTF::listDump(testData));
+    auto shuffledTestData = testData;
+    std::shuffle(shuffledTestData.begin(), shuffledTestData.end(), gen);
+    dataLogLnIf(IntervalSetTest::verbose, "After shuffle: ", WTF::listDump(shuffledTestData));
 
     for (const auto& entry : testData)
         intervalSet.insert(entry.first, entry.second);
@@ -151,7 +147,7 @@ TEST(WTF_IntervalSet, RandomStressTest)
     }
 
     // Test that all inserted intervals can be found with correct values
-    std::shuffle(testData.begin(), testData.end(), gen);
+    std::shuffle(shuffledTestData.begin(), shuffledTestData.end(), gen);
     for (const auto& data : testData) {
         dataLogLnIf(IntervalSetTest::verbose, "Testing: interval=", data.first, " value=", data.second);
         EXPECT_TRUE(intervalSet.hasOverlap(data.first));
@@ -177,7 +173,8 @@ TEST(WTF_IntervalSet, RandomStressTest)
                 break;
             }
         }
-        
+        dataLogLnIf(IntervalSetTest::verbose, "Testing: random interval=", query);
+
         EXPECT_EQ(shouldOverlap, intervalSet.hasOverlap(query));
         const Value* found = intervalSet.find(query);
         if (shouldOverlap) {
