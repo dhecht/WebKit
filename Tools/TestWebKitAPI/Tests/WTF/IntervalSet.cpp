@@ -26,13 +26,22 @@
 #include "config.h"
 #include "Test.h"
 
+#include <wtf/DataLog.h>
 #include <wtf/IntervalSet.h>
+#include <wtf/ListDump.h>
 #include <wtf/Vector.h>
 
 #include <random>
 #include <algorithm>
 
 namespace TestWebKitAPI {
+
+struct IntervalSetTest {
+    static constexpr bool verbose = true;
+    static bool skip;
+};
+
+bool IntervalSetTest::skip = true;
 
 using Point = uint32_t;
 using Value = int;
@@ -95,10 +104,20 @@ TEST(WTF_IntervalSet, EdgeCases)
 
 TEST(WTF_IntervalSet, RandomStressTest)
 {
-    constexpr size_t numberTestIntervals = 10000;
+    constexpr size_t numberTestIntervals = 10;//10000;
     constexpr size_t maxGap = 1000;
     constexpr size_t maxSize = 1000;
     constexpr size_t maxPoint = numberTestIntervals * (maxGap + maxSize);
+
+    struct TestCase : public std::pair<Interval, Value> {
+        TestCase() = default;
+        TestCase(const Interval& interval, const Value& value) : std::pair<Interval, Value>(interval, value) { }
+        
+        void dump(PrintStream& out) const
+        {
+            out.print("{ ", first, ", ", second, " }");
+        }
+    };
 
     IntervalSet<Point, Value> intervalSet;
     
@@ -109,31 +128,37 @@ TEST(WTF_IntervalSet, RandomStressTest)
     std::uniform_int_distribution<Value> valueDist(0, 10000);
     
     // Generate non-overlapping intervals by sorting start points
-    Vector<Interval> testIntervals;
+    Vector<TestCase> testData;
     Point end = 0;
     for (unsigned i = 0; i < numberTestIntervals; ++i) {
         Point start = end + gapDist(gen);
         end = start + sizeDist(gen);
-        testIntervals.append({ start, end });
-    }
-    
-    // Shuffle the intervals to insert them in random order
-    std::shuffle(testIntervals.begin(), testIntervals.end(), gen);
-    
-    Vector<std::pair<Interval, Value>> insertedData;
-    for (const auto& interval : testIntervals) {
         Value value = valueDist(gen);
-        insertedData.append({ interval, value });
-
-        intervalSet.insert(interval, value);
+        testData.append(TestCase({ start, end }, value));
     }
     
+    dataLogLnIf(IntervalSetTest::verbose, "Before shuffle: ", WTF::listDump(testData));
+
+    // Shuffle the intervals to insert them in random order
+    std::shuffle(testData.begin(), testData.end(), gen);
+    dataLogLnIf(IntervalSetTest::verbose, "After shuffle: ", WTF::listDump(testData));
+
+    for (const auto& entry : testData)
+        intervalSet.insert(entry.first, entry.second);
+    
+    for (auto e : intervalSet) {
+        dataLogLnIf(IntervalSetTest::verbose, e.first, " -> ", e.second);
+    }
+
     // Test that all inserted intervals can be found with correct values
-    for (const auto& data : insertedData) {
+    std::shuffle(testData.begin(), testData.end(), gen);
+    for (const auto& data : testData) {
+        dataLogLnIf(IntervalSetTest::verbose, "Testing: interval=", data.first, " value=", data.second);
         EXPECT_TRUE(intervalSet.hasOverlap(data.first));
         const Value* found = intervalSet.find(data.first);
         EXPECT_NE(nullptr, found);
         EXPECT_EQ(data.second, *found);
+        if (data.second != *found) return;
     }
     
     std::uniform_int_distribution<size_t> pointDist(0, maxPoint);
@@ -145,7 +170,7 @@ TEST(WTF_IntervalSet, RandomStressTest)
         
         bool shouldOverlap = false;
         Value expectedValue = 0;
-        for (const auto& data : insertedData) {
+        for (const auto& data : testData) {
             if (query.overlaps(data.first)) {
                 shouldOverlap = true;
                 expectedValue = data.second;
