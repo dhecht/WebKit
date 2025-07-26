@@ -141,10 +141,6 @@ TEST(WTF_IntervalSet, RandomStressTest)
 
     for (const auto& entry : testData)
         intervalSet.insert(entry.first, entry.second);
-    
-    for (auto e : intervalSet) {
-        dataLogLnIf(IntervalSetTest::verbose, e.first, " -> ", e.second);
-    }
 
     // Test that all inserted intervals can be found with correct values
     std::shuffle(shuffledTestData.begin(), shuffledTestData.end(), gen);
