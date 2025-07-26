@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <wtf/DataLog.h>
 #include <wtf/FastMalloc.h>
 #include <wtf/Range.h>
 #include <wtf/Vector.h>
@@ -46,18 +47,13 @@ public:
     
     // Calculate optimal order for each node type based on target cache line usage
     static constexpr size_t calculateLeafOrder() {
-        // Base size includes: next/prev pointers, size field, and any padding
-        constexpr size_t baseSize = sizeof(void*) * 2 + sizeof(size_t);
-        constexpr size_t elementSize = sizeof(Interval) + sizeof(Value);
-        constexpr size_t availableSpace = targetNodeSize > baseSize ? targetNodeSize - baseSize : 0;
-        return availableSpace / elementSize;
+        constexpr size_t sizePerOrder = sizeof(Interval) + sizeof(Value);
+        return targetNodeSize / sizePerOrder;
     }
     
     static constexpr size_t calculateInnerOrder() {
-        // Inner nodes only have the arrays, no additional fields
-        // FIXME: NodePtr is essentially a uintptr_t, so use that size
-        constexpr size_t elementSize = sizeof(Interval) + sizeof(uintptr_t);
-        return targetNodeSize / elementSize;
+        constexpr size_t sizePerOrder = sizeof(Interval) + sizeof(uintptr_t);
+        return targetNodeSize / sizePerOrder;
     }
     
     static constexpr size_t LeafOrder = calculateLeafOrder();
@@ -69,7 +65,7 @@ public:
     
     class iterator;
 
-    IntervalSet() = default;
+    IntervalSet() { dataLogLn("leafOrder=", LeafOrder, " innerOrder=", InnerOrder);}
 
     ~IntervalSet()
     {
@@ -96,6 +92,7 @@ public:
             newRoot->child(1) = newChild;
             m_height++;
             m_root = NodePtr(newRoot, 2);
+            dataLogLn("Added level height=", m_height);
         }
         m_rootInterval = m_root.coverage(m_height);
     }
@@ -177,6 +174,7 @@ private:
         
         Interval& interval(unsigned i)
         {
+            ASSERT(i < N);
             return intervals[i];
         }
 
@@ -213,10 +211,12 @@ private:
         // or size if no such interval exists.
         size_t firstIntervalEndAfter(size_t size, T point) const
         {
-            size_t i = 0;
-            while (i < size && intervals[i].end() <= point)
-                ++i;
-            return i;
+            ASSERT(size <= N);
+            for (size_t i = 0; i < size; i++) {
+                if (point < intervals[i].end())
+                    return i;
+            }
+            return size;
         }
 
         Interval intervals[N];
@@ -255,6 +255,7 @@ private:
         const Interval coverage(unsigned distanceToLeaf) const
         {
             RELEASE_ASSERT(size());
+            // XXX: the code is the same in both cases, would be nice to not have a runtime branch.
             if (distanceToLeaf) {
                 auto inner = asInner();
                 return { inner->interval(0).begin(), inner->interval(size() - 1).end() };
@@ -290,18 +291,30 @@ private:
     struct LeafNode : public NodeImpl<Value, LeafOrder> {
         Value& value(unsigned i)
         {
+            ASSERT(i < LeafOrder);
             return this->payloads[i];
         }
-        
-        LeafNode* next { nullptr };
-        LeafNode* prev { nullptr };
-        size_t size { 0 }; // FIXME: redudant with size in the NodePtr
     };
 
     struct InnerNode : public NodeImpl<NodePtr, InnerOrder> {
         NodePtr& child(unsigned i)
         {
+            ASSERT(i < InnerOrder);
             return this->payloads[i];
+        }
+
+        size_t subtreeForInsert(size_t size, T point) const
+        {
+            ASSERT(size <= InnerOrder);
+            // XXX: this only happens when the tree is empty or when creating a new level. Could we remove from this path?
+            if (!size) [[unlikely]]
+                return 0;
+            for (size_t i = 0; i < size - 1; i++) {
+                // XXX: or maybe keep adjacent intervals together
+                if (point <= this->intervals[i + 1].begin())
+                    return i;
+            }
+            return size - 1;
         }
     };
 
@@ -316,17 +329,6 @@ public:
         {
             ASSERT(m_leaf && m_position < m_leaf->size);
             return { m_leaf->interval(m_position), m_leaf->value(m_position) };
-        }
-        
-        iterator& operator++()
-        {
-            ASSERT(m_leaf);
-            ++m_position;
-            if (m_position >= m_leaf->size) {
-                m_leaf = m_leaf->next;
-                m_position = 0;
-            }
-            return *this;
         }
         
         bool operator==(const iterator& other) const
@@ -353,10 +355,7 @@ private:
         }
 
         InnerNode* inner = subtree.asInner();        
-        size_t pos = inner->firstIntervalEndAfter(subtree.size(), interval.end());
-
-        if (pos == subtree.size())
-            pos = subtree.size() - 1;
+        size_t pos = inner->subtreeForInsert(subtree.size(), interval.end());
 
         unsigned childDepth = depth + 1;
         NodePtr newChild = insertIntoSubtree(inner->child(pos), interval, value, childDepth);
@@ -394,40 +393,15 @@ private:
             if (insertionPoint < splitPoint) {
                 node->insertAt(nodeSize, insertionPoint, interval, value);
             } else {
-                // Insert into new node (recalculate insertion point for new node)
                 insertionPoint -= splitPoint;
                 newNode->insertAt(newNodeSize, insertionPoint, interval, value);
-            }
-            
-            // If this is a leaf node split, maintain the linked list and size
-            if constexpr (std::is_same_v<NodeType, LeafNode>) {
-                // Insert newNode after node in the linked list
-                newNode->next = node->next;
-                newNode->prev = node;
-                
-                if (node->next)
-                    node->next->prev = newNode;
-                node->next = newNode;
-                
-                node->size = nodeSize;
-                newNode->size = newNodeSize;
-            }
-            
-            // nodePtr node's size has changed so update the nodePtr to reflect the new size.
+            }            
             nodePtr.setSize(nodeSize);
             return NodePtr(newNode, newNodeSize);
         }
-        
-        // Node has space, insert without splitting
+
         node->insertAt(nodeSize, insertionPoint, interval, value);
-        // nodeSize was incremented by insertAt, so update the NodePtr
         nodePtr.setSize(nodeSize);
-        
-        // Update leaf size if this is a leaf node
-        if constexpr (std::is_same_v<NodeType, LeafNode>) {
-            node->size = nodeSize;
-        }
-        
         return NodePtr();
     }
 
