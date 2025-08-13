@@ -89,11 +89,11 @@ public:
         for (unsigned depth = 0; depth < m_height; depth++) {
             InnerNode* inner = node->asInner();        
             size_t index = inner->subtreeForInsert(node->size(), interval.end());
-            path.append({ node, index });
+            path.append({ *node, index });
 
             node = &inner->child(index);
         }
-        path.append( { node, 0 }); // leaf has no child so index is irrelevant
+        path.append( { *node, 0 }); // leaf has no child so index is irrelevant
         ASSERT(path.size() == m_height + 1);
 
         size_t index = node->asLeaf()->firstIntervalEndAfter(node->size(), interval.end());
@@ -103,7 +103,7 @@ public:
 
         for (int depth = m_height - 1; depth >= 0; depth--) {    
             PathEntry& entry = path[depth];
-            InnerNode* inner = entry.node->asInner();
+            InnerNode* inner = entry.node.asInner();
 
             if (inner->interval(entry.index) != coverage) [[unlikely]]
                 inner->interval(entry.index) = coverage;
@@ -113,7 +113,7 @@ public:
                 ASSERT(newNodeCoverage);
                 std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode, entry.index + 1);
             }
-            coverage = inner->coverage(entry.node->size());
+            coverage = inner->coverage(entry.node.size());
             // FIXME: if neither coverage nor newChild changed, we can stop
         }
 
@@ -368,7 +368,7 @@ private:
         }
     };
     struct PathEntry {
-        NodePtr* node;
+        NodePtr& node;
         size_t index;
     };
 
@@ -408,7 +408,7 @@ private:
     template<typename NodeType>
     std::pair<NodePtr, Interval> insertInNodeSplitIfNeeded(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value, size_t insertionIndex)
     {
-        NodePtr& nodePtr = *path[depth].node;
+        NodePtr& nodePtr = path[depth].node;
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
         ASSERT(nodeSize <= NodeType::capacity);
