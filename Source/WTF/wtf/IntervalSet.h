@@ -76,27 +76,72 @@ public:
     // Insert an interval-value pair into the B+ tree
     void insert(const Interval& interval, const Value& value)
     {
-        if (!m_root) {
+        struct PathEntry {
+            NodePtr* node;
+            size_t index;
+        };
+
+        if (!m_root) [[unlikely]] {
             // Create initial root as a leaf
             LeafNode* leaf = allocNode<LeafNode>();
             m_root = NodePtr(leaf, 0);
             m_height = 0;
         }
-        NodePtr newChild = insertIntoSubtree(m_root, interval, value, 0);
-        if (newChild) [[unlikely]] {
-            ASSERT(newChild.size() + m_root.size() == (m_height ? InnerOrder : LeafOrder) + 1);
+
+        Vector<PathEntry, 8> path;
+        NodePtr* node = &m_root;
+
+        for (unsigned depth = 0; depth < m_height; depth++) {
+            InnerNode* inner = node->asInner();        
+            size_t index = inner->subtreeForInsert(node->size(), interval.end());
+            path.append({ node, index });
+
+            node = &inner->child(index);
+        }
+        size_t index = node->asLeaf()->firstIntervalEndAfter(node->size(), interval.end());
+        auto [newNode, newNodeCoverage] = insertInNodeSplitIfNeeded<LeafNode>(*node, interval, value, index);
+        
+        Interval coverage = node->asLeaf()->coverage(node->size());
+
+        for (int depth = m_height - 1; depth >= 0; depth--) {    
+            PathEntry& entry = path[depth];
+            InnerNode* inner = entry.node->asInner();
+
+            if (inner->interval(entry.index) != coverage) [[unlikely]]
+                inner->interval(entry.index) = coverage;
+    
+            if (newNode) [[unlikely]] {
+                ASSERT(inner->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
+                ASSERT(newNodeCoverage);
+                std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(*entry.node, newNodeCoverage, newNode, entry.index + 1);
+            }
+            coverage = inner->coverage(entry.node->size());
+            // FIXME: if neither coverage nor newChild changed, we can stop
+        }
+
+        // Root was split so need to add a new level to the tree.
+        if (newNode) [[unlikely]] {
+            ASSERT(newNode.size() + m_root.size() == (m_height ? InnerOrder : LeafOrder) + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
-            newRoot->interval(0) = m_root.coverage(m_height);
+            if (m_height) {
+                newRoot->interval(0) = m_root.asInner()->coverage(m_root.size());
+                newRoot->interval(1) = newNode.asInner()->coverage(newNode.size());
+            } else {
+                newRoot->interval(0) = m_root.asLeaf()->coverage(m_root.size());
+                newRoot->interval(1) = newNode.asLeaf()->coverage(newNode.size());
+            }
             newRoot->child(0) = m_root;
-            newRoot->interval(1) = newChild.coverage(m_height);
-            newRoot->child(1) = newChild;
+            newRoot->child(1) = newNode;
             m_height++;
             m_root = NodePtr(newRoot, 2);
+            coverage = newRoot->coverage(2);
             dataLogLn("Added level height=", m_height);
         }
-        m_rootInterval = m_root.coverage(m_height);
+        // FIXME: only update when necessary?
+        m_rootInterval = coverage;
     }
+
 
     // Remove an interval from the B+ tree
     void erase(const Interval& interval);
@@ -192,6 +237,12 @@ private:
             return intervals[i];
         }
 
+        const Interval coverage(size_t size) const
+        {
+            RELEASE_ASSERT(size);
+            return { intervals[0].begin(), intervals[size - 1].end() };
+        }
+
         // XXX: maybe move this to NodePtr so it can directly update size?
         void insertAt(size_t& size, size_t index, const Interval& interval, const Payload& value)
         {
@@ -264,19 +315,6 @@ private:
         {
             ASSERT(newSize <= size_mask);
             m_bits = (m_bits & ~size_mask) | newSize;
-        }
-
-        const Interval coverage(unsigned distanceToLeaf) const
-        {
-            RELEASE_ASSERT(size());
-            // XXX: the code is the same in both cases, would be nice to not have a runtime branch.
-            if (distanceToLeaf) {
-                auto inner = asInner();
-                return { inner->interval(0).begin(), inner->interval(size() - 1).end() };
-             } else {
-                auto leaf = asLeaf();
-                return { leaf->interval(0).begin(), leaf->interval(size() - 1).end() };
-            }
         }
 
         explicit operator bool() const { return m_bits; }
@@ -361,32 +399,10 @@ public:
     };
 
 private:
-    NodePtr insertIntoSubtree(NodePtr& subtree, const Interval& interval, const Value& value, unsigned depth)
-    {
-        if (depth == m_height) {
-            size_t pos = subtree.asLeaf()->firstIntervalEndAfter(subtree.size(), interval.end());
-            return insertInNodeSplitIfNeeded<LeafNode>(subtree, interval, value, pos);
-        }
-
-        InnerNode* inner = subtree.asInner();        
-        size_t pos = inner->subtreeForInsert(subtree.size(), interval.end());
-
-        unsigned childDepth = depth + 1;
-        NodePtr newChild = insertIntoSubtree(inner->child(pos), interval, value, childDepth);
-        inner->interval(pos) = inner->child(pos).coverage(m_height - childDepth);
-
-        if (newChild) [[unlikely]] {
-            ASSERT(inner->child(pos).size() + newChild.size() == (childDepth == m_height ? LeafOrder : InnerOrder) + 1);
-            Interval newChildCoverage = newChild.coverage(m_height - childDepth);
-            return insertInNodeSplitIfNeeded<InnerNode>(subtree, newChildCoverage, newChild, pos + 1);
-        }
-        return NodePtr(); // Inserted without needing to split
-    }
-
     // Inserts interval and value into the node referred to by NodePtr, and updates NodePtr with
     // the new size. If the node needed to be split returns a NodePtr for the new node.
     template<typename NodeType>
-    NodePtr insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Interval& interval, const typename NodeType::PayloadType& value, size_t insertionPoint)
+    std::pair<NodePtr, Interval> insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Interval& interval, const typename NodeType::PayloadType& value, size_t insertionPoint)
     {
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
@@ -411,12 +427,12 @@ private:
                 newNode->insertAt(newNodeSize, insertionPoint, interval, value);
             }            
             nodePtr.setSize(nodeSize);
-            return NodePtr(newNode, newNodeSize);
+            return { NodePtr(newNode, newNodeSize), newNode->coverage(newNodeSize) };
         }
 
         node->insertAt(nodeSize, insertionPoint, interval, value);
         nodePtr.setSize(nodeSize);
-        return NodePtr();
+        return { NodePtr(), Interval() };
     }
 
     // FIXME: should be made more flexible.
@@ -474,7 +490,7 @@ private:
         if (distanceToLeaf) {
             InnerNode* inner = node.asInner();
             printIndent();
-            out.println("Inner(size=", node.size(), ", coverage=", node.coverage(distanceToLeaf), "):");
+            out.println("Inner(size=", node.size(), ", coverage=", inner->coverage(node.size()), "):");
             
             for (size_t i = 0; i < node.size(); ++i) {
                 printIndent();
