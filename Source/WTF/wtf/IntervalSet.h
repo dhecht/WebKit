@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <wtf/CommaPrinter.h>
 #include <wtf/DataLog.h>
 #include <wtf/FastMalloc.h>
 #include <wtf/Range.h>
@@ -158,6 +159,19 @@ public:
     }
 
     iterator findFirstAfter(const Interval& interval);
+
+    // Pretty print the tree structure for debugging
+    void dump(PrintStream& out) const
+    {
+        out.print("IntervalSet(height=", m_height, ", leafOrder=", LeafOrder, ", innerOrder=", InnerOrder, ")");
+        if (!m_root) {
+            out.print(" <empty>");
+            return;
+        }
+        out.print(" coverage=", m_rootInterval);
+        out.print("\n");
+        dumpSubtree(out, m_root, m_height, 0);
+    }
 
 private:
     struct LeafNode;
@@ -448,6 +462,34 @@ private:
             node = inner->child(0);
         }
         return node.asLeaf();
+    }
+
+    void dumpSubtree(PrintStream& out, NodePtr node, unsigned distanceToLeaf, unsigned indent) const
+    {
+        auto printIndent = [&] {
+            for (unsigned i = 0; i < indent; ++i)
+                out.print("  ");
+        };
+
+        if (distanceToLeaf) {
+            InnerNode* inner = node.asInner();
+            printIndent();
+            out.println("Inner(size=", node.size(), ", coverage=", node.coverage(distanceToLeaf), "):");
+            
+            for (size_t i = 0; i < node.size(); ++i) {
+                printIndent();
+                out.println("  [", i, "] ", inner->interval(i));
+                dumpSubtree(out, inner->child(i), distanceToLeaf - 1, indent + 2);
+            }
+        } else {
+            CommaPrinter comma;
+            LeafNode* leaf = node.asLeaf();
+            printIndent();
+            out.print("Leaf(size=", node.size(), "): ");
+            for (size_t i = 0; i < node.size(); ++i)
+                out.print(comma, leaf->interval(i), "=", leaf->value(i));
+            out.println();
+        }
     }
 
 public:
