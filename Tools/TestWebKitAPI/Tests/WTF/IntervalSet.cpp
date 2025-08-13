@@ -139,12 +139,14 @@ TEST(WTF_IntervalSet, RandomStressTest)
     std::shuffle(shuffledTestData.begin(), shuffledTestData.end(), gen);
     dataLogLnIf(IntervalSetTest::verbose, "After shuffle: ", WTF::listDump(shuffledTestData));
 
-    for (const auto& entry : testData)
+    for (const auto& entry : shuffledTestData) {
         intervalSet.insert(entry.first, entry.second);
+        dataLogLnIf(IntervalSetTest::verbose, "Added ", entry.first, "=", entry.second, ": ", intervalSet);
+    }
 
     // Test that all inserted intervals can be found with correct values
     std::shuffle(shuffledTestData.begin(), shuffledTestData.end(), gen);
-    for (const auto& data : testData) {
+    for (const auto& data : shuffledTestData) {
         dataLogLnIf(IntervalSetTest::verbose, "Testing: interval=", data.first, " value=", data.second);
         EXPECT_TRUE(intervalSet.hasOverlap(data.first));
         const Value* found = intervalSet.find(data.first);
