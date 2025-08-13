@@ -99,7 +99,13 @@ TEST(WTF_IntervalSet, EdgeCases)
     EXPECT_EQ(100, *value);
 }
 
-TEST(WTF_IntervalSet, RandomStressTest)
+enum class IntervalOrdering {
+    Ascending,
+    Descending,
+    Random,
+};
+
+static void stressTest(IntervalOrdering ordering)
 {
     constexpr size_t numberTestIntervals = 10000;
     constexpr size_t maxGap = 1000;
@@ -134,9 +140,19 @@ TEST(WTF_IntervalSet, RandomStressTest)
     }
     dataLogLnIf(IntervalSetTest::verbose, "Test data: ", WTF::listDump(testData));
 
-    // Shuffle the intervals to insert them in random order
     auto shuffledTestData = testData;
-    std::shuffle(shuffledTestData.begin(), shuffledTestData.end(), gen);
+
+    switch (ordering) {
+    case IntervalOrdering::Ascending:
+        break;
+    case IntervalOrdering::Descending:
+        std::reverse(shuffledTestData.begin(), shuffledTestData.end());
+        break;
+    case IntervalOrdering::Random:
+        // Shuffle the intervals to insert them in random order
+        std::shuffle(shuffledTestData.begin(), shuffledTestData.end(), gen);
+        break;
+    }
     dataLogLnIf(IntervalSetTest::verbose, "After shuffle: ", WTF::listDump(shuffledTestData));
 
     for (const auto& entry : shuffledTestData) {
@@ -182,6 +198,21 @@ TEST(WTF_IntervalSet, RandomStressTest)
             EXPECT_EQ(nullptr, found);
         }
     }
+}
+
+TEST(WTF_IntervalSet, AscendingStressTest)
+{
+    stressTest(IntervalOrdering::Ascending);
+}
+
+TEST(WTF_IntervalSet, DescendingStressTest)
+{
+    stressTest(IntervalOrdering::Descending);
+}
+
+TEST(WTF_IntervalSet, RandomStressTest)
+{
+    stressTest(IntervalOrdering::Random);
 }
 
 TEST(WTF_IntervalSet, Dump)
