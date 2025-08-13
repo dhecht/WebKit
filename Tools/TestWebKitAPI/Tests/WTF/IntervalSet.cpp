@@ -182,4 +182,29 @@ TEST(WTF_IntervalSet, RandomStressTest)
     }
 }
 
+TEST(WTF_IntervalSet, Dump)
+{
+    IntervalSet<int, const char*> intervalSet;
+    
+    // Test empty tree
+    dataLogLn("Empty tree:");
+    intervalSet.dump(WTF::dataFile());
+    
+    // Add some intervals
+    intervalSet.insert({10, 20}, "first");
+    intervalSet.insert({30, 40}, "second");
+    intervalSet.insert({50, 60}, "third");
+    
+    dataLogLn("\nAfter inserting intervals:");
+    intervalSet.dump(WTF::dataFile());
+    
+    // Add more intervals to potentially cause splits
+    intervalSet.insert({5, 8}, "before");
+    intervalSet.insert({25, 28}, "middle");
+    intervalSet.insert({65, 70}, "after");
+    
+    dataLogLn("\nAfter more insertions:");
+    intervalSet.dump(WTF::dataFile());
+}
+
 } // namespace TestWebKitAPI
