@@ -76,11 +76,6 @@ public:
     // Insert an interval-value pair into the B+ tree
     void insert(const Interval& interval, const Value& value)
     {
-        struct PathEntry {
-            NodePtr* node;
-            size_t index;
-        };
-
         if (!m_root) [[unlikely]] {
             // Create initial root as a leaf
             LeafNode* leaf = allocNode<LeafNode>();
@@ -88,7 +83,7 @@ public:
             m_height = 0;
         }
 
-        Vector<PathEntry, 8> path;
+        Path path;
         NodePtr* node = &m_root;
 
         for (unsigned depth = 0; depth < m_height; depth++) {
@@ -98,8 +93,11 @@ public:
 
             node = &inner->child(index);
         }
+        path.append( { node, 0 }); // leaf has no child so index is irrelevant
+        ASSERT(path.size() == m_height + 1);
+
         size_t index = node->asLeaf()->firstIntervalEndAfter(node->size(), interval.end());
-        auto [newNode, newNodeCoverage] = insertInNodeSplitIfNeeded<LeafNode>(*node, interval, value, index);
+        auto [newNode, newNodeCoverage] = insertInNodeSplitIfNeeded<LeafNode>(path, m_height, interval, value, index);
         
         Interval coverage = node->asLeaf()->coverage(node->size());
 
@@ -113,7 +111,7 @@ public:
             if (newNode) [[unlikely]] {
                 ASSERT(inner->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
                 ASSERT(newNodeCoverage);
-                std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(*entry.node, newNodeCoverage, newNode, entry.index + 1);
+                std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode, entry.index + 1);
             }
             coverage = inner->coverage(entry.node->size());
             // FIXME: if neither coverage nor newChild changed, we can stop
@@ -369,6 +367,12 @@ private:
             return size - 1;
         }
     };
+    struct PathEntry {
+        NodePtr* node;
+        size_t index;
+    };
+
+    using Path = Vector<PathEntry, 8>;
 
 public:
     class iterator {
@@ -399,11 +403,12 @@ public:
     };
 
 private:
-    // Inserts interval and value into the node referred to by NodePtr, and updates NodePtr with
+    // Inserts interval and value into the node referred to by path at the given depth, and updates NodePtr with
     // the new size. If the node needed to be split returns a NodePtr for the new node.
     template<typename NodeType>
-    std::pair<NodePtr, Interval> insertInNodeSplitIfNeeded(NodePtr& nodePtr, const Interval& interval, const typename NodeType::PayloadType& value, size_t insertionPoint)
+    std::pair<NodePtr, Interval> insertInNodeSplitIfNeeded(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value, size_t insertionIndex)
     {
+        NodePtr& nodePtr = *path[depth].node;
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
         ASSERT(nodeSize <= NodeType::capacity);
@@ -420,17 +425,17 @@ private:
             size_t newNodeSize = nodeSize - splitPoint;
             nodeSize = splitPoint;
             
-            if (insertionPoint < splitPoint) {
-                node->insertAt(nodeSize, insertionPoint, interval, value);
+            if (insertionIndex < splitPoint) {
+                node->insertAt(nodeSize, insertionIndex, interval, value);
             } else {
-                insertionPoint -= splitPoint;
-                newNode->insertAt(newNodeSize, insertionPoint, interval, value);
+                insertionIndex -= splitPoint;
+                newNode->insertAt(newNodeSize, insertionIndex, interval, value);
             }            
             nodePtr.setSize(nodeSize);
             return { NodePtr(newNode, newNodeSize), newNode->coverage(newNodeSize) };
         }
 
-        node->insertAt(nodeSize, insertionPoint, interval, value);
+        node->insertAt(nodeSize, insertionIndex, interval, value);
         nodePtr.setSize(nodeSize);
         return { NodePtr(), Interval() };
     }
