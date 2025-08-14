@@ -93,11 +93,11 @@ public:
 
             node = &inner->child(index);
         }
-        path.append( { *node, 0 }); // leaf has no child so index is irrelevant
+        size_t insertionIndex = node->asLeaf()->firstIntervalEndAfter(node->size(), interval.end());
+        path.append( { *node, insertionIndex });
         ASSERT(path.size() == m_height + 1);
 
-        size_t index = node->asLeaf()->firstIntervalEndAfter(node->size(), interval.end());
-        auto [newNode, newNodeCoverage] = insertInNodeSplitIfNeeded<LeafNode>(path, m_height, interval, value, index);
+        auto [newNode, newNodeCoverage] = insertInNodeSplitIfNeeded<LeafNode>(path, m_height, interval, value);
         
         Interval coverage = node->asLeaf()->coverage(node->size());
 
@@ -111,7 +111,8 @@ public:
             if (newNode) [[unlikely]] {
                 ASSERT(inner->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
                 ASSERT(newNodeCoverage);
-                std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode, entry.index + 1);
+                entry.index++; // Insert new parent immediately after the existing parent
+                std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode);
             }
             coverage = inner->coverage(entry.node.size());
             // FIXME: if neither coverage nor newChild changed, we can stop
@@ -403,12 +404,33 @@ public:
     };
 
 private:
-    // Inserts interval and value into the node referred to by path at the given depth, and updates NodePtr with
-    // the new size. If the node needed to be split returns a NodePtr for the new node.
+#if 0
+    void updateCoverage(const Path& path, int depth, Interval coverage) {
+
+        for (; depth > 0; depth--) {
+            auto index = path[depth].index;
+            if (index != 0 && index != path[depth].node.size() - 1)
+                return;
+            path[depth].intervals(path[depth].index) = coverage;
+            coverage = path[depth - 1].index
+        }
+        m_rootInterval = coverage;
+
+        while () {
+            path[depth].intervals(path[depth].index) = coverage;
+            depth--;
+            coverage = path[depth].intervals(path[depth].index);
+        }
+    }
+#endif
+    // Inserts interval and value into the node referred to by path at the given depth. Updates affected NodePtr 
+    // sizes and coverages for the affected subtree. If the node needed to be split then returns the NodePtr and
+    // coverage interval for the new node for the caller to insert into the parent.
     template<typename NodeType>
-    std::pair<NodePtr, Interval> insertInNodeSplitIfNeeded(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value, size_t insertionIndex)
+    std::pair<NodePtr, Interval> insertInNodeSplitIfNeeded(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
     {
         NodePtr& nodePtr = path[depth].node;
+        auto insertionIndex = path[depth].index;
         auto node = nodePtr.template as<NodeType>();
         size_t nodeSize = nodePtr.size();
         ASSERT(nodeSize <= NodeType::capacity);
