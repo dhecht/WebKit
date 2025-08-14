@@ -86,6 +86,7 @@ public:
         Path path;
         NodePtr* node = &m_root;
 
+        // Descend down the tree, recording the path taken.
         for (unsigned depth = 0; depth < m_height; depth++) {
             InnerNode* inner = node->asInner();        
             size_t index = inner->subtreeForInsert(node->size(), interval.end());
@@ -93,52 +94,40 @@ public:
 
             node = &inner->child(index);
         }
+        // Found the correct leaf for the insert, now determine the position within that leaf.
         size_t insertionIndex = node->asLeaf()->firstIntervalEndAfter(node->size(), interval.end());
         path.append( { *node, insertionIndex });
         ASSERT(path.size() == m_height + 1);
 
         auto [newNode, newNodeCoverage] = insertInNodeSplitIfNeeded<LeafNode>(path, m_height, interval, value);
-        
-        Interval coverage = node->asLeaf()->coverage(node->size());
 
+        // Ascend back up the tree along the same path, inserting new inner nodes as needed.
         for (int depth = m_height - 1; depth >= 0; depth--) {    
+            if (!newNode) [[likely]]
+                return;
             PathEntry& entry = path[depth];
             InnerNode* inner = entry.node.asInner();
 
-            if (inner->interval(entry.index) != coverage) [[unlikely]]
-                inner->interval(entry.index) = coverage;
-    
-            if (newNode) [[unlikely]] {
-                ASSERT(inner->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
-                ASSERT(newNodeCoverage);
-                entry.index++; // Insert new parent immediately after the existing parent
-                std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode);
-            }
-            coverage = inner->coverage(entry.node.size());
-            // FIXME: if neither coverage nor newChild changed, we can stop
+            ASSERT(inner->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
+            ASSERT(newNodeCoverage);
+            entry.index++; // Insert new parent immediately after the existing parent
+            std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode);
         }
 
-        // Root was split so need to add a new level to the tree.
+        // There's a new node at depth 0 so a new level is required.
         if (newNode) [[unlikely]] {
-            ASSERT(newNode.size() + m_root.size() == (m_height ? InnerOrder : LeafOrder) + 1);
+            ASSERT(m_root.size() + newNode.size() == (m_height ? InnerOrder : LeafOrder) + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
-            if (m_height) {
-                newRoot->interval(0) = m_root.asInner()->coverage(m_root.size());
-                newRoot->interval(1) = newNode.asInner()->coverage(newNode.size());
-            } else {
-                newRoot->interval(0) = m_root.asLeaf()->coverage(m_root.size());
-                newRoot->interval(1) = newNode.asLeaf()->coverage(newNode.size());
-            }
+            newRoot->interval(0) = m_rootInterval;
             newRoot->child(0) = m_root;
+            newRoot->interval(1) = newNodeCoverage;
             newRoot->child(1) = newNode;
             m_height++;
             m_root = NodePtr(newRoot, 2);
-            coverage = newRoot->coverage(2);
+            m_rootInterval = newRoot->coverage(2);
             dataLogLn("Added level height=", m_height);
         }
-        // FIXME: only update when necessary?
-        m_rootInterval = coverage;
     }
 
 
@@ -404,25 +393,54 @@ public:
     };
 
 private:
-#if 0
-    void updateCoverage(const Path& path, int depth, Interval coverage) {
 
-        for (; depth > 0; depth--) {
-            auto index = path[depth].index;
-            if (index != 0 && index != path[depth].node.size() - 1)
+    bool isFirstOrLastIndex(NodePtr node, unsigned index)
+    {
+        ASSERT(index < node.size());
+        return index == 0 || index == node.size() - 1;
+    }
+
+    void updateCoverage(const Path& path, int depth, Interval coverage)
+    {
+        ASSERT(depth >= 0);
+        depth--; // So that depth is at the parent of the node with 'coverage'.
+        while (depth >= 0) {
+            const PathEntry& entry = path[depth];
+            InnerNode* inner = entry.node.asInner();
+            inner->interval(entry.index) = coverage;
+
+            // FIXME: and/or should we filter based on actual coverage value since we may hit a common ancestor
+            // when modifying multiple node, and one could be first and the other could be last.
+            if (!isFirstOrLastIndex(entry.node, entry.index)) {
+                // Since first/last of this node was not modified, its coverage hasn't changed - no need to continue upward.
+                verifyCoverageConsistency(path, depth, inner->coverage(entry.node.size()));
                 return;
-            path[depth].intervals(path[depth].index) = coverage;
-            coverage = path[depth - 1].index
+            }
+            coverage = inner->coverage(entry.node.size());
+            depth--;
         }
         m_rootInterval = coverage;
-
-        while () {
-            path[depth].intervals(path[depth].index) = coverage;
-            depth--;
-            coverage = path[depth].intervals(path[depth].index);
-        }
     }
+
+    void verifyCoverageConsistency(const Path& path, int depth, Interval coverage)
+    {
+#ifdef ASSERT_ENABLED
+        ASSERT(depth >= 0);
+        depth--;
+        while (depth >= 0) {
+            const PathEntry& entry = path[depth];
+            InnerNode* inner = entry.node.asInner();
+            ASSERT(inner->interval(entry.index) == coverage);
+            coverage = inner->coverage(entry.node.size());
+            depth--;
+        }
+        if (m_rootInterval != coverage) {
+            dataLogLn("FAIL: m_rootInterval=", m_rootInterval, " coverage=", coverage, " Tree=", *this);
+        }
+        ASSERT(m_rootInterval == coverage);
 #endif
+    }
+
     // Inserts interval and value into the node referred to by path at the given depth. Updates affected NodePtr 
     // sizes and coverages for the affected subtree. If the node needed to be split then returns the NodePtr and
     // coverage interval for the new node for the caller to insert into the parent.
@@ -454,11 +472,14 @@ private:
                 newNode->insertAt(newNodeSize, insertionIndex, interval, value);
             }            
             nodePtr.setSize(nodeSize);
+            updateCoverage(path, depth, node->coverage(nodeSize));
             return { NodePtr(newNode, newNodeSize), newNode->coverage(newNodeSize) };
         }
 
         node->insertAt(nodeSize, insertionIndex, interval, value);
         nodePtr.setSize(nodeSize);
+        if (isFirstOrLastIndex(nodePtr, insertionIndex))
+            updateCoverage(path, depth, node->coverage(nodeSize));
         return { NodePtr(), Interval() };
     }
 
