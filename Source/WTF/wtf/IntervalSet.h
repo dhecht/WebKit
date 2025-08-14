@@ -130,9 +130,44 @@ public:
         }
     }
 
+    // remove the given interval from the IntervalSet. The interval must be present.
+    void erase(const Interval& interval)
+    {
+        Path path;
+        ASSERT(interval.overlaps(m_rootInterval));
+        ASSERT(m_root);
+        NodePtr* node = &m_root;
 
-    // Remove an interval from the B+ tree
-    void erase(const Interval& interval);
+        for (unsigned depth = 0; depth < m_height; ++depth) {
+            InnerNode* inner = node->asInner();
+            size_t index = inner->firstIntervalEndAfter(node->size(), interval.begin());
+            ASSERT(index < node->size());
+            ASSERT(inner->interval(index).begin() < interval.end());
+            path.append({ *node, index });
+            node = &inner->child(index);
+        }
+        LeafNode* leaf = node->asLeaf();
+        size_t eraseIndex = leaf->firstIntervalEndAfter(node->size(), interval.begin());
+        ASSERT(leaf->interval(eraseIndex).begin() == interval.begin() && leaf->interval(eraseIndex).end() == interval.end());
+        path.append({ *node, eraseIndex });
+
+        bool removedNode = eraseFromNode<LeafNode>(path, m_height);
+
+        // Ascend back up the tree along the same path, removing nodes that are now empty.
+        for (int depth = m_height - 1; depth >= 0; depth--) {    
+            if (!removedNode) [[likely]]
+                return;
+            removedNode = eraseFromNode<InnerNode>(path, depth);
+        }
+
+        // If removeNode was true at ever depth, the tree is empty.
+        if (removedNode) [[unlikely]] {
+            m_height = 0;
+            m_root = NodePtr(); // FIXME: leak
+            m_rootInterval = Interval();
+            dataLogLn("Tree is empty");
+        }
+    }
 
     // Find value by interval
     const Value* find(const Interval& query) const
@@ -190,8 +225,6 @@ public:
         ASSERT(query.begin() < leaf->interval(pos).end());
         return leaf->interval(pos).begin() < query.end();
     }
-
-    iterator findFirstAfter(const Interval& interval);
 
     // Pretty print the tree structure for debugging
     void dump(PrintStream& out) const
@@ -481,6 +514,27 @@ private:
         if (isFirstOrLastIndex(nodePtr, insertionIndex))
             updateCoverage(path, depth, node->coverage(nodeSize));
         return { NodePtr(), Interval() };
+    }
+
+    template<typename NodeType>
+    bool eraseFromNode(const Path& path, int depth)
+    {
+        NodePtr& nodePtr = path[depth].node;
+        auto eraseIndex = path[depth].index;
+        auto node = nodePtr.template as<NodeType>();
+        size_t nodeSize = nodePtr.size();
+        ASSERT(nodeSize <= NodeType::capacity);
+
+        if (nodeSize == 1) [[unlikely]] {
+            // FIXME: leak
+            nodePtr = NodePtr();
+            return true;
+        }
+        node->remoteAt(nodeSize, eraseIndex);
+        nodePtr.setSize(nodeSize);
+        if (isFirstOrLastIndex(nodePtr, eraseIndex))
+            updateCoverage(path, depth, node->coverage(nodeSize));
+        return false;
     }
 
     // FIXME: should be made more flexible.
