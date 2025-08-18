@@ -70,7 +70,9 @@ public:
 
     ~IntervalSet()
     {
+#ifdef USE_SLAB
         freeAllocations();
+#endif
     }
 
     // Insert an interval-value pair into the B+ tree
@@ -507,13 +509,14 @@ private:
         return false;
     }
 
+#ifdef USE_SLAB
     // FIXME: should be made more flexible.
     static constexpr size_t allocSize = std::max(sizeof(InnerNode), sizeof(LeafNode));
 
     template<typename NodeType>
     NodeType* allocNode()
     {
-        static_assert(std::is_base_of_v<Node, NodeType>);        
+        static_assert(std::is_base_of_v<Node, NodeType>);     
         if (m_slabs.isEmpty() || m_slabOffset >= nodesPerSlab)
             allocateSlab();
         
@@ -538,7 +541,19 @@ private:
         m_slabs.clear();
         m_slabOffset = 0;
     }
+#else
+    template<typename NodeType>
+    NodeType* allocNode()
+    {
+        return static_cast<NodeType*>(fastAlignedMalloc(cpuCacheLineSize, sizeof(NodeType)));
+    }
 
+    template<typename NodeType>
+    void freeNode(NodeType* node)
+    {
+        fastAlignedFree(node);
+    }
+#endif
     void dumpSubtree(PrintStream& out, NodePtr node, unsigned distanceToLeaf, unsigned indent) const
     {
         auto printIndent = [&] {
