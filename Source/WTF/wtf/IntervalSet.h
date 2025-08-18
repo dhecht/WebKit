@@ -72,6 +72,8 @@ public:
     {
 #ifdef USE_SLAB
         freeAllocations();
+#else
+        freeAllNodes();
 #endif
     }
 
@@ -531,6 +533,14 @@ private:
         return node;
     }
 
+    template<typename NodeType>
+    void freeNode(NodeType* node)
+    {
+        // In slab allocator, individual nodes cannot be freed
+        // Memory is freed when the entire slab is freed
+        UNUSED_PARAM(node);
+    }
+
     void allocateSlab()
     {
         size_t slabSize = allocSize * nodesPerSlab;
@@ -546,6 +556,7 @@ private:
         m_slabs.clear();
         m_slabOffset = 0;
     }
+
 #else
     template<typename NodeType>
     NodeType* allocNode()
@@ -558,6 +569,30 @@ private:
     {
         fastAlignedFree(node);
     }
+
+    // Free all nodes iteratively to avoid stack overflow
+    void freeAllNodes()
+    {
+        if (!m_root)
+            return;
+    
+        Vector<std::pair<NodePtr, unsigned>, 16> stack;
+        stack.append({ m_root, m_height });
+        
+        while (!stack.isEmpty()) {
+            auto [node, distanceToLeaf] = stack.takeLast();
+            
+            if (!distanceToLeaf) {
+                freeNode(node.asLeaf());
+                continue;
+            }
+            InnerNode* inner = node.asInner();
+            for (size_t i = 0; i < node.size(); ++i)
+                stack.append({ inner->child(i), distanceToLeaf - 1 });
+            freeNode(inner);
+        }
+    }
+
 #endif
     void dumpSubtree(PrintStream& out, NodePtr node, unsigned distanceToLeaf, unsigned indent) const
     {
