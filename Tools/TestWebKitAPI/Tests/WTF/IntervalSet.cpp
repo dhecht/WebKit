@@ -233,12 +233,7 @@ static void stressTest(IntervalOrdering ordering)
     Vector<TestCase> currentlyInserted;
     std::uniform_int_distribution<int> eraseDist(1, 4); // 1 in 4 chance to erase
     
-    for (const auto& entry : shuffledTestData) {
-        intervalSet.insert(entry.first, entry.second);
-        currentlyInserted.append(entry);
-        dataLogLnIf(IntervalSetTest::verbose, "Added ", entry.first, "=", entry.second, ": ", intervalSet);
-        
-        // Randomly erase an interval (1 in 4 chance) if we have intervals to erase
+    auto maybeEraseInterval = [&]() {
         if (currentlyInserted.size() > 1 && eraseDist(gen) == 1) {
             std::uniform_int_distribution<size_t> eraseIndexDist(0, currentlyInserted.size() - 1);
             size_t eraseIndex = eraseIndexDist(gen);
@@ -248,6 +243,14 @@ static void stressTest(IntervalOrdering ordering)
             currentlyInserted.removeAt(eraseIndex);
             dataLogLnIf(IntervalSetTest::verbose, "Erased ", toErase.first, "=", toErase.second, ": ", intervalSet);
         }
+    };
+    
+    for (const auto& entry : shuffledTestData) {
+        intervalSet.insert(entry.first, entry.second);
+        currentlyInserted.append(entry);
+        dataLogLnIf(IntervalSetTest::verbose, "Added ", entry.first, "=", entry.second, ": ", intervalSet);
+        
+        maybeEraseInterval();
     }
 
     // Test that all currently inserted intervals can be found with correct values
@@ -292,16 +295,9 @@ static void stressTest(IntervalOrdering ordering)
             EXPECT_EQ(nullptr, found);
         }
         
-        // Randomly erase an interval during query phase (1 in 8 chance) if we have intervals to erase
-        if (currentlyInserted.size() > 1 && eraseDist(gen) == 1 && (i % 2) == 0) {
-            std::uniform_int_distribution<size_t> eraseIndexDist(0, currentlyInserted.size() - 1);
-            size_t eraseIndex = eraseIndexDist(gen);
-            TestCase toErase = currentlyInserted[eraseIndex];
-            
-            intervalSet.erase(toErase.first);
-            currentlyInserted.removeAt(eraseIndex);
-            dataLogLnIf(IntervalSetTest::verbose, "Erased during query phase: ", toErase.first, "=", toErase.second, ": ", intervalSet);
-        }
+        // Occasionally erase an interval during query phase (reduced frequency)
+        if (i % 2)
+            maybeEraseInterval();
     }
 }
 
