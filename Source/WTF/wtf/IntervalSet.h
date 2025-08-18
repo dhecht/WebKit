@@ -531,9 +531,9 @@ private:
             return true;
         }
         node->removeAt(nodeSize, eraseIndex);
-        nodePtr.setSize(nodeSize);
         if (isFirstOrLastIndex(nodePtr, eraseIndex))
             updateCoverage(path, depth, node->coverage(nodeSize));
+        nodePtr.setSize(nodeSize);
         return false;
     }
 
