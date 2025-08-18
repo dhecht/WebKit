@@ -266,7 +266,7 @@ static void stressTest(IntervalOrdering ordering)
     });
     
     std::uniform_int_distribution<size_t> pointDist(0, maxPoint);
-    // Test random queries
+    // Test random queries with occasional erase operations
     for (unsigned i = 0; i < 500; ++i) {
         Point start = pointDist(gen);
         Point end = start + sizeDist(gen);
@@ -290,6 +290,17 @@ static void stressTest(IntervalOrdering ordering)
             EXPECT_EQ(expectedValue, *found);
         } else {
             EXPECT_EQ(nullptr, found);
+        }
+        
+        // Randomly erase an interval during query phase (1 in 8 chance) if we have intervals to erase
+        if (currentlyInserted.size() > 1 && eraseDist(gen) == 1 && (i % 2) == 0) {
+            std::uniform_int_distribution<size_t> eraseIndexDist(0, currentlyInserted.size() - 1);
+            size_t eraseIndex = eraseIndexDist(gen);
+            TestCase toErase = currentlyInserted[eraseIndex];
+            
+            intervalSet.erase(toErase.first);
+            currentlyInserted.removeAt(eraseIndex);
+            dataLogLnIf(IntervalSetTest::verbose, "Erased during query phase: ", toErase.first, "=", toErase.second, ": ", intervalSet);
         }
     }
 }
