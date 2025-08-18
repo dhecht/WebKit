@@ -164,9 +164,13 @@ public:
 
         // If removeNode was true at every depth, the tree is now empty.
         if (removedNode) [[unlikely]] {
-            m_height = 0;
-            m_root = NodePtr(); // FIXME: leak
+            if (m_height)
+                freeNode(m_root.asInner());
+            else
+                freeNode(m_root.asLeaf());
+            m_root = NodePtr();
             m_rootInterval = Interval();
+            m_height = 0;
             dataLogLn("Tree is empty");
         }
     }
@@ -498,7 +502,8 @@ private:
         ASSERT(nodeSize <= NodeType::capacity);
 
         if (nodeSize == 1) [[unlikely]] {
-            // FIXME: leak
+            ASSERT(!eraseIndex);
+            freeNode(node);
             nodePtr = NodePtr();
             return true;
         }
