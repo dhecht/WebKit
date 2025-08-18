@@ -76,7 +76,81 @@ TEST(WTF_IntervalSet, SingleInterval)
     
     // Test find with non-overlapping interval
     EXPECT_EQ(nullptr, intervalSet.find({ 0, 5 }));
+    
+    // Test erase functionality
+    intervalSet.erase({ 10, 20 });
+    
+    // After erase, all overlap checks should return false
+    EXPECT_FALSE(intervalSet.hasOverlap({ 15, 25 }));  // No longer overlaps
+    EXPECT_FALSE(intervalSet.hasOverlap({ 5, 15 }));   // No longer overlaps
+    EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));  // No longer overlaps
+    EXPECT_FALSE(intervalSet.hasOverlap({ 0, 10 }));   // Still no overlap
+    EXPECT_FALSE(intervalSet.hasOverlap({ 20, 30 }));  // Still no overlap
+    EXPECT_FALSE(intervalSet.hasOverlap({ 0, 5 }));    // Still no overlap
+    EXPECT_FALSE(intervalSet.hasOverlap({ 25, 30 }));  // Still no overlap
+    
+    // After erase, all find operations should return nullptr
+    EXPECT_EQ(nullptr, intervalSet.find({ 15, 16 }));
+    EXPECT_EQ(nullptr, intervalSet.find({ 10, 20 }));
+    EXPECT_EQ(nullptr, intervalSet.find({ 0, 5 }));
 }
+
+TEST(WTF_IntervalSet, EraseTests)
+{
+    IntervalSet<Point, Value> intervalSet;
+    
+    // Test erasing from empty set (should not crash)
+    // Note: This would actually assert in debug builds since erase expects the interval to exist
+    
+    // Test basic erase functionality
+    intervalSet.insert({ 10, 20 }, 100);
+    intervalSet.insert({ 30, 40 }, 200);
+    intervalSet.insert({ 50, 60 }, 300);
+    
+    // Verify all intervals are present
+    EXPECT_TRUE(intervalSet.hasOverlap({ 10, 20 }));
+    EXPECT_TRUE(intervalSet.hasOverlap({ 30, 40 }));
+    EXPECT_TRUE(intervalSet.hasOverlap({ 50, 60 }));
+    
+    // Erase middle interval
+    intervalSet.erase({ 30, 40 });
+    
+    // Verify middle interval is gone, others remain
+    EXPECT_TRUE(intervalSet.hasOverlap({ 10, 20 }));
+    EXPECT_FALSE(intervalSet.hasOverlap({ 30, 40 }));
+    EXPECT_TRUE(intervalSet.hasOverlap({ 50, 60 }));
+    
+    // Verify find operations
+    const Value* value = intervalSet.find({ 15, 16 });
+    EXPECT_NE(nullptr, value);
+    EXPECT_EQ(100, *value);
+    
+    EXPECT_EQ(nullptr, intervalSet.find({ 35, 36 }));
+    
+    value = intervalSet.find({ 55, 56 });
+    EXPECT_NE(nullptr, value);
+    EXPECT_EQ(300, *value);
+    
+    // Erase first interval
+    intervalSet.erase({ 10, 20 });
+    
+    EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));
+    EXPECT_FALSE(intervalSet.hasOverlap({ 30, 40 }));
+    EXPECT_TRUE(intervalSet.hasOverlap({ 50, 60 }));
+    
+    // Erase last interval (should make set empty)
+    intervalSet.erase({ 50, 60 });
+    
+    EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));
+    EXPECT_FALSE(intervalSet.hasOverlap({ 30, 40 }));
+    EXPECT_FALSE(intervalSet.hasOverlap({ 50, 60 }));
+    
+    // Verify all finds return nullptr on empty set
+    EXPECT_EQ(nullptr, intervalSet.find({ 15, 16 }));
+    EXPECT_EQ(nullptr, intervalSet.find({ 35, 36 }));
+    EXPECT_EQ(nullptr, intervalSet.find({ 55, 56 }));
+}
+
 
 TEST(WTF_IntervalSet, EdgeCases)
 {
@@ -168,7 +242,6 @@ static void stressTest(IntervalOrdering ordering)
         const Value* found = intervalSet.find(data.first);
         EXPECT_NE(nullptr, found);
         EXPECT_EQ(data.second, *found);
-        if (data.second != *found) return;
     }
     
     std::uniform_int_distribution<size_t> pointDist(0, maxPoint);

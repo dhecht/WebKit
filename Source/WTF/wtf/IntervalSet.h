@@ -160,7 +160,7 @@ public:
             removedNode = eraseFromNode<InnerNode>(path, depth);
         }
 
-        // If removeNode was true at ever depth, the tree is empty.
+        // If removeNode was true at every depth, the tree is now empty.
         if (removedNode) [[unlikely]] {
             m_height = 0;
             m_root = NodePtr(); // FIXME: leak
@@ -530,7 +530,7 @@ private:
             nodePtr = NodePtr();
             return true;
         }
-        node->remoteAt(nodeSize, eraseIndex);
+        node->removeAt(nodeSize, eraseIndex);
         nodePtr.setSize(nodeSize);
         if (isFirstOrLastIndex(nodePtr, eraseIndex))
             updateCoverage(path, depth, node->coverage(nodeSize));
@@ -625,7 +625,6 @@ public:
     }
 
 private:
-    // Root node pointer
     NodePtr m_root { };
     Interval m_rootInterval { T{}, T{} };
     unsigned m_height { 0 };
