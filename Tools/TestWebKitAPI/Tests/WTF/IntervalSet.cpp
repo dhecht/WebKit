@@ -151,7 +151,6 @@ TEST(WTF_IntervalSet, EraseTests)
     EXPECT_EQ(nullptr, intervalSet.find({ 55, 56 }));
 }
 
-
 TEST(WTF_IntervalSet, EdgeCases)
 {
     IntervalSet<Point, Value> intervalSet;
