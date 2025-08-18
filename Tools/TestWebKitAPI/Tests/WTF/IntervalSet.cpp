@@ -229,19 +229,36 @@ static void stressTest(IntervalOrdering ordering)
     }
     dataLogLnIf(IntervalSetTest::verbose, "After shuffle: ", WTF::listDump(shuffledTestData));
 
+    // Track which intervals are currently in the set for erase operations
+    Vector<TestCase> currentlyInserted;
+    std::uniform_int_distribution<int> eraseDist(1, 4); // 1 in 4 chance to erase
+    
     for (const auto& entry : shuffledTestData) {
         intervalSet.insert(entry.first, entry.second);
+        currentlyInserted.append(entry);
         dataLogLnIf(IntervalSetTest::verbose, "Added ", entry.first, "=", entry.second, ": ", intervalSet);
+        
+        // Randomly erase an interval (1 in 4 chance) if we have intervals to erase
+        if (currentlyInserted.size() > 1 && eraseDist(gen) == 1) {
+            std::uniform_int_distribution<size_t> eraseIndexDist(0, currentlyInserted.size() - 1);
+            size_t eraseIndex = eraseIndexDist(gen);
+            TestCase toErase = currentlyInserted[eraseIndex];
+            
+            intervalSet.erase(toErase.first);
+            currentlyInserted.removeAt(eraseIndex);
+            dataLogLnIf(IntervalSetTest::verbose, "Erased ", toErase.first, "=", toErase.second, ": ", intervalSet);
+        }
     }
 
-    // Test that all inserted intervals can be found with correct values
-    std::shuffle(shuffledTestData.begin(), shuffledTestData.end(), gen);
-    for (const auto& data : shuffledTestData) {
+    // Test that all currently inserted intervals can be found with correct values
+    std::shuffle(currentlyInserted.begin(), currentlyInserted.end(), gen);
+    for (const auto& data : currentlyInserted) {
         dataLogLnIf(IntervalSetTest::verbose, "Testing: interval=", data.first, " value=", data.second);
         EXPECT_TRUE(intervalSet.hasOverlap(data.first));
         const Value* found = intervalSet.find(data.first);
         EXPECT_NE(nullptr, found);
         EXPECT_EQ(data.second, *found);
+        if (data.second != *found) return;
     }
     
     std::uniform_int_distribution<size_t> pointDist(0, maxPoint);
@@ -253,7 +270,7 @@ static void stressTest(IntervalOrdering ordering)
         
         bool shouldOverlap = false;
         Value expectedValue = 0;
-        for (const auto& data : testData) {
+        for (const auto& data : currentlyInserted) {
             if (query.overlaps(data.first)) {
                 shouldOverlap = true;
                 expectedValue = data.second;
