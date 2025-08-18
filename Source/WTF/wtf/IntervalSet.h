@@ -397,36 +397,6 @@ private:
 
     using Path = Vector<PathEntry, 8>;
 
-public:
-    class iterator {
-    public:
-        iterator() : m_leaf(nullptr), m_position(0) { }
-        
-        iterator(LeafNode* leaf, size_t position) : m_leaf(leaf), m_position(position) { }
-        
-        std::pair<Interval, Value> operator*() const
-        {
-            ASSERT(m_leaf && m_position < m_leaf->size);
-            return { m_leaf->interval(m_position), m_leaf->value(m_position) };
-        }
-        
-        bool operator==(const iterator& other) const
-        {
-            return m_leaf == other.m_leaf && m_position == other.m_position;
-        }
-        
-        bool operator!=(const iterator& other) const
-        {
-            return !(*this == other);
-        }
-        
-    private:
-        LeafNode* m_leaf;
-        size_t m_position;
-    };
-
-private:
-
     bool isFirstOrLastIndex(NodePtr node, unsigned index)
     {
         ASSERT(index < node.size());
@@ -569,19 +539,6 @@ private:
         m_slabOffset = 0;
     }
 
-    LeafNode* findFirstLeaf() const
-    {
-        if (!m_root)
-            return nullptr;
-            
-        NodePtr node = m_root;
-        for (unsigned depth = 0; depth < m_height; ++depth) {
-            InnerNode* inner = node.asInner();
-            node = inner->child(0);
-        }
-        return node.asLeaf();
-    }
-
     void dumpSubtree(PrintStream& out, NodePtr node, unsigned distanceToLeaf, unsigned indent) const
     {
         auto printIndent = [&] {
@@ -610,21 +567,6 @@ private:
         }
     }
 
-public:
-    iterator begin() const
-    {
-        LeafNode* firstLeaf = findFirstLeaf();
-        if (!firstLeaf || !firstLeaf->size)
-            return end();
-        return iterator(firstLeaf, 0);
-    }
-    
-    iterator end() const
-    {
-        return iterator(nullptr, 0);
-    }
-
-private:
     NodePtr m_root { };
     Interval m_rootInterval { T{}, T{} };
     unsigned m_height { 0 };
@@ -637,4 +579,3 @@ private:
 } // namespace WTF
 
 using WTF::IntervalSet;
-
