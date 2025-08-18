@@ -75,6 +75,7 @@ public:
 #else
         freeAllNodes();
 #endif
+        ASSERT(!assertOnlyNumNodes);
     }
 
     // Insert an interval-value pair into the B+ tree
@@ -105,7 +106,7 @@ public:
 
         auto [newNode, newNodeCoverage] = insertInNodeSplitIfNeeded<LeafNode>(path, m_height, interval, value);
 
-        // Ascend back up the tree along the same path, inserting new inner nodes as needed.
+        // Ascend back up along the same path, splitting inner nodes as needed.
         for (int depth = m_height - 1; depth >= 0; depth--) {    
             if (!newNode) [[likely]]
                 return;
@@ -118,7 +119,7 @@ public:
             std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode);
         }
 
-        // There's a new node at depth 0 so a new level is required.
+        // If there's a new node at depth 0 then a new level is required.
         if (newNode) [[unlikely]] {
             ASSERT(m_root.size() + newNode.size() == (m_height ? InnerOrder : LeafOrder) + 1);
             // Need to add another level to the tree.
@@ -157,20 +158,17 @@ public:
 
         bool removedNode = eraseFromNode<LeafNode>(path, m_height);
 
-        // Ascend back up the tree along the same path, removing nodes that are now empty.
+        // Ascend removing references to any child that was removed, which may in turn cause the parent to become empty.
         for (int depth = m_height - 1; depth >= 0; depth--) {    
             if (!removedNode) [[likely]]
                 return;
             removedNode = eraseFromNode<InnerNode>(path, depth);
         }
 
-        // If removeNode was true at every depth, the tree is now empty.
+        // If removedNode was true at every depth, the tree is now empty.
         if (removedNode) [[unlikely]] {
-            if (m_height)
-                freeNode(m_root.asInner());
-            else
-                freeNode(m_root.asLeaf());
-            m_root = NodePtr();
+            ASSERT(!assertOnlyNumNodes);
+            ASSERT(!m_root);
             m_rootInterval = Interval();
             m_height = 0;
             dataLogLn("Tree is empty");
@@ -561,12 +559,14 @@ private:
     template<typename NodeType>
     NodeType* allocNode()
     {
+        ASSERT(++assertOnlyNumNodes);
         return static_cast<NodeType*>(fastAlignedMalloc(cpuCacheLineSize, sizeof(NodeType)));
     }
 
     template<typename NodeType>
     void freeNode(NodeType* node)
     {
+        ASSERT(assertOnlyNumNodes--);
         fastAlignedFree(node);
     }
 
@@ -626,9 +626,15 @@ private:
     Interval m_rootInterval { T{}, T{} };
     unsigned m_height { 0 };
 
+#ifdef USE_SLAB
     // Slab allocator state
     Vector<char*, 8> m_slabs;
     size_t m_slabOffset { 0 };
+#else
+#if ASSERT_ENABLED
+    unsigned assertOnlyNumNodes { 0 };
+#endif
+#endif
 };
 
 } // namespace WTF
