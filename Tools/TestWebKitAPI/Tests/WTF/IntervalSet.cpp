@@ -258,8 +258,12 @@ static void stressTest(IntervalOrdering ordering)
         const Value* found = intervalSet.find(data.first);
         EXPECT_NE(nullptr, found);
         EXPECT_EQ(data.second, *found);
-        if (data.second != *found) return;
     }
+    
+    // Sort currentlyInserted by interval start for correct expected value calculation
+    std::sort(currentlyInserted.begin(), currentlyInserted.end(), [](const TestCase& a, const TestCase& b) {
+        return a.first.begin() < b.first.begin();
+    });
     
     std::uniform_int_distribution<size_t> pointDist(0, maxPoint);
     // Test random queries
