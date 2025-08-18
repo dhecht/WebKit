@@ -340,4 +340,121 @@ TEST(WTF_IntervalSet, Dump)
     intervalSet.dump(WTF::dataFile());
 }
 
+TEST(WTF_IntervalSet, DestructorMemoryManagement)
+{
+    // Test destructor with single leaf node
+    {
+        IntervalSet<Point, Value> intervalSet;
+        intervalSet.insert({ 10, 20 }, 42);
+        intervalSet.insert({ 30, 40 }, 84);
+    }
+    
+    // Test destructor with multi-level tree (force tree growth)
+    {
+        IntervalSet<Point, Value> intervalSet;
+        
+        // Insert enough intervals to force tree growth beyond single leaf
+        for (Point i = 0; i < 100; ++i) {
+            Point start = i * 10;
+            Point end = start + 5;
+            intervalSet.insert({ start, end }, static_cast<Value>(i));
+        }
+    }
+    
+    // Test destructor with empty tree
+    {
+        IntervalSet<Point, Value> intervalSet;
+    }
+}
+
+TEST(WTF_IntervalSet, EraseLastItemSingleLeaf)
+{
+    IntervalSet<Point, Value> intervalSet;
+    
+    // Test case: Tree with only a single leaf node, erase the last (and only) item
+    intervalSet.insert({ 10, 20 }, 42);
+    
+    // Verify the interval is present
+    EXPECT_TRUE(intervalSet.hasOverlap({ 10, 20 }));
+    const Value* value = intervalSet.find({ 15, 16 });
+    EXPECT_NE(nullptr, value);
+    EXPECT_EQ(42, *value);
+    
+    // Erase the only interval - this should make the tree empty
+    intervalSet.erase({ 10, 20 });
+    
+    // Verify the tree is now empty
+    EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));
+    EXPECT_EQ(nullptr, intervalSet.find({ 15, 16 }));
+    EXPECT_EQ(nullptr, intervalSet.find({ 0, 100 })); // Any query should return null
+    
+    // Test that we can still insert after emptying the tree
+    intervalSet.insert({ 30, 40 }, 100);
+    EXPECT_TRUE(intervalSet.hasOverlap({ 30, 40 }));
+    value = intervalSet.find({ 35, 36 });
+    EXPECT_NE(nullptr, value);
+    EXPECT_EQ(100, *value);
+}
+
+TEST(WTF_IntervalSet, EraseLastItemWithInnerNodes)
+{
+    IntervalSet<Point, Value> intervalSet;
+    
+    // Build a tree with inner nodes by inserting many intervals
+    Vector<Interval> intervals;
+    for (Point i = 0; i < 50; ++i) {
+        Point start = i * 10;
+        Point end = start + 5;
+        Interval interval = { start, end };
+        intervals.append(interval);
+        intervalSet.insert(interval, static_cast<Value>(i));
+    }
+    
+    // Verify we have a multi-level tree by checking all intervals are present
+    for (size_t i = 0; i < intervals.size(); ++i) {
+        EXPECT_TRUE(intervalSet.hasOverlap(intervals[i]));
+        const Value* value = intervalSet.find(intervals[i]);
+        EXPECT_NE(nullptr, value);
+        EXPECT_EQ(static_cast<Value>(i), *value);
+    }
+    
+    // Erase all intervals one by one until only one remains
+    for (size_t i = 0; i < intervals.size() - 1; ++i) {
+        intervalSet.erase(intervals[i]);
+        
+        // Verify the erased interval is gone
+        EXPECT_FALSE(intervalSet.hasOverlap(intervals[i]));
+        EXPECT_EQ(nullptr, intervalSet.find(intervals[i]));
+        
+        // Verify remaining intervals are still present
+        for (size_t j = i + 1; j < intervals.size(); ++j)
+            EXPECT_TRUE(intervalSet.hasOverlap(intervals[j]));
+    }
+    
+    // Now erase the very last interval - this should collapse the tree to empty
+    Interval lastInterval = intervals.last();
+    Value lastValue = static_cast<Value>(intervals.size() - 1);
+    
+    // Verify the last interval is still present
+    EXPECT_TRUE(intervalSet.hasOverlap(lastInterval));
+    const Value* value = intervalSet.find(lastInterval);
+    EXPECT_NE(nullptr, value);
+    EXPECT_EQ(lastValue, *value);
+    
+    intervalSet.erase(lastInterval);
+    
+    EXPECT_FALSE(intervalSet.hasOverlap(lastInterval));
+    EXPECT_EQ(nullptr, intervalSet.find(lastInterval));
+    
+    EXPECT_FALSE(intervalSet.hasOverlap({ 0, 1000 }));
+    EXPECT_EQ(nullptr, intervalSet.find({ 0, 1000 }));
+    
+    // Verify we can still insert after completely emptying a complex tree
+    intervalSet.insert({ 1000, 2000 }, 999);
+    EXPECT_TRUE(intervalSet.hasOverlap({ 1000, 2000 }));
+    value = intervalSet.find({ 1500, 1600 });
+    EXPECT_NE(nullptr, value);
+    EXPECT_EQ(999, *value);
+}
+
 } // namespace TestWebKitAPI
