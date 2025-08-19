@@ -325,7 +325,9 @@ private:
     class NodePtr {
     public:
         static_assert(isPowerOfTwo(cpuCacheLineSize));
+
         static constexpr uintptr_t sizeMask = cpuCacheLineSize - 1;
+        static_assert(LeafOrder <= sizeMask && InnerOrder <= sizeMask);
 
         NodePtr() : m_bits(0) { }
         
