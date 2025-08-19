@@ -31,6 +31,8 @@
 #include <wtf/Range.h>
 #include <wtf/Vector.h>
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+
 namespace WTF {
 
 // IntervalSet: A specialized B+ tree for storing non-overlapping intervals with efficient overlap queries.
@@ -684,5 +686,7 @@ private:
 };
 
 } // namespace WTF
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 using WTF::IntervalSet;
