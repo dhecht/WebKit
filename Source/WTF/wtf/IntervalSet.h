@@ -177,11 +177,11 @@ public:
         }
     }
 
-    // Find value by interval
-    const Value* find(const Interval& query) const
+    // returns iterator to first interval that overlaps with the query interval
+    iterator find(const Interval& query) const
     {
         if (!query.overlaps(m_rootInterval))
-            return nullptr;
+            return end();
 
         ASSERT(m_root);
         NodePtr node = m_root;
@@ -189,17 +189,23 @@ public:
             InnerNode* inner = node.asInner();
             size_t pos = inner->firstIntervalEndAfter(node.size(), query.begin());
             if (pos == node.size())
-                return nullptr; // query is entirely after this subtree
+                return end(); // query is entirely after this subtree
             if (query.end() <= inner->interval(pos).begin())
-                return nullptr; // query is entirely before this subtree
-            // Otherwise, there may exist an overlapping interval in this subtree 
+                return end(); // query is entirely before this subtree
+            // Otherwise, there may exist an overlapping interval in this subtree
             node = inner->child(pos);
         }
         LeafNode* leaf = node.asLeaf();
         size_t pos = leaf->firstIntervalEndAfter(node.size(), query.begin());
         ASSERT(pos < node.size()); // coverage check at parent level ensures this
         ASSERT(query.begin() < leaf->interval(pos).end());
-        return leaf->interval(pos).begin() < query.end() ? &leaf->value(pos) : nullptr;
+        return leaf->interval(pos).begin() < query.end() ? iterator(leaf, pos) : end();
+    }
+
+    // Return end iterator
+    iterator end() const
+    {
+        return iterator();
     }
 
     // Check if any stored interval overlaps with the query interval
@@ -398,6 +404,44 @@ private:
             return size - 1;
         }
     };
+
+public:
+    class iterator {
+    public:
+        iterator() : m_leaf(nullptr), m_index(0) { }
+        
+        iterator(LeafNode* leaf, size_t index) : m_leaf(leaf), m_index(index) { }
+        
+        const Interval& interval() const
+        {
+            ASSERT(m_leaf);
+            ASSERT(m_index < LeafOrder);
+            return m_leaf->interval(m_index);
+        }
+        
+        const Value& value() const
+        {
+            ASSERT(m_leaf);
+            ASSERT(m_index < LeafOrder);
+            return m_leaf->value(m_index);
+        }
+        
+        bool operator==(const iterator& other) const
+        {
+            return m_leaf == other.m_leaf && m_index == other.m_index;
+        }
+        
+        bool operator!=(const iterator& other) const
+        {
+            return !(*this == other);
+        }
+        
+    private:
+        LeafNode* m_leaf;
+        size_t m_index;
+    };
+
+private:
     struct PathEntry {
         NodePtr& node;
         size_t index;
