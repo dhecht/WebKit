@@ -68,7 +68,7 @@ public:
     
     class iterator;
 
-    IntervalSet() { dataLogLn("leafOrder=", LeafOrder, " innerOrder=", InnerOrder);}
+    IntervalSet() = default;
 
     ~IntervalSet()
     {
@@ -135,7 +135,6 @@ public:
             m_height++;
             m_root = NodePtr(newRoot, 2);
             m_rootInterval = newRoot->coverage(2);
-            dataLogLn("Added level height=", m_height);
         }
     }
 
@@ -175,7 +174,6 @@ public:
             ASSERT(!m_root);
             m_rootInterval = Interval();
             m_height = 0;
-            dataLogLn("Tree is empty");
         }
     }
 
