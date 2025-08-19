@@ -324,31 +324,32 @@ private:
 
     class NodePtr {
     public:
-        static constexpr uintptr_t size_mask = 0xf;
+        static_assert(isPowerOfTwo(cpuCacheLineSize));
+        static constexpr uintptr_t sizeMask = cpuCacheLineSize - 1;
 
         NodePtr() : m_bits(0) { }
         
         NodePtr(Node* ptr, size_t size) :
             m_bits(reinterpret_cast<uintptr_t>(ptr) | size)
         {
-            ASSERT(!(reinterpret_cast<uintptr_t>(ptr) & size_mask));
-            ASSERT(size <= size_mask);
+            ASSERT(!(reinterpret_cast<uintptr_t>(ptr) & sizeMask));
+            ASSERT(size <= sizeMask);
         }
 
         Node* node() const
         {
-            return reinterpret_cast<Node*>(m_bits & ~size_mask);
+            return reinterpret_cast<Node*>(m_bits & ~sizeMask);
         }
     
         size_t size() const
         {
-            return m_bits & size_mask;
+            return m_bits & sizeMask;
         }
         
         void setSize(size_t newSize)
         {
-            ASSERT(newSize <= size_mask);
-            m_bits = (m_bits & ~size_mask) | newSize;
+            ASSERT(newSize <= sizeMask);
+            m_bits = (m_bits & ~sizeMask) | newSize;
         }
 
         explicit operator bool() const { return m_bits; }
