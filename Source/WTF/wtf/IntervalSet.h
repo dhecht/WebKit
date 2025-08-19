@@ -78,6 +78,8 @@ public:
         ASSERT(!assertOnlyNumNodes);
     }
 
+    bool isEmpty() const { return !m_rootInterval; }
+
     // Insert an interval-value pair into the B+ tree
     void insert(const Interval& interval, const Value& value)
     {
