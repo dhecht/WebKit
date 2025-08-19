@@ -48,7 +48,7 @@ TEST(WTF_IntervalSet, Basic)
 {
     IntervalSet<Point, Value> intervalSet;
     
-    // Test empty set
+    EXPECT_TRUE(intervalSet.isEmpty());
     EXPECT_FALSE(intervalSet.hasOverlap({ 0, 10 }));
     EXPECT_EQ(nullptr, intervalSet.find({ 0, 10 }));
 }
@@ -60,6 +60,8 @@ TEST(WTF_IntervalSet, SingleInterval)
     // Insert a single interval [10, 20) with value 42
     intervalSet.insert({ 10, 20 }, 42);
     
+    EXPECT_FALSE(intervalSet.isEmpty());
+
     // Test overlap detection
     EXPECT_TRUE(intervalSet.hasOverlap({ 15, 25 }));  // Overlaps
     EXPECT_TRUE(intervalSet.hasOverlap({ 5, 15 }));   // Overlaps
@@ -108,6 +110,7 @@ TEST(WTF_IntervalSet, EraseTests)
     intervalSet.insert({ 50, 60 }, 300);
     
     // Verify all intervals are present
+    EXPECT_FALSE(intervalSet.isEmpty());
     EXPECT_TRUE(intervalSet.hasOverlap({ 10, 20 }));
     EXPECT_TRUE(intervalSet.hasOverlap({ 30, 40 }));
     EXPECT_TRUE(intervalSet.hasOverlap({ 50, 60 }));
@@ -116,6 +119,7 @@ TEST(WTF_IntervalSet, EraseTests)
     intervalSet.erase({ 30, 40 });
     
     // Verify middle interval is gone, others remain
+    EXPECT_FALSE(intervalSet.isEmpty());
     EXPECT_TRUE(intervalSet.hasOverlap({ 10, 20 }));
     EXPECT_FALSE(intervalSet.hasOverlap({ 30, 40 }));
     EXPECT_TRUE(intervalSet.hasOverlap({ 50, 60 }));
@@ -134,6 +138,7 @@ TEST(WTF_IntervalSet, EraseTests)
     // Erase first interval
     intervalSet.erase({ 10, 20 });
     
+    EXPECT_FALSE(intervalSet.isEmpty());
     EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));
     EXPECT_FALSE(intervalSet.hasOverlap({ 30, 40 }));
     EXPECT_TRUE(intervalSet.hasOverlap({ 50, 60 }));
@@ -141,6 +146,7 @@ TEST(WTF_IntervalSet, EraseTests)
     // Erase last interval (should make set empty)
     intervalSet.erase({ 50, 60 });
     
+    EXPECT_TRUE(intervalSet.isEmpty());
     EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));
     EXPECT_FALSE(intervalSet.hasOverlap({ 30, 40 }));
     EXPECT_FALSE(intervalSet.hasOverlap({ 50, 60 }));
