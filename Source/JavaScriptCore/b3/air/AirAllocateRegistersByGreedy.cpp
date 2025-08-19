@@ -379,7 +379,7 @@ private:
 
 class RegisterRange {
 public:
-    using AllocatedIntervalSet = IntervalSet<Point, Tmp>;
+    using AllocatedIntervalSet = IntervalSet<Point, Tmp, 3>;
 
     RegisterRange() = default;
 
