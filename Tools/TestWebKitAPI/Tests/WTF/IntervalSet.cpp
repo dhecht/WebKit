@@ -29,6 +29,7 @@
 #include <wtf/DataLog.h>
 #include <wtf/IntervalSet.h>
 #include <wtf/ListDump.h>
+#include <wtf/StringPrintStream.h>
 #include <wtf/Vector.h>
 
 #include <random>
@@ -322,24 +323,38 @@ TEST(WTF_IntervalSet, Dump)
     IntervalSet<int, const char*> intervalSet;
     
     // Test empty tree
-    dataLogLn("Empty tree:");
-    intervalSet.dump(WTF::dataFile());
+    StringPrintStream emptyOutput;
+    intervalSet.dump(emptyOutput);
+    String emptyResult = emptyOutput.toString();
+    EXPECT_EQ(emptyResult, String("IntervalSet(height=0, leafOrder=4, innerOrder=4) <empty>"_s));
     
     // Add some intervals
     intervalSet.insert({10, 20}, "first");
     intervalSet.insert({30, 40}, "second");
     intervalSet.insert({50, 60}, "third");
     
-    dataLogLn("\nAfter inserting intervals:");
-    intervalSet.dump(WTF::dataFile());
+    StringPrintStream basicOutput;
+    intervalSet.dump(basicOutput);
+    String basicResult = basicOutput.toString();
+    String expectedBasic = "IntervalSet(height=0, leafOrder=4, innerOrder=4) coverage=10...60\n"
+                           "Leaf(size=3): 10...20=first, 30...40=second, 50...60=third"_s;
+    EXPECT_EQ(basicResult, expectedBasic);
     
     // Add more intervals to potentially cause splits
     intervalSet.insert({5, 8}, "before");
     intervalSet.insert({25, 28}, "middle");
     intervalSet.insert({65, 70}, "after");
     
-    dataLogLn("\nAfter more insertions:");
-    intervalSet.dump(WTF::dataFile());
+    StringPrintStream fullOutput;
+    intervalSet.dump(fullOutput);
+    String fullResult = fullOutput.toString();
+    String expectedFull = "IntervalSet(height=1, leafOrder=4, innerOrder=4) coverage=5...70\n"
+                         "Inner(size=2, coverage=5...70):\n"
+                         "  [0] 5...20\n"
+                         "    Leaf(size=2): 5...8=before, 10...20=first\n"
+                         "  [1] 25...70\n"
+                         "    Leaf(size=4): 25...28=middle, 30...40=second, 50...60=third, 65...70=after"_s;
+    EXPECT_EQ(fullResult, expectedFull);
 }
 
 TEST(WTF_IntervalSet, DestructorMemoryManagement)
