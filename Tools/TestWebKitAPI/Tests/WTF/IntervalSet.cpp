@@ -73,11 +73,10 @@ TEST(WTF_IntervalSet, SingleInterval)
     
     // Test find
     auto it = intervalSet.find({ 15, 16 });
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(42, it.value());
+    EXPECT_EQ(it.value(), 42);
     
     // Test find with non-overlapping interval
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 0, 5 }));
+    EXPECT_EQ(intervalSet.find({ 0, 5 }), intervalSet.end());
     
     // Test erase functionality
     intervalSet.erase({ 10, 20 });
@@ -92,9 +91,9 @@ TEST(WTF_IntervalSet, SingleInterval)
     EXPECT_FALSE(intervalSet.hasOverlap({ 25, 30 }));  // Still no overlap
     
     // After erase, all find operations should return end()
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 15, 16 }));
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 10, 20 }));
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 0, 5 }));
+    EXPECT_EQ(intervalSet.find({ 15, 16 }), intervalSet.end());
+    EXPECT_EQ(intervalSet.find({ 10, 20 }), intervalSet.end());
+    EXPECT_EQ(intervalSet.find({ 0, 5 }), intervalSet.end());
 }
 
 TEST(WTF_IntervalSet, EraseTests)
@@ -126,14 +125,12 @@ TEST(WTF_IntervalSet, EraseTests)
     
     // Verify find operations
     auto it = intervalSet.find({ 15, 16 });
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(100, it.value());
+    EXPECT_EQ(it.value(), 100);
     
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 35, 36 }));
+    EXPECT_EQ(intervalSet.find({ 35, 36 }), intervalSet.end());
     
     it = intervalSet.find({ 55, 56 });
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(300, it.value());
+    EXPECT_EQ(it.value(), 300);
     
     // Erase first interval
     intervalSet.erase({ 10, 20 });
@@ -152,9 +149,9 @@ TEST(WTF_IntervalSet, EraseTests)
     EXPECT_FALSE(intervalSet.hasOverlap({ 50, 60 }));
     
     // Verify all finds return end() on empty set
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 15, 16 }));
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 35, 36 }));
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 55, 56 }));
+    EXPECT_EQ(intervalSet.find({ 15, 16 }), intervalSet.end());
+    EXPECT_EQ(intervalSet.find({ 35, 36 }), intervalSet.end());
+    EXPECT_EQ(intervalSet.find({ 55, 56 }), intervalSet.end());
 }
 
 TEST(WTF_IntervalSet, EdgeCases)
@@ -168,14 +165,12 @@ TEST(WTF_IntervalSet, EdgeCases)
     EXPECT_FALSE(intervalSet.hasOverlap({ 1, 2 }));
     
     auto it = intervalSet.find({ 0, 1 });
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(100, it.value());
+    EXPECT_EQ(it.value(), 100);
     
     // Test with larger intervals that span the small one
     EXPECT_TRUE(intervalSet.hasOverlap({ 0, 10 }));
     it = intervalSet.find({ 0, 10 });
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(100, it.value());
+    EXPECT_EQ(it.value(), 100);
 }
 
 enum class IntervalOrdering {
@@ -264,8 +259,7 @@ static void stressTest(IntervalOrdering ordering)
         dataLogLnIf(IntervalSetTest::verbose, "Testing: interval=", data.first, " value=", data.second);
         EXPECT_TRUE(intervalSet.hasOverlap(data.first));
         auto found = intervalSet.find(data.first);
-        EXPECT_NE(intervalSet.end(), found);
-        EXPECT_EQ(data.second, found.value());
+        EXPECT_EQ(found.value(), data.second);
     }
     
     // Sort currentlyInserted by interval start for correct expected value calculation
@@ -294,10 +288,9 @@ static void stressTest(IntervalOrdering ordering)
         EXPECT_EQ(shouldOverlap, intervalSet.hasOverlap(query));
         auto found = intervalSet.find(query);
         if (shouldOverlap) {
-            EXPECT_NE(intervalSet.end(), found);
-            EXPECT_EQ(expectedValue, found.value());
+            EXPECT_EQ(found.value(), expectedValue);
         } else {
-            EXPECT_EQ(intervalSet.end(), found);
+            EXPECT_EQ(found, intervalSet.end());
         }
         
         // Occasionally erase an interval during query phase (reduced frequency)
@@ -383,23 +376,21 @@ TEST(WTF_IntervalSet, EraseLastItemSingleLeaf)
     // Verify the interval is present
     EXPECT_TRUE(intervalSet.hasOverlap({ 10, 20 }));
     auto it = intervalSet.find({ 15, 16 });
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(42, it.value());
+    EXPECT_EQ(it.value(), 42);
     
     // Erase the only interval - this should make the tree empty
     intervalSet.erase({ 10, 20 });
     
     // Verify the tree is now empty
     EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 15, 16 }));
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 0, 100 })); // Any query should return end()
+    EXPECT_EQ(intervalSet.find({ 15, 16 }), intervalSet.end());
+    EXPECT_EQ(intervalSet.find({ 0, 100 }), intervalSet.end()); // Any query should return end()
     
     // Test that we can still insert after emptying the tree
     intervalSet.insert({ 30, 40 }, 100);
     EXPECT_TRUE(intervalSet.hasOverlap({ 30, 40 }));
     it = intervalSet.find({ 35, 36 });
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(100, it.value());
+    EXPECT_EQ(it.value(), 100);
 }
 
 TEST(WTF_IntervalSet, EraseLastItemWithInnerNodes)
@@ -420,8 +411,7 @@ TEST(WTF_IntervalSet, EraseLastItemWithInnerNodes)
     for (size_t i = 0; i < intervals.size(); ++i) {
         EXPECT_TRUE(intervalSet.hasOverlap(intervals[i]));
         auto it = intervalSet.find(intervals[i]);
-        EXPECT_NE(intervalSet.end(), it);
-        EXPECT_EQ(static_cast<Value>(i), it.value());
+        EXPECT_EQ(it.value(), static_cast<Value>(i));
     }
     
     // Erase all intervals one by one until only one remains
@@ -430,7 +420,7 @@ TEST(WTF_IntervalSet, EraseLastItemWithInnerNodes)
         
         // Verify the erased interval is gone
         EXPECT_FALSE(intervalSet.hasOverlap(intervals[i]));
-        EXPECT_EQ(intervalSet.end(), intervalSet.find(intervals[i]));
+        EXPECT_EQ(intervalSet.find(intervals[i]), intervalSet.end());
         
         // Verify remaining intervals are still present
         for (size_t j = i + 1; j < intervals.size(); ++j)
@@ -444,23 +434,21 @@ TEST(WTF_IntervalSet, EraseLastItemWithInnerNodes)
     // Verify the last interval is still present
     EXPECT_TRUE(intervalSet.hasOverlap(lastInterval));
     auto it = intervalSet.find(lastInterval);
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(lastValue, it.value());
+    EXPECT_EQ(it.value(), lastValue);
     
     intervalSet.erase(lastInterval);
     
     EXPECT_FALSE(intervalSet.hasOverlap(lastInterval));
-    EXPECT_EQ(intervalSet.end(), intervalSet.find(lastInterval));
+    EXPECT_EQ(intervalSet.find(lastInterval), intervalSet.end());
     
     EXPECT_FALSE(intervalSet.hasOverlap({ 0, 1000 }));
-    EXPECT_EQ(intervalSet.end(), intervalSet.find({ 0, 1000 }));
+    EXPECT_EQ(intervalSet.find({ 0, 1000 }), intervalSet.end());
     
     // Verify we can still insert after completely emptying a complex tree
     intervalSet.insert({ 1000, 2000 }, 999);
     EXPECT_TRUE(intervalSet.hasOverlap({ 1000, 2000 }));
     it = intervalSet.find({ 1500, 1600 });
-    EXPECT_NE(intervalSet.end(), it);
-    EXPECT_EQ(999, it.value());
+    EXPECT_EQ(it.value(), 999);
 }
 
 } // namespace TestWebKitAPI
