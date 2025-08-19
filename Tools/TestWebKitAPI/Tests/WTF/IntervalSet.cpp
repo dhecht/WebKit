@@ -337,7 +337,8 @@ TEST(WTF_IntervalSet, Dump)
     intervalSet.dump(basicOutput);
     String basicResult = basicOutput.toString();
     String expectedBasic = "IntervalSet(height=0, leafOrder=4, innerOrder=4) coverage=10...60\n"
-                           "Leaf(size=3): 10...20=first, 30...40=second, 50...60=third"_s;
+                           "Leaf(size=3): 10...20=first, 30...40=second, 50...60=third\n"_s;
+    
     EXPECT_EQ(basicResult, expectedBasic);
     
     // Add more intervals to potentially cause splits
@@ -353,7 +354,8 @@ TEST(WTF_IntervalSet, Dump)
                          "  [0] 5...20\n"
                          "    Leaf(size=2): 5...8=before, 10...20=first\n"
                          "  [1] 25...70\n"
-                         "    Leaf(size=4): 25...28=middle, 30...40=second, 50...60=third, 65...70=after"_s;
+                         "    Leaf(size=4): 25...28=middle, 30...40=second, 50...60=third, 65...70=after\n"_s;
+    
     EXPECT_EQ(fullResult, expectedFull);
 }
 
