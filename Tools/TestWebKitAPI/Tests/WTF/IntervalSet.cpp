@@ -179,6 +179,7 @@ enum class IntervalOrdering {
     Random,
 };
 
+template<unsigned numCacheLines>
 static void stressTest(IntervalOrdering ordering)
 {
     constexpr size_t numberTestIntervals = 10000;
@@ -196,7 +197,7 @@ static void stressTest(IntervalOrdering ordering)
         }
     };
 
-    IntervalSet<Point, Value> intervalSet;
+    IntervalSet<Point, Value, numCacheLines> intervalSet;
     
     std::mt19937 gen(testing::UnitTest::GetInstance()->random_seed());
     std::uniform_int_distribution<size_t> gapDist(0, maxGap);
@@ -299,19 +300,21 @@ static void stressTest(IntervalOrdering ordering)
     }
 }
 
+static constexpr unsigned stressNumCacheLines = 3;
+
 TEST(WTF_IntervalSet, AscendingStressTest)
 {
-    stressTest(IntervalOrdering::Ascending);
+    stressTest<stressNumCacheLines>(IntervalOrdering::Ascending);
 }
 
 TEST(WTF_IntervalSet, DescendingStressTest)
 {
-    stressTest(IntervalOrdering::Descending);
+    stressTest<stressNumCacheLines>(IntervalOrdering::Descending);
 }
 
 TEST(WTF_IntervalSet, RandomStressTest)
 {
-    stressTest(IntervalOrdering::Random);
+    stressTest<stressNumCacheLines>(IntervalOrdering::Random);
 }
 
 TEST(WTF_IntervalSet, Dump)
