@@ -115,9 +115,8 @@ public:
             if (!newNode) [[likely]]
                 return;
             PathEntry& entry = path[depth];
-            InnerNode* inner = entry.node.asInner();
 
-            ASSERT(inner->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
+            ASSERT(entry.node.asInner()->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
             ASSERT(newNodeCoverage);
             entry.index++; // Insert new parent immediately after the existing parent
             std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode);
