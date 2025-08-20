@@ -204,13 +204,7 @@ public:
         return std::make_pair(leaf->interval(pos), leaf->value(pos));
     }
 
-    // Return end iterator
-    iterator end() const
-    {
-        return iterator();
-    }
-
-    // Check if any stored interval overlaps with the query interval
+    // Returns true iff any stored interval overlaps with the query interval
     bool hasOverlap(const Interval& query) const
     {
         if (!query.overlaps(m_rootInterval))
@@ -421,7 +415,50 @@ private:
         }
     };
 
-    using Path = Vector<PathEntry, 8>;
+    class Path : public Vector<PathEntry, 8>
+    {
+        friend class iterator;
+        
+        void next()
+        {
+            ASSERT(this->size());
+            int height = this->size() - 1;
+            PathEntry& leafEntry = this->last();
+            if (++leafEntry.index < leafEntry.node.size()) [[likely]]
+                return;
+            if (!height) {
+                // Tree is a single leaf - reached end
+                this->clear();
+                return;
+            }
+            int depth = height - 1; // Deepest inner node level
+            // Ascend up the tree until we find a node with indices to the right
+            for (; depth >= 0; depth--) {
+                PathEntry& innerEntry = this->at(depth);
+                if (innerEntry.index < innerEntry.node.size() - 1)
+                    break;
+            }
+            if (depth < 0) {
+                // Exhausted all indices of the root node.
+                this->clear();
+                return;
+            }
+            // Descend down the left-most edges of the next subtree
+            PathEntry& innerEntry = this->at(depth);
+            innerEntry.index++;
+            depth++;
+            NodePtr child = innerEntry.node.asInner()->child(innerEntry.index);
+            for (; depth < height; depth++) {
+                this->at(depth).node = child;
+                this->at(depth).index = 0;
+                child = child.asInner()->child(0);
+            }
+            this->at(depth).node = child;
+            this->at(depth).index = 0;
+            ASSERT(child.size());
+        }
+    };
+
 public:
     class iterator {
     public:
@@ -441,6 +478,17 @@ public:
         {
             auto [leaf, index] = leafAndIndex();
             return leaf->value(index);
+        }
+
+        const std::pair<Interval, Value> operator*() const
+        {
+            return { interval(), value() };
+        }
+
+        iterator& operator++()
+        {
+            m_path.next();
+            return *this;
         }
         
         bool operator==(const iterator& other) const
@@ -462,6 +510,30 @@ public:
 
         Path m_path;
     };
+
+    iterator begin() const
+    {
+        if (!m_root)
+            return end();
+        Path path;
+        NodePtr* node = const_cast<NodePtr*>(&m_root);
+        // Generate path to the left-most leaf node.
+        for (unsigned depth = 0; depth < m_height; depth++) {
+            ASSERT(node->size());
+            path.append({ *node, 0 });
+            node = &node->asInner()->child(0);
+        }
+        // Leaf node
+        ASSERT(node->size());
+        path.append({ *node, 0 });
+        ASSERT(path.size() == m_height + 1);
+        return iterator(WTFMove(path));
+    }
+
+    iterator end() const
+    {
+        return iterator();
+    }
 
 private:
     bool isFirstOrLastIndex(NodePtr node, unsigned index)
