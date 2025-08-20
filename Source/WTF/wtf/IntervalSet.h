@@ -261,10 +261,10 @@ private:
         using PayloadType = Payload;
         static constexpr size_t capacity = order;
         
-        Interval& interval(unsigned i)
+        Interval& interval(size_t index)
         {
-            ASSERT(i < capacity);
-            return intervals[i];
+            ASSERT(index < capacity);
+            return intervals[index];
         }
 
         const Interval coverage(size_t size) const
@@ -374,18 +374,18 @@ private:
     };
 
     struct LeafNode : public NodeImpl<Value, leafOrder> {
-        Value& value(unsigned i)
+        Value& value(size_t index)
         {
-            ASSERT(i < leafOrder);
-            return this->payloads[i];
+            ASSERT(index < leafOrder);
+            return this->payloads[index];
         }
     };
 
     struct InnerNode : public NodeImpl<NodeRef, innerOrder> {
-        NodeRef& child(unsigned i)
+        NodeRef& child(size_t index)
         {
-            ASSERT(i < innerOrder);
-            return this->payloads[i];
+            ASSERT(index < innerOrder);
+            return this->payloads[index];
         }
 
         size_t subtreeForInsert(size_t size, T endPoint) const
@@ -418,9 +418,8 @@ private:
     {
         friend class iterator;
         
-        // Advances to the next index of the leaf node, if exists.
-        // If the current leaf node is exhausted, advance to next
-        // leaf node and set index to 0.
+        // Advances to the next index of the leaf node, if exists. If the current leaf node
+        // is exhausted, advance to next leaf node and set index to 0.
         void nextIndexInLeaf()
         {
             ASSERT(this->size());
