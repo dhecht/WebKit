@@ -421,7 +421,7 @@ private:
         // Advances to the next index of the leaf node, if exists.
         // If the current leaf node is exhausted, advance to next
         // leaf node and set index to 0.
-        void nextLeafIndex()
+        void nextIndexInLeaf()
         {
             ASSERT(this->size());
             int height = this->size() - 1;
@@ -489,7 +489,7 @@ public:
 
         iterator& operator++()
         {
-            m_path.nextLeafIndex();
+            m_path.nextIndexInLeaf();
             return *this;
         }
 
