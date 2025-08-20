@@ -256,14 +256,14 @@ private:
         // Common base class for all nodes - provides type identity for NodePtr
     };
 
-    template<typename Payload, size_t N>
+    template<typename Payload, size_t order>
     struct NodeImpl : public Node {
         using PayloadType = Payload;
-        static constexpr size_t capacity = N;
+        static constexpr size_t capacity = order;
         
         Interval& interval(unsigned i)
         {
-            ASSERT(i < N);
+            ASSERT(i < capacity);
             return intervals[i];
         }
 
@@ -276,7 +276,7 @@ private:
         // XXX: maybe move this to NodePtr so it can directly update size?
         void insertAt(size_t& size, size_t index, const Interval& interval, const Payload& value)
         {
-            ASSERT(size < N);
+            ASSERT(size < capacity);
             ASSERT(index <= size);
             // Shift elements to the right
             // FIXME: use memmove?
@@ -291,7 +291,7 @@ private:
         
         void removeAt(size_t& size, size_t index)
         {
-            ASSERT(size <= N);
+            ASSERT(size <= capacity);
             ASSERT(index < size);
             // Shift elements to the left
             // FIXME: use memmove?
@@ -306,7 +306,7 @@ private:
         // or size if no such interval exists.
         size_t firstIntervalEndAfter(size_t size, T point) const
         {
-            ASSERT(size <= N);
+            ASSERT(size <= capacity);
             for (size_t i = 0; i < size; i++) {
                 if (point < intervals[i].end())
                     return i;
@@ -314,8 +314,8 @@ private:
             return size;
         }
 
-        Interval intervals[N];
-        Payload payloads[N];
+        Interval intervals[order];
+        Payload payloads[order];
     };
 
     class NodeRef {
@@ -388,7 +388,7 @@ private:
             return this->payloads[i];
         }
 
-        size_t subtreeForInsert(size_t size, T point) const
+        size_t subtreeForInsert(size_t size, T endPoint) const
         {
             ASSERT(size <= innerOrder);
             // XXX: this only happens when the tree is empty or when creating a new level. Could we remove from this path?
@@ -396,7 +396,7 @@ private:
                 return 0;
             for (size_t i = 0; i < size - 1; i++) {
                 // XXX: or maybe keep adjacent intervals together
-                if (point <= this->intervals[i + 1].begin())
+                if (endPoint <= this->intervals[i + 1].begin())
                     return i;
             }
             return size - 1;
