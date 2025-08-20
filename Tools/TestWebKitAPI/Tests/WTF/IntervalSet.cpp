@@ -52,6 +52,8 @@ TEST(WTF_IntervalSet, Basic)
     EXPECT_TRUE(intervalSet.isEmpty());
     EXPECT_FALSE(intervalSet.hasOverlap({ 0, 10 }));
     EXPECT_FALSE(intervalSet.find({ 0, 10 }));
+    
+    EXPECT_EQ(intervalSet.begin(), intervalSet.end());
 }
 
 TEST(WTF_IntervalSet, SingleInterval)
@@ -62,6 +64,13 @@ TEST(WTF_IntervalSet, SingleInterval)
     intervalSet.insert({ 10, 20 }, 42);
     
     EXPECT_FALSE(intervalSet.isEmpty());
+
+    EXPECT_NE(intervalSet.begin(), intervalSet.end());
+    auto it = intervalSet.begin();
+    EXPECT_EQ(it.interval(), Interval(10, 20));
+    EXPECT_EQ(it.value(), 42);
+    ++it;
+    EXPECT_EQ(it, intervalSet.end());
 
     // Test overlap detection
     EXPECT_TRUE(intervalSet.hasOverlap({ 15, 25 }));  // Overlaps
@@ -83,6 +92,8 @@ TEST(WTF_IntervalSet, SingleInterval)
     
     // Test erase functionality
     intervalSet.erase({ 10, 20 });
+    
+    EXPECT_EQ(intervalSet.begin(), intervalSet.end());
     
     // After erase, all overlap checks should return false
     EXPECT_FALSE(intervalSet.hasOverlap({ 15, 25 }));  // No longer overlaps
@@ -111,6 +122,12 @@ TEST(WTF_IntervalSet, EraseTests)
     intervalSet.insert({ 30, 40 }, 200);
     intervalSet.insert({ 50, 60 }, 300);
     
+    // Verify iterator traverses all three intervals
+    size_t count = 0;
+    for (auto it = intervalSet.begin(); it != intervalSet.end(); ++it)
+        count++;
+    EXPECT_EQ(count, 3u);
+    
     // Verify all intervals are present
     EXPECT_FALSE(intervalSet.isEmpty());
     EXPECT_TRUE(intervalSet.hasOverlap({ 10, 20 }));
@@ -119,6 +136,12 @@ TEST(WTF_IntervalSet, EraseTests)
     
     // Erase middle interval
     intervalSet.erase({ 30, 40 });
+    
+    // Verify iterator now traverses only two intervals
+    count = 0;
+    for (auto it = intervalSet.begin(); it != intervalSet.end(); ++it)
+        count++;
+    EXPECT_EQ(count, 2u);
     
     // Verify middle interval is gone, others remain
     EXPECT_FALSE(intervalSet.isEmpty());
@@ -142,6 +165,12 @@ TEST(WTF_IntervalSet, EraseTests)
     // Erase first interval
     intervalSet.erase({ 10, 20 });
     
+    // Verify iterator now traverses only one interval
+    count = 0;
+    for (auto it = intervalSet.begin(); it != intervalSet.end(); ++it)
+        count++;
+    EXPECT_EQ(count, 1u);
+    
     EXPECT_FALSE(intervalSet.isEmpty());
     EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));
     EXPECT_FALSE(intervalSet.hasOverlap({ 30, 40 }));
@@ -149,6 +178,9 @@ TEST(WTF_IntervalSet, EraseTests)
     
     // Erase last interval (should make set empty)
     intervalSet.erase({ 50, 60 });
+    
+    // Verify iterator shows empty set
+    EXPECT_EQ(intervalSet.begin(), intervalSet.end());
     
     EXPECT_TRUE(intervalSet.isEmpty());
     EXPECT_FALSE(intervalSet.hasOverlap({ 10, 20 }));
@@ -264,6 +296,18 @@ static void stressTest(IntervalOrdering ordering)
         
         maybeEraseInterval();
     }
+
+    // Validate iterator traversal: count and ordering
+    size_t iteratorCount = 0;
+    Point lastEnd = 0;
+    for (auto it = intervalSet.begin(); it != intervalSet.end(); ++it) {
+        iteratorCount++;
+        auto interval = (*it).first;
+        // Verify intervals are in sorted order (non-overlapping by construction)
+        EXPECT_GE(interval.begin(), lastEnd);
+        lastEnd = interval.end();
+    }
+    EXPECT_EQ(iteratorCount, currentlyInserted.size());
 
     // Test that all currently inserted intervals can be found with correct values
     std::shuffle(currentlyInserted.begin(), currentlyInserted.end(), gen);
