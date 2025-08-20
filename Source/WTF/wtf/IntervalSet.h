@@ -177,11 +177,11 @@ public:
         }
     }
 
-    // returns iterator to first interval that overlaps with the query interval
-    iterator find(const Interval& query) const
+    // returns the Interval and Value for the first interval, if any, that overlaps with the query interval
+    std::optional<std::pair<Interval, Value>> find(const Interval& query) const
     {
         if (!query.overlaps(m_rootInterval))
-            return end();
+            return std::nullopt;
 
         ASSERT(m_root);
         NodePtr node = m_root;
@@ -189,9 +189,9 @@ public:
             InnerNode* inner = node.asInner();
             size_t pos = inner->firstIntervalEndAfter(node.size(), query.begin());
             if (pos == node.size())
-                return end(); // query is entirely after this subtree
+                return std::nullopt; // query is entirely after this subtree
             if (query.end() <= inner->interval(pos).begin())
-                return end(); // query is entirely before this subtree
+                return std::nullopt; // query is entirely before this subtree
             // Otherwise, there may exist an overlapping interval in this subtree
             node = inner->child(pos);
         }
@@ -199,7 +199,9 @@ public:
         size_t pos = leaf->firstIntervalEndAfter(node.size(), query.begin());
         ASSERT(pos < node.size()); // coverage check at parent level ensures this
         ASSERT(query.begin() < leaf->interval(pos).end());
-        return leaf->interval(pos).begin() < query.end() ? iterator(leaf, pos) : end();
+        if (query.end() <= leaf->interval(pos).begin())
+            return std::nullopt;
+        return std::make_pair(leaf->interval(pos), leaf->value(pos));
     }
 
     // Return end iterator
@@ -408,30 +410,42 @@ private:
         }
     };
 
+private:
+    struct PathEntry {
+        NodePtr& node;
+        size_t index;
+
+        bool operator==(const PathEntry& other) const
+        {
+            return node.node() == other.node.node() && index == other.index;
+        }
+    };
+
+    using Path = Vector<PathEntry, 8>;
 public:
     class iterator {
     public:
-        iterator() : m_leaf(nullptr), m_index(0) { }
+        iterator() = default;
         
-        iterator(LeafNode* leaf, size_t index) : m_leaf(leaf), m_index(index) { }
+        iterator(Path&& path)
+        : m_path(WTFMove(path))
+        { }
         
         const Interval& interval() const
         {
-            ASSERT(m_leaf);
-            ASSERT(m_index < LeafOrder);
-            return m_leaf->interval(m_index);
+            auto [leaf, index] = leafAndIndex();
+            return leaf->interval(index);
         }
         
         const Value& value() const
         {
-            ASSERT(m_leaf);
-            ASSERT(m_index < LeafOrder);
-            return m_leaf->value(m_index);
+            auto [leaf, index] = leafAndIndex();
+            return leaf->value(index);
         }
         
         bool operator==(const iterator& other) const
         {
-            return m_leaf == other.m_leaf && m_index == other.m_index;
+            return m_path == other.m_path;
         }
         
         bool operator!=(const iterator& other) const
@@ -440,18 +454,16 @@ public:
         }
         
     private:
-        LeafNode* m_leaf;
-        size_t m_index;
+        const std::pair<LeafNode*, unsigned> leafAndIndex() const
+        {
+            const PathEntry& entry = m_path.last();
+            return { entry.node.asLeaf(), entry.index };
+        }
+
+        Path m_path;
     };
 
 private:
-    struct PathEntry {
-        NodePtr& node;
-        size_t index;
-    };
-
-    using Path = Vector<PathEntry, 8>;
-
     bool isFirstOrLastIndex(NodePtr node, unsigned index)
     {
         ASSERT(index < node.size());
