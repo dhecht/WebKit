@@ -39,14 +39,14 @@ namespace WTF {
 // IntervalSet: A specialized B+ tree for storing non-overlapping intervals with efficient overlap queries.
 // Uses WTF::Range<T> for interval representation and supports gap-based load balancing.
 
-template<typename T, typename Value, size_t CacheLinesPerNode = 1>
+template<typename T, typename Value, size_t cacheLinesPerNode = 1>
     requires std::is_trivially_destructible_v<T> && std::is_trivially_destructible_v<Value>
 class IntervalSet {
 public:
     using Interval = Range<T>;
     
     static constexpr size_t cpuCacheLineSize = 64;
-    static constexpr size_t targetNodeSize = CacheLinesPerNode * cpuCacheLineSize;
+    static constexpr size_t targetNodeSize = cacheLinesPerNode * cpuCacheLineSize;
     static constexpr size_t nodesPerSlab = 8;
     
     // Calculate optimal order for each node type based on target cache line usage
@@ -60,12 +60,12 @@ public:
         return targetNodeSize / sizePerOrder;
     }
     
-    static constexpr size_t LeafOrder = calculateLeafOrder();
-    static constexpr size_t InnerOrder = calculateInnerOrder();
+    static constexpr size_t leafOrder = calculateLeafOrder();
+    static constexpr size_t innerOrder = calculateInnerOrder();
     
-    // Ensure CacheLinesPerNode parameter is large enough for valid B+ tree orders
-    static_assert(LeafOrder >= 2, "CacheLinesPerNode parameter too small: LeafNode order must be at least 2 for a valid B+ tree");
-    static_assert(InnerOrder >= 2, "CacheLinesPerNode parameter too small: InnerNode order must be at least 2 for a valid B+ tree");
+    // Ensure cacheLinesPerNode parameter is large enough for valid B+ tree orders
+    static_assert(leafOrder >= 2, "cacheLinesPerNode parameter too small: LeafNode order must be at least 2 for a valid B+ tree");
+    static_assert(innerOrder >= 2, "cacheLinesPerNode parameter too small: InnerNode order must be at least 2 for a valid B+ tree");
     
     class iterator;
 
@@ -117,7 +117,7 @@ public:
                 return;
             PathEntry& entry = path[depth];
 
-            ASSERT(entry.nodeRef->asInner()->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
+            ASSERT(entry.nodeRef->asInner()->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? leafOrder : innerOrder) + 1);
             ASSERT(newNodeCoverage);
             entry.index++; // Insert new parent immediately after the existing parent
             std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode);
@@ -125,7 +125,7 @@ public:
 
         // If there's a new node at depth 0 then a new level is required.
         if (newNode) [[unlikely]] {
-            ASSERT(m_root.size() + newNode.size() == (m_height ? InnerOrder : LeafOrder) + 1);
+            ASSERT(m_root.size() + newNode.size() == (m_height ? innerOrder : leafOrder) + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
             newRoot->interval(0) = m_rootInterval;
@@ -239,7 +239,7 @@ public:
     // Pretty print the tree structure for debugging
     void dump(PrintStream& out) const
     {
-        out.print("IntervalSet(height=", m_height, ", leafOrder=", LeafOrder, ", innerOrder=", InnerOrder, ")");
+        out.print("IntervalSet(height=", m_height, ", leafOrder=", leafOrder, ", innerOrder=", innerOrder, ")");
         if (!m_root) {
             out.print(" <empty>");
             return;
@@ -323,7 +323,7 @@ private:
         static_assert(isPowerOfTwo(cpuCacheLineSize));
 
         static constexpr uintptr_t sizeMask = cpuCacheLineSize - 1;
-        static_assert(LeafOrder <= sizeMask && InnerOrder <= sizeMask);
+        static_assert(leafOrder <= sizeMask && innerOrder <= sizeMask);
 
         NodeRef() : m_bits(0) { }
         
@@ -373,24 +373,24 @@ private:
         uintptr_t m_bits;
     };
 
-    struct LeafNode : public NodeImpl<Value, LeafOrder> {
+    struct LeafNode : public NodeImpl<Value, leafOrder> {
         Value& value(unsigned i)
         {
-            ASSERT(i < LeafOrder);
+            ASSERT(i < leafOrder);
             return this->payloads[i];
         }
     };
 
-    struct InnerNode : public NodeImpl<NodeRef, InnerOrder> {
+    struct InnerNode : public NodeImpl<NodeRef, innerOrder> {
         NodeRef& child(unsigned i)
         {
-            ASSERT(i < InnerOrder);
+            ASSERT(i < innerOrder);
             return this->payloads[i];
         }
 
         size_t subtreeForInsert(size_t size, T point) const
         {
-            ASSERT(size <= InnerOrder);
+            ASSERT(size <= innerOrder);
             // XXX: this only happens when the tree is empty or when creating a new level. Could we remove from this path?
             if (!size) [[unlikely]]
                 return 0;
