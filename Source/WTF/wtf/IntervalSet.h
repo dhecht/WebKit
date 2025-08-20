@@ -89,24 +89,24 @@ public:
         if (!m_root) [[unlikely]] {
             // Create initial root as a leaf
             LeafNode* leaf = allocNode<LeafNode>();
-            m_root = NodePtr(leaf, 0);
+            m_root = NodeRef(leaf, 0);
             m_height = 0;
         }
 
         Path path;
-        NodePtr* node = &m_root;
+        NodeRef* nodeRef = &m_root;
 
         // Descend down the tree, recording the path taken.
         for (unsigned depth = 0; depth < m_height; depth++) {
-            InnerNode* inner = node->asInner();        
-            size_t index = inner->subtreeForInsert(node->size(), interval.end());
-            path.append({ *node, index });
+            InnerNode* inner = nodeRef->asInner();        
+            size_t index = inner->subtreeForInsert(nodeRef->size(), interval.end());
+            path.append({ nodeRef, index });
 
-            node = &inner->child(index);
+            nodeRef = &inner->child(index);
         }
         // Found the correct leaf for the insert, now determine the position within that leaf.
-        size_t insertionIndex = node->asLeaf()->firstIntervalEndAfter(node->size(), interval.end());
-        path.append( { *node, insertionIndex });
+        size_t insertionIndex = nodeRef->asLeaf()->firstIntervalEndAfter(nodeRef->size(), interval.end());
+        path.append( { nodeRef, insertionIndex });
         ASSERT(path.size() == m_height + 1);
 
         auto [newNode, newNodeCoverage] = insertInNodeSplitIfNeeded<LeafNode>(path, m_height, interval, value);
@@ -117,7 +117,7 @@ public:
                 return;
             PathEntry& entry = path[depth];
 
-            ASSERT(entry.node.asInner()->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
+            ASSERT(entry.nodeRef->asInner()->child(entry.index).size() + newNode.size() == (static_cast<unsigned>(depth + 1) == m_height ? LeafOrder : InnerOrder) + 1);
             ASSERT(newNodeCoverage);
             entry.index++; // Insert new parent immediately after the existing parent
             std::tie(newNode, newNodeCoverage) = insertInNodeSplitIfNeeded<InnerNode>(path, depth, newNodeCoverage, newNode);
@@ -133,7 +133,7 @@ public:
             newRoot->interval(1) = newNodeCoverage;
             newRoot->child(1) = newNode;
             m_height++;
-            m_root = NodePtr(newRoot, 2);
+            m_root = NodeRef(newRoot, 2);
             m_rootInterval = newRoot->coverage(2);
         }
     }
@@ -144,20 +144,20 @@ public:
         Path path;
         ASSERT(interval.overlaps(m_rootInterval));
         ASSERT(m_root);
-        NodePtr* node = &m_root;
+        NodeRef* nodeRef = &m_root;
 
         for (unsigned depth = 0; depth < m_height; ++depth) {
-            InnerNode* inner = node->asInner();
-            size_t index = inner->firstIntervalEndAfter(node->size(), interval.begin());
-            ASSERT(index < node->size());
+            InnerNode* inner = nodeRef->asInner();
+            size_t index = inner->firstIntervalEndAfter(nodeRef->size(), interval.begin());
+            ASSERT(index < nodeRef->size());
             ASSERT(inner->interval(index).begin() < interval.end());
-            path.append({ *node, index });
-            node = &inner->child(index);
+            path.append({ nodeRef, index });
+            nodeRef = &inner->child(index);
         }
-        LeafNode* leaf = node->asLeaf();
-        size_t eraseIndex = leaf->firstIntervalEndAfter(node->size(), interval.begin());
+        LeafNode* leaf = nodeRef->asLeaf();
+        size_t eraseIndex = leaf->firstIntervalEndAfter(nodeRef->size(), interval.begin());
         ASSERT(leaf->interval(eraseIndex).begin() == interval.begin() && leaf->interval(eraseIndex).end() == interval.end());
-        path.append({ *node, eraseIndex });
+        path.append({ nodeRef, eraseIndex });
 
         bool removedNode = eraseFromNode<LeafNode>(path, m_height);
 
@@ -184,24 +184,24 @@ public:
             return std::nullopt;
 
         ASSERT(m_root);
-        NodePtr node = m_root;
+        NodeRef nodeRef = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
-            InnerNode* inner = node.asInner();
-            size_t pos = inner->firstIntervalEndAfter(node.size(), query.begin());
-            if (pos == node.size())
+            InnerNode* inner = nodeRef.asInner();
+            size_t pos = inner->firstIntervalEndAfter(nodeRef.size(), query.begin());
+            if (pos == nodeRef.size())
                 return std::nullopt; // query is entirely after this subtree
             if (query.end() <= inner->interval(pos).begin())
                 return std::nullopt; // query is entirely before this subtree
             // Otherwise, there may exist an overlapping interval in this subtree
-            node = inner->child(pos);
+            nodeRef = inner->child(pos);
         }
-        LeafNode* leaf = node.asLeaf();
-        size_t pos = leaf->firstIntervalEndAfter(node.size(), query.begin());
-        ASSERT(pos < node.size()); // coverage check at parent level ensures this
-        ASSERT(query.begin() < leaf->interval(pos).end());
-        if (query.end() <= leaf->interval(pos).begin())
+        LeafNode* leaf = nodeRef.asLeaf();
+        size_t index = leaf->firstIntervalEndAfter(nodeRef.size(), query.begin());
+        ASSERT(index < nodeRef.size()); // coverage check at parent level ensures this
+        ASSERT(query.begin() < leaf->interval(index).end());
+        if (query.end() <= leaf->interval(index).begin())
             return std::nullopt;
-        return std::make_pair(leaf->interval(pos), leaf->value(pos));
+        return std::make_pair(leaf->interval(index), leaf->value(index));
     }
 
     // Returns true iff any stored interval overlaps with the query interval
@@ -211,29 +211,29 @@ public:
             return false;
 
         ASSERT(m_root);
-        NodePtr node = m_root;
+        NodeRef nodeRef = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
-            InnerNode* inner = node.asInner();
-            size_t pos = inner->firstIntervalEndAfter(node.size(), query.begin());
-            if (pos == node.size())
+            InnerNode* inner = nodeRef.asInner();
+            size_t index = inner->firstIntervalEndAfter(nodeRef.size(), query.begin());
+            if (index == nodeRef.size())
                 return false; // query starts after all intervals
             // query start lands either within the pos subtree or the gap immediately preceding that subtree
-            ASSERT(query.begin() < inner->interval(pos).end());
-            if (query.end() <= inner->interval(pos).begin())
+            ASSERT(query.begin() < inner->interval(index).end());
+            if (query.end() <= inner->interval(index).begin())
                 return false; // query is entirely in the gap before this subtree
-            if (inner->interval(pos).end() <= query.end())
+            if (inner->interval(index).end() <= query.end())
                 return true; // query spans subtree end point so it must overlap the last interval
-            if (query.begin() <= inner->interval(pos).begin())
+            if (query.begin() <= inner->interval(index).begin())
                 return true; // query spans subtree start point so it must overlap the first interval
             // Otherwise, subtree encompasses query so need to search subtree
-            ASSERT(inner->interval(pos).begin() < query.begin() && query.end() < inner->interval(pos).end());
-            node = inner->child(pos);
+            ASSERT(inner->interval(index).begin() < query.begin() && query.end() < inner->interval(index).end());
+            nodeRef = inner->child(index);
         }
 
-        LeafNode* leaf = node.asLeaf();
-        size_t pos = leaf->firstIntervalEndAfter(node.size(), query.begin());
-        ASSERT(query.begin() < leaf->interval(pos).end());
-        return leaf->interval(pos).begin() < query.end();
+        LeafNode* leaf = nodeRef.asLeaf();
+        size_t index = leaf->firstIntervalEndAfter(nodeRef.size(), query.begin());
+        ASSERT(query.begin() < leaf->interval(index).end());
+        return leaf->interval(index).begin() < query.end();
     }
 
     // Pretty print the tree structure for debugging
@@ -244,8 +244,7 @@ public:
             out.print(" <empty>");
             return;
         }
-        out.print(" coverage=", m_rootInterval);
-        out.print("\n");
+        out.println(" coverage=", m_rootInterval);
         dumpSubtree(out, m_root, m_height, 0);
     }
 
@@ -319,16 +318,16 @@ private:
         Payload payloads[N];
     };
 
-    class NodePtr {
+    class NodeRef {
     public:
         static_assert(isPowerOfTwo(cpuCacheLineSize));
 
         static constexpr uintptr_t sizeMask = cpuCacheLineSize - 1;
         static_assert(LeafOrder <= sizeMask && InnerOrder <= sizeMask);
 
-        NodePtr() : m_bits(0) { }
+        NodeRef() : m_bits(0) { }
         
-        NodePtr(Node* ptr, size_t size) :
+        NodeRef(Node* ptr, size_t size) :
             m_bits(reinterpret_cast<uintptr_t>(ptr) | size)
         {
             ASSERT(!(reinterpret_cast<uintptr_t>(ptr) & sizeMask));
@@ -382,8 +381,8 @@ private:
         }
     };
 
-    struct InnerNode : public NodeImpl<NodePtr, InnerOrder> {
-        NodePtr& child(unsigned i)
+    struct InnerNode : public NodeImpl<NodeRef, InnerOrder> {
+        NodeRef& child(unsigned i)
         {
             ASSERT(i < InnerOrder);
             return this->payloads[i];
@@ -406,12 +405,12 @@ private:
 
 private:
     struct PathEntry {
-        NodePtr& node;
+        NodeRef* nodeRef;
         size_t index;
 
         bool operator==(const PathEntry& other) const
         {
-            return node.node() == other.node.node() && index == other.index;
+            return nodeRef->node() == other.nodeRef->node() && index == other.index;
         }
     };
 
@@ -419,12 +418,15 @@ private:
     {
         friend class iterator;
         
+        // Advances to the next index of the leaf node, if exists.
+        // If the current leaf node is exhausted, advance to next
+        // leaf node and set index to 0.
         void next()
         {
             ASSERT(this->size());
             int height = this->size() - 1;
             PathEntry& leafEntry = this->last();
-            if (++leafEntry.index < leafEntry.node.size()) [[likely]]
+            if (++leafEntry.index < leafEntry.nodeRef->size()) [[likely]]
                 return;
             if (!height) {
                 // Tree is a single leaf - reached end
@@ -435,7 +437,7 @@ private:
             // Ascend up the tree until we find a node with indices to the right
             for (; depth >= 0; depth--) {
                 PathEntry& innerEntry = this->at(depth);
-                if (innerEntry.index < innerEntry.node.size() - 1)
+                if (innerEntry.index < innerEntry.nodeRef->size() - 1)
                     break;
             }
             if (depth < 0) {
@@ -447,15 +449,15 @@ private:
             PathEntry& innerEntry = this->at(depth);
             innerEntry.index++;
             depth++;
-            NodePtr child = innerEntry.node.asInner()->child(innerEntry.index);
+            NodeRef* childRef = &innerEntry.nodeRef->asInner()->child(innerEntry.index);
             for (; depth < height; depth++) {
-                this->at(depth).node = child;
+                this->at(depth).nodeRef = childRef;
                 this->at(depth).index = 0;
-                child = child.asInner()->child(0);
+                childRef = &childRef->asInner()->child(0);
             }
-            this->at(depth).node = child;
+            this->at(depth).nodeRef = childRef;
             this->at(depth).index = 0;
-            ASSERT(child.size());
+            ASSERT(childRef->size());
         }
     };
 
@@ -490,7 +492,7 @@ public:
             m_path.next();
             return *this;
         }
-        
+
         bool operator==(const iterator& other) const
         {
             return m_path == other.m_path;
@@ -505,27 +507,28 @@ public:
         const std::pair<LeafNode*, unsigned> leafAndIndex() const
         {
             const PathEntry& entry = m_path.last();
-            return { entry.node.asLeaf(), entry.index };
+            return { entry.nodeRef->asLeaf(), entry.index };
         }
 
         Path m_path;
     };
 
+    // returns an iterator with the path to the left-most leaf node and index 0
     iterator begin() const
     {
         if (!m_root)
             return end();
         Path path;
-        NodePtr* node = const_cast<NodePtr*>(&m_root);
+        NodeRef* nodeRef = const_cast<NodeRef*>(&m_root);
         // Generate path to the left-most leaf node.
         for (unsigned depth = 0; depth < m_height; depth++) {
-            ASSERT(node->size());
-            path.append({ *node, 0 });
-            node = &node->asInner()->child(0);
+            ASSERT(nodeRef->size());
+            path.append({ nodeRef, 0 });
+            nodeRef = &nodeRef->asInner()->child(0);
         }
         // Leaf node
-        ASSERT(node->size());
-        path.append({ *node, 0 });
+        ASSERT(nodeRef->size());
+        path.append({ nodeRef, 0 });
         ASSERT(path.size() == m_height + 1);
         return iterator(WTFMove(path));
     }
@@ -536,10 +539,10 @@ public:
     }
 
 private:
-    bool isFirstOrLastIndex(NodePtr node, unsigned index)
+    bool isFirstOrLastIndex(NodeRef nodeRef, unsigned index)
     {
-        ASSERT(index < node.size());
-        return index == 0 || index == node.size() - 1;
+        ASSERT(index < nodeRef.size());
+        return index == 0 || index == nodeRef.size() - 1;
     }
 
     void updateCoverage(const Path& path, int depth, Interval coverage)
@@ -548,17 +551,17 @@ private:
         depth--; // So that depth is at the parent of the node with 'coverage'.
         while (depth >= 0) {
             const PathEntry& entry = path[depth];
-            InnerNode* inner = entry.node.asInner();
+            InnerNode* inner = entry.nodeRef->asInner();
             inner->interval(entry.index) = coverage;
 
             // FIXME: and/or should we filter based on actual coverage value since we may hit a common ancestor
             // when modifying multiple node, and one could be first and the other could be last.
-            if (!isFirstOrLastIndex(entry.node, entry.index)) {
+            if (!isFirstOrLastIndex(*entry.nodeRef, entry.index)) {
                 // Since first/last of this node was not modified, its coverage hasn't changed - no need to continue upward.
-                verifyCoverageConsistency(path, depth, inner->coverage(entry.node.size()));
+                verifyCoverageConsistency(path, depth, inner->coverage(entry.nodeRef->size()));
                 return;
             }
-            coverage = inner->coverage(entry.node.size());
+            coverage = inner->coverage(entry.nodeRef->size());
             depth--;
         }
         m_rootInterval = coverage;
@@ -571,9 +574,9 @@ private:
         depth--;
         while (depth >= 0) {
             const PathEntry& entry = path[depth];
-            InnerNode* inner = entry.node.asInner();
+            InnerNode* inner = entry.nodeRef->asInner();
             ASSERT(inner->interval(entry.index) == coverage);
-            coverage = inner->coverage(entry.node.size());
+            coverage = inner->coverage(entry.nodeRef->size());
             depth--;
         }
         if (m_rootInterval != coverage) {
@@ -587,12 +590,12 @@ private:
     // sizes and coverages for the affected subtree. If the node needed to be split then returns the NodePtr and
     // coverage interval for the new node for the caller to insert into the parent.
     template<typename NodeType>
-    std::pair<NodePtr, Interval> insertInNodeSplitIfNeeded(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
+    std::pair<NodeRef, Interval> insertInNodeSplitIfNeeded(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
     {
-        NodePtr& nodePtr = path[depth].node;
+        NodeRef* nodeRef = path[depth].nodeRef;
         auto insertionIndex = path[depth].index;
-        auto node = nodePtr.template as<NodeType>();
-        size_t nodeSize = nodePtr.size();
+        auto node = nodeRef->template as<NodeType>();
+        size_t nodeSize = nodeRef->size();
         ASSERT(nodeSize <= NodeType::capacity);
 
         if (nodeSize == NodeType::capacity) [[unlikely]] {
@@ -613,37 +616,37 @@ private:
                 insertionIndex -= splitPoint;
                 newNode->insertAt(newNodeSize, insertionIndex, interval, value);
             }            
-            nodePtr.setSize(nodeSize);
+            nodeRef->setSize(nodeSize);
             updateCoverage(path, depth, node->coverage(nodeSize));
-            return { NodePtr(newNode, newNodeSize), newNode->coverage(newNodeSize) };
+            return { NodeRef(newNode, newNodeSize), newNode->coverage(newNodeSize) };
         }
 
         node->insertAt(nodeSize, insertionIndex, interval, value);
-        nodePtr.setSize(nodeSize);
-        if (isFirstOrLastIndex(nodePtr, insertionIndex))
+        nodeRef->setSize(nodeSize);
+        if (isFirstOrLastIndex(*nodeRef, insertionIndex))
             updateCoverage(path, depth, node->coverage(nodeSize));
-        return { NodePtr(), Interval() };
+        return { NodeRef(), Interval() };
     }
 
     template<typename NodeType>
     bool eraseFromNode(const Path& path, int depth)
     {
-        NodePtr& nodePtr = path[depth].node;
+        NodeRef* nodeRef = path[depth].nodeRef;
         auto eraseIndex = path[depth].index;
-        auto node = nodePtr.template as<NodeType>();
-        size_t nodeSize = nodePtr.size();
+        auto node = nodeRef->template as<NodeType>();
+        size_t nodeSize = nodeRef->size();
         ASSERT(nodeSize <= NodeType::capacity);
 
         if (nodeSize == 1) [[unlikely]] {
             ASSERT(!eraseIndex);
             freeNode(node);
-            nodePtr = NodePtr();
+            *nodeRef = NodeRef();
             return true;
         }
         node->removeAt(nodeSize, eraseIndex);
-        if (isFirstOrLastIndex(nodePtr, eraseIndex))
+        if (isFirstOrLastIndex(*nodeRef, eraseIndex))
             updateCoverage(path, depth, node->coverage(nodeSize));
-        nodePtr.setSize(nodeSize);
+        nodeRef->setSize(nodeSize);
         return false;
     }
 
@@ -703,13 +706,12 @@ private:
         fastAlignedFree(node);
     }
 
-    // Free all nodes iteratively to avoid stack overflow
     void freeAllNodes()
     {
         if (!m_root)
             return;
     
-        Vector<std::pair<NodePtr, unsigned>, 16> stack;
+        Vector<std::pair<NodeRef, unsigned>, 16> stack;
         stack.append({ m_root, m_height });
         
         while (!stack.isEmpty()) {
@@ -727,7 +729,7 @@ private:
     }
 
 #endif
-    void dumpSubtree(PrintStream& out, NodePtr node, unsigned distanceToLeaf, unsigned indent) const
+    void dumpSubtree(PrintStream& out, NodeRef nodeRef, unsigned distanceToLeaf, unsigned indent) const
     {
         auto printIndent = [&] {
             for (unsigned i = 0; i < indent; ++i)
@@ -735,27 +737,27 @@ private:
         };
 
         if (distanceToLeaf) {
-            InnerNode* inner = node.asInner();
+            InnerNode* inner = nodeRef.asInner();
             printIndent();
-            out.println("Inner(size=", node.size(), ", coverage=", inner->coverage(node.size()), "):");
+            out.println("Inner(size=", nodeRef.size(), ", coverage=", inner->coverage(nodeRef.size()), "):");
             
-            for (size_t i = 0; i < node.size(); ++i) {
+            for (size_t i = 0; i < nodeRef.size(); ++i) {
                 printIndent();
                 out.println("  [", i, "] ", inner->interval(i));
                 dumpSubtree(out, inner->child(i), distanceToLeaf - 1, indent + 2);
             }
         } else {
             CommaPrinter comma;
-            LeafNode* leaf = node.asLeaf();
+            LeafNode* leaf = nodeRef.asLeaf();
             printIndent();
-            out.print("Leaf(size=", node.size(), "): ");
-            for (size_t i = 0; i < node.size(); ++i)
+            out.print("Leaf(size=", nodeRef.size(), "): ");
+            for (size_t i = 0; i < nodeRef.size(); ++i)
                 out.print(comma, leaf->interval(i), "=", leaf->value(i));
             out.println();
         }
     }
 
-    NodePtr m_root { };
+    NodeRef m_root { };
     Interval m_rootInterval { T{}, T{} };
     unsigned m_height { 0 };
 
