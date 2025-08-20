@@ -384,12 +384,12 @@ public:
     RegisterRange() = default;
 
     struct AllocatedInterval {
-        Tmp tmp;
         Interval interval;
+        Tmp tmp;
 
-        AllocatedInterval(AllocatedIntervalSet::iterator& iter)
-        : tmp(iter.value())
-        , interval(iter.interval())
+        AllocatedInterval(const std::pair<Interval, Tmp>& pair)
+        : interval(pair.first)
+        , tmp(pair.second)
         { }
 
         bool operator<(const AllocatedInterval& other) const
@@ -486,10 +486,10 @@ private:
     {
         for (auto interval : range.intervals()) {
             while (true) {
-                auto iter = allocatedSet.find(interval);
-                if (iter == allocatedSet.end())
+                auto intervalAndTmp = allocatedSet.find(interval);
+                if (!intervalAndTmp)
                     break;
-                AllocatedInterval conflict = { iter };
+                AllocatedInterval conflict = { *intervalAndTmp };
                 if (func(conflict) == IterationStatus::Done)
                     return IterationStatus::Done;
                 if (interval.end() <= conflict.interval.end())
