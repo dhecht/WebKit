@@ -288,31 +288,21 @@ static void stressTest(IntervalOrdering ordering)
         Point end = start + sizeDist(gen);
         Interval query = { start, end };
         
-        bool shouldOverlap = false;
-        Value expectedValue = 0;
+        std::optional<std::pair<Interval, Value>> expected;
         for (const auto& data : currentlyInserted) {
             if (query.overlaps(data.first)) {
-                shouldOverlap = true;
-                expectedValue = data.second;
+                expected = std::make_pair(data.first, data.second);
                 break;
             }
         }
         dataLogLnIf(IntervalSetTest::verbose, "Testing: random interval=", query);
 
-        EXPECT_EQ(shouldOverlap, intervalSet.hasOverlap(query));
+        EXPECT_EQ(expected.has_value(), intervalSet.hasOverlap(query));
         auto found = intervalSet.find(query);
-        if (shouldOverlap) {
+        if (expected) {
             EXPECT_TRUE(found);
-            // The found interval should be the first overlapping interval from our test data
-            Interval expectedInterval;
-            for (const auto& data : currentlyInserted) {
-                if (query.overlaps(data.first)) {
-                    expectedInterval = data.first;
-                    break;
-                }
-            }
-            EXPECT_EQ(found->first, expectedInterval);
-            EXPECT_EQ(found->second, expectedValue);
+            EXPECT_EQ(found->first, expected->first);
+            EXPECT_EQ(found->second, expected->second);
         } else {
             EXPECT_FALSE(found);
         }
