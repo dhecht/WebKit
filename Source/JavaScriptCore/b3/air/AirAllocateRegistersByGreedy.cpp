@@ -461,15 +461,13 @@ public:
 
     void dump(PrintStream& out) const
     {
-        auto dumpSet = [&out](const AllocatedIntervalSet&) {
+        auto dumpSet = [&out](const AllocatedIntervalSet& allocationSet) {
             CommaPrinter comma;
             out.print("[");
-#if 0
-            for (auto& alloc : allocationSet) {
+            for (auto alloc : allocationSet) {
                 out.print(comma);
-                out.print(alloc);
+                out.print(AllocatedInterval(alloc));
             }
-#endif
             out.print("]");
         };
 
