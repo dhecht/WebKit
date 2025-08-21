@@ -674,41 +674,21 @@ private:
     std::pair<NodeRef, Interval> insertInNodeSplitIfNeeded(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
     {
         NodeRef* nodeRef = path[depth].nodeRef;
-        auto insertionIndex = path[depth].index;
-        auto node = nodeRef->template as<NodeType>();
         size_t nodeSize = nodeRef->size();
         ASSERT(nodeSize <= NodeType::capacity);
 
-        if (nodeSize == NodeType::capacity) [[unlikely]] {
-            if (tryRedistributeLeftAndInsert<NodeType>(path, depth, interval, value))
-                return { NodeRef(), Interval() };
-            constexpr size_t splitPoint = NodeType::capacity / 2;
-            // Node is full, need to split
-            auto newNode = allocNode<NodeType>();
-
-            for (size_t i = splitPoint; i < nodeSize; ++i) {
-                newNode->intervals[i - splitPoint] = node->intervals[i];
-                newNode->payloads[i - splitPoint] = node->payloads[i];
-            }
-            size_t newNodeSize = nodeSize - splitPoint;
-            nodeSize = splitPoint;
-            
-            if (insertionIndex < splitPoint) {
-                node->insertAt(nodeSize, insertionIndex, interval, value);
-            } else {
-                insertionIndex -= splitPoint;
-                newNode->insertAt(newNodeSize, insertionIndex, interval, value);
-            }            
+        if (nodeSize < NodeType::capacity) [[likely]] {
+            auto insertionIndex = path[depth].index;
+            auto node = nodeRef->template as<NodeType>();
+            node->insertAt(nodeSize, insertionIndex, interval, value);
             nodeRef->setSize(nodeSize);
-            updateCoverage(path, depth, node->coverage(nodeSize));
-            return { NodeRef(newNode, newNodeSize), newNode->coverage(newNodeSize) };
+            if (isFirstOrLastIndex(*nodeRef, insertionIndex))
+                updateCoverage(path, depth, node->coverage(nodeSize));
+            return { NodeRef(), Interval() };
         }
-
-        node->insertAt(nodeSize, insertionIndex, interval, value);
-        nodeRef->setSize(nodeSize);
-        if (isFirstOrLastIndex(*nodeRef, insertionIndex))
-            updateCoverage(path, depth, node->coverage(nodeSize));
-        return { NodeRef(), Interval() };
+        if (tryRedistributeLeftAndInsert<NodeType>(path, depth, interval, value))
+            return { NodeRef(), Interval() };
+        return splitNodeAndInsert<NodeType>(path, depth, interval, value); 
     }
 
     template<typename NodeType>
@@ -744,6 +724,35 @@ private:
         nodeRef->setSize(nodeSize);
         updateCoverage(path, depth, node->coverage(nodeSize));
         return true;
+    }
+
+    template<typename NodeType>
+    std::pair<NodeRef, Interval> splitNodeAndInsert(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value) 
+    {
+        NodeRef* nodeRef = path[depth].nodeRef;
+        auto insertionIndex = path[depth].index;
+        auto node = nodeRef->template as<NodeType>();
+        size_t nodeSize = nodeRef->size();
+        constexpr size_t splitPoint = NodeType::capacity / 2;
+        // Node is full, need to split
+        auto newNode = allocNode<NodeType>();
+
+        for (size_t i = splitPoint; i < nodeSize; ++i) {
+            newNode->intervals[i - splitPoint] = node->intervals[i];
+            newNode->payloads[i - splitPoint] = node->payloads[i];
+        }
+        size_t newNodeSize = nodeSize - splitPoint;
+        nodeSize = splitPoint;
+        
+        if (insertionIndex < splitPoint) {
+            node->insertAt(nodeSize, insertionIndex, interval, value);
+        } else {
+            insertionIndex -= splitPoint;
+            newNode->insertAt(newNodeSize, insertionIndex, interval, value);
+        }            
+        nodeRef->setSize(nodeSize);
+        updateCoverage(path, depth, node->coverage(nodeSize));
+        return { NodeRef(newNode, newNodeSize), newNode->coverage(newNodeSize) };
     }
 
     template<typename NodeType>
