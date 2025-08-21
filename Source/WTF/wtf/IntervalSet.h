@@ -417,46 +417,97 @@ private:
     class Path : public Vector<PathEntry, 8>
     {
         friend class iterator;
-        
+        struct TraverseLeft {
+            static bool hasMoreChildren(const PathEntry& entry)
+            {
+                // If index != 0, then we can traverse left at this level.
+                return entry.index;
+            }
+
+            static size_t nextSubtreeIndex(const PathEntry& entry)
+            {
+                ASSERT(entry.index);
+                // Left sibling is in the previous subtree.
+                return entry.index - 1;
+            }
+
+            static size_t descendIndex(const NodeRef nodeRef)
+            {
+                ASSERT(nodeRef.size());
+                // Descend down the right subtrees.
+                return nodeRef.size() - 1;
+            }
+        };
+
+        struct TraverseRight {
+            static bool hasMoreChildren(const PathEntry& entry)
+            {
+                // If index != size() - 1, then we can traverse right at this level.
+                return entry.index < entry.nodeRef->size() - 1;
+            }
+
+            static size_t nextSubtreeIndex(const PathEntry& entry)
+            {
+                ASSERT(entry.index < entry.nodeRef->size() - 1);
+                return entry.index + 1;
+            }
+
+            static size_t descendIndex(const NodeRef nodeRef)
+            {
+                ASSERT_UNUSED(nodeRef, nodeRef.size());
+                // Descend down the left subtrees.
+                return 0;
+            }
+        };
+
+        template<typename Traverser>
+        void findCousin()
+        {
+            int initialDepth = this->size() - 1;
+            if (!initialDepth) {
+                this->clear(); // Root has no cousins
+                return;
+            }
+            // Ascend up until we find a node with indicies to the left.
+            int depth = initialDepth - 1;
+            for (; depth >= 0; depth--) {
+                PathEntry& innerEntry = this->at(depth);
+                if (Traverser::hasMoreChildren(innerEntry))
+                    break;
+            }
+            if (depth < 0) {
+                // Exhausted all indicies of the root node.
+                this->clear();
+                return;
+            }
+            // Descend down the right-most edge of the left subtree.
+            PathEntry& innerEntry = this->at(depth);
+            innerEntry.index = Traverser::nextSubtreeIndex(innerEntry);
+            depth++;
+            NodeRef* childRef = &innerEntry.nodeRef->asInner()->child(innerEntry.index);
+            for (; depth < initialDepth; depth++) {
+                ASSERT(childRef->size());
+                size_t childIndex = Traverser::descendIndex(*childRef);
+                this->at(depth).nodeRef = childRef;
+                this->at(depth).index = childIndex;
+                childRef = &childRef->asInner()->child(childIndex);
+            }
+            ASSERT(childRef->size());
+            this->at(depth).nodeRef = childRef;
+            this->at(depth).index = Traverser::descendIndex(*childRef);
+        }
+
         // Advances to the next index of the leaf node, if exists. If the current leaf node
         // is exhausted, advance to next leaf node and set index to 0.
         void nextIndexInLeaf()
         {
             ASSERT(this->size());
-            int height = this->size() - 1;
             PathEntry& leafEntry = this->last();
             if (++leafEntry.index < leafEntry.nodeRef->size()) [[likely]]
                 return;
-            if (!height) {
-                // Tree is a single leaf - reached end
-                this->clear();
-                return;
-            }
-            int depth = height - 1; // Deepest inner node level
-            // Ascend up the tree until we find a node with indices to the right
-            for (; depth >= 0; depth--) {
-                PathEntry& innerEntry = this->at(depth);
-                if (innerEntry.index < innerEntry.nodeRef->size() - 1)
-                    break;
-            }
-            if (depth < 0) {
-                // Exhausted all indices of the root node.
-                this->clear();
-                return;
-            }
-            // Descend down the left-most edges of the next subtree
-            PathEntry& innerEntry = this->at(depth);
-            innerEntry.index++;
-            depth++;
-            NodeRef* childRef = &innerEntry.nodeRef->asInner()->child(innerEntry.index);
-            for (; depth < height; depth++) {
-                this->at(depth).nodeRef = childRef;
-                this->at(depth).index = 0;
-                childRef = &childRef->asInner()->child(0);
-            }
-            this->at(depth).nodeRef = childRef;
-            this->at(depth).index = 0;
-            ASSERT(childRef->size());
+            // Move on to the next leaf node, if exists.
+            findCousin<TraverseRight>();
+            ASSERT(!this->size() || !this->last().index);
         }
     };
 
@@ -598,6 +649,21 @@ private:
         ASSERT(nodeSize <= NodeType::capacity);
 
         if (nodeSize == NodeType::capacity) [[unlikely]] {
+#if 0
+            // Get left cousin
+            // If left cousin is not full:
+            //.  Transfer left
+            //   Calc new insertionIndex in which node
+            //.  update sizes for both
+            //.  updateCoverage for both
+            //.  done
+            // Otherwise, repeat with right
+            // Otherwise, newNode
+            Path cousinPath = path;
+            cousinPath.resise(depth + 1);
+            cousinPath.findCousin<Path::TraverseLeft>(depth);
+#endif
+
             constexpr size_t splitPoint = NodeType::capacity / 2;
             // Node is full, need to split
             auto newNode = allocNode<NodeType>();
