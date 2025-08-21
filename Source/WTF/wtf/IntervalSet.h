@@ -273,6 +273,22 @@ private:
             return { intervals[0].begin(), intervals[size - 1].end() };
         }
 
+        void shiftLeftFrom(size_t& size, NodeImpl* rightNode, size_t& rightSize, size_t count)
+        {
+            ASSERT(size + count <= capacity);
+            ASSERT(count <= rightSize);
+            for (size_t i = 0; i < count; i++) {
+                intervals[i + size] = rightNode->intervals[i];
+                payloads[i + size] = rightNode->payloads[i];
+            }
+            size += count;
+            for (size_t i = 0; i < rightSize - count; i++) {
+                rightNode->intervals[i] = rightNode->intervals[i + count];
+                rightNode->payloads[i] = rightNode->payloads[i + count];
+            }
+            rightSize -= count;
+        }
+
         // XXX: maybe move this to NodePtr so it can directly update size?
         void insertAt(size_t& size, size_t index, const Interval& interval, const Payload& value)
         {
@@ -416,7 +432,35 @@ private:
 
     class Path : public Vector<PathEntry, 8>
     {
-        friend class iterator;
+        using Base = Vector<PathEntry, 8>;
+
+    public:
+        Path() = default;
+
+        Path(const Path& from, size_t depth)
+        : Base(from)
+        {
+            ASSERT(this->size() > depth);
+            this->resize(depth + 1);
+        }
+
+        // Advances to the next index of the leaf node, if exists. If the current leaf node
+        // is exhausted, advance to next leaf node and set index to 0.
+        void nextIndexInLeaf()
+        {
+            ASSERT(this->size());
+            PathEntry& leafEntry = this->last();
+            if (++leafEntry.index < leafEntry.nodeRef->size()) [[likely]]
+                return;
+            // Move on to the next leaf node, if exists.
+            toRightCousin();
+            ASSERT(!this->size() || !this->last().index);
+        }
+
+        void toLeftCousin() { toCousin<TraverseLeft>(); }
+        void toRightCousin() { toCousin<TraverseRight>(); }
+    
+    private:
         struct TraverseLeft {
             static bool hasMoreChildren(const PathEntry& entry)
             {
@@ -461,7 +505,7 @@ private:
         };
 
         template<typename Traverser>
-        void findCousin()
+        void toCousin()
         {
             int initialDepth = this->size() - 1;
             if (!initialDepth) {
@@ -495,19 +539,6 @@ private:
             ASSERT(childRef->size());
             this->at(depth).nodeRef = childRef;
             this->at(depth).index = Traverser::descendIndex(*childRef);
-        }
-
-        // Advances to the next index of the leaf node, if exists. If the current leaf node
-        // is exhausted, advance to next leaf node and set index to 0.
-        void nextIndexInLeaf()
-        {
-            ASSERT(this->size());
-            PathEntry& leafEntry = this->last();
-            if (++leafEntry.index < leafEntry.nodeRef->size()) [[likely]]
-                return;
-            // Move on to the next leaf node, if exists.
-            findCousin<TraverseRight>();
-            ASSERT(!this->size() || !this->last().index);
         }
     };
 
@@ -649,21 +680,8 @@ private:
         ASSERT(nodeSize <= NodeType::capacity);
 
         if (nodeSize == NodeType::capacity) [[unlikely]] {
-#if 0
-            // Get left cousin
-            // If left cousin is not full:
-            //.  Transfer left
-            //   Calc new insertionIndex in which node
-            //.  update sizes for both
-            //.  updateCoverage for both
-            //.  done
-            // Otherwise, repeat with right
-            // Otherwise, newNode
-            Path cousinPath = path;
-            cousinPath.resise(depth + 1);
-            cousinPath.findCousin<Path::TraverseLeft>(depth);
-#endif
-
+            if (tryRedistributeLeftAndInsert<NodeType>(path, depth, interval, value))
+                return { NodeRef(), Interval() };
             constexpr size_t splitPoint = NodeType::capacity / 2;
             // Node is full, need to split
             auto newNode = allocNode<NodeType>();
@@ -691,6 +709,41 @@ private:
         if (isFirstOrLastIndex(*nodeRef, insertionIndex))
             updateCoverage(path, depth, node->coverage(nodeSize));
         return { NodeRef(), Interval() };
+    }
+
+    template<typename NodeType>
+    bool tryRedistributeLeftAndInsert(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
+    {
+        NodeRef* nodeRef = path[depth].nodeRef;
+        auto insertionIndex = path[depth].index;
+        auto node = nodeRef->template as<NodeType>();
+        size_t nodeSize = nodeRef->size();
+
+        Path leftPath(path, depth);
+        leftPath.toLeftCousin();
+        if (leftPath.isEmpty())
+            return false;
+        
+        NodeRef* leftNodeRef = leftPath[depth].nodeRef;
+        size_t leftNodeSize = leftNodeRef->size();
+        if (leftNodeSize == NodeType::capacity)
+            return false;
+
+        auto leftNode = leftNodeRef->template as<NodeType>();
+        size_t newSize = (leftNodeSize + nodeSize) / 2;
+        ASSERT(newSize < NodeType::capacity);
+        size_t numToMove = nodeSize - newSize;
+        leftNode->shiftLeftFrom(leftNodeSize, node, nodeSize, numToMove);
+        ASSERT(nodeSize == newSize);
+        if (insertionIndex < numToMove)
+            leftNode->insertAt(leftNodeSize, leftNodeSize + insertionIndex - numToMove, interval, value);
+        else
+            node->insertAt(nodeSize, insertionIndex - numToMove, interval, value);
+        leftNodeRef->setSize(leftNodeSize);
+        updateCoverage(leftPath, depth, leftNode->coverage(leftNodeSize));
+        nodeRef->setSize(nodeSize);
+        updateCoverage(path, depth, node->coverage(nodeSize));
+        return true;
     }
 
     template<typename NodeType>
