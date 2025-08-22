@@ -457,7 +457,7 @@ private:
         : Base(from)
         {
             ASSERT(this->size() > depth);
-            this->resize(depth + 1);
+            this->shrink(depth + 1);
         }
 
         // Advances to the next index of the leaf node, if exists. If the current leaf node
