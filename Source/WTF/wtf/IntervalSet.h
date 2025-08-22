@@ -448,7 +448,7 @@ private:
     public:
         Path() = default;
 
-        Path(const Path& from, size_t depth)
+        Path(const Path& from, unsigned depth)
         : Base(from)
         {
             ASSERT(this->size() > depth);
@@ -476,7 +476,7 @@ private:
             static bool hasMoreChildren(const PathEntry& entry)
             {
                 // If index != 0, then we can traverse left at this level.
-                return entry.index;
+                return !!entry.index;
             }
 
             static size_t nextSubtreeIndex(const PathEntry& entry)
