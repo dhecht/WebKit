@@ -387,9 +387,9 @@ public:
         Interval interval;
         Tmp tmp;
 
-        AllocatedInterval(const AllocatedIntervalSet::iterator& it)
-        : interval(it.interval())
-        , tmp(it.value())
+        AllocatedInterval(const std::pair<Interval, Tmp>& pair)
+        : interval(pair.first)
+        , tmp(pair.second)
         { }
 
         bool operator<(const AllocatedInterval& other) const
@@ -461,15 +461,13 @@ public:
 
     void dump(PrintStream& out) const
     {
-        auto dumpSet = [&out](const AllocatedIntervalSet&) {
+        auto dumpSet = [&out](const AllocatedIntervalSet& allocationSet) {
             CommaPrinter comma;
             out.print("[");
-#if 0
             for (auto alloc : allocationSet) {
                 out.print(comma);
                 out.print(AllocatedInterval(alloc));
             }
-#endif
             out.print("]");
         };
 
@@ -485,18 +483,17 @@ private:
     static IterationStatus forEachConflictImpl(AllocatedIntervalSet& allocatedSet, const LiveRange& range, const Func& func)
     {
         for (auto interval : range.intervals()) {
-            auto it = allocatedSet.find(interval);
-            if (it == allocatedSet.end())
-                continue;
             while (true) {
-                AllocatedInterval conflict = { it };
+                auto intervalAndTmp = allocatedSet.find(interval);
+                if (!intervalAndTmp)
+                    break;
+                AllocatedInterval conflict = { *intervalAndTmp };
                 if (func(conflict) == IterationStatus::Done)
                     return IterationStatus::Done;
-                ++it;
-                if (it == allocatedSet.end())
-                    return IterationStatus::Continue;
-                if (!it.interval().overlaps(interval))
-                    break;
+                if (interval.end() <= conflict.interval.end())
+                    break; // There can't exist other conflicts with interval
+                // Search for other conflicts with interval that occur after this one
+                interval = { conflict.interval.end(), interval.end() };
             }
         }
         return IterationStatus::Continue;
@@ -1541,7 +1538,6 @@ private:
         Reg bestEvictReg;
         float minSpillCost = unspillableCost;
         BitVector visited(m_code.numTmps(bank));
-        BitVector evictTmps(m_code.numTmps(bank));
         LiveRange& liveRange = tmpData.liveRange;
         Width width = widthForConflicts<bank>(tmp);
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
@@ -1573,7 +1569,6 @@ private:
             if (conflictsSpillCost < minSpillCost) {
                 minSpillCost = conflictsSpillCost;
                 bestEvictReg = r;
-                evictTmps.swap(visited);
             }
         }
         if (minSpillCost >= tmpData.spillCost()) {
@@ -1583,12 +1578,13 @@ private:
             return false;
         }
         // It's cheaper to spill all the already-assigned conflicting tmps, so evict them in favor of assigning 'tmp'.
-        for (auto index : evictTmps) {
-            Tmp conflictTmp = Tmp::tmpForIndex(bank, index);
-            TmpData& conflictData = m_map[conflictTmp];
-            evict(conflictTmp, conflictData, bestEvictReg);
-            setStageAndEnqueue(conflictTmp, conflictData, Stage::TryAllocate);
-        }
+        m_regRanges[bestEvictReg].forEachConflict(liveRange, widthForConflicts<bank>(tmp),
+            [&](auto& conflict) -> IterationStatus {
+                TmpData& conflictData = m_map[conflict.tmp];
+                evict(conflict.tmp, conflictData, bestEvictReg);
+                setStageAndEnqueue(conflict.tmp, conflictData, Stage::TryAllocate);
+                return IterationStatus::Continue;
+            });
         assign(tmp, tmpData, bestEvictReg);
         return true;
     }

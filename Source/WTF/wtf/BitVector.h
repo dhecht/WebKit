@@ -379,8 +379,6 @@ public:
         
     WTF_EXPORT_PRIVATE void shiftRightByMultipleOf64(size_t);
 
-    void swap(BitVector& other) { std::swap(m_bitsOrPointer, other.m_bitsOrPointer); }
-
 private:
     friend class JSC::CachedBitVector;
     friend class FixedBitVector;

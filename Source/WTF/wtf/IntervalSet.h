@@ -173,34 +173,30 @@ public:
     }
 
     // returns the Interval and Value for the first interval, if any, that overlaps with the query interval
-    iterator find(const Interval& query) const
+    std::optional<std::pair<Interval, Value>> find(const Interval& query) const
     {
         if (!query.overlaps(m_rootInterval))
-            return end();
-
-        Path path;
+            return std::nullopt;
 
         ASSERT(m_root);
-        NodeRef* nodeRef = const_cast<NodeRef*>(&m_root);
+        NodeRef nodeRef = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
-            InnerNode* inner = nodeRef->asInner();
-            size_t pos = inner->firstIntervalEndAfter(nodeRef->size(), query.begin());
-            if (pos == nodeRef->size())
-                return end(); // query is entirely after this subtree
+            InnerNode* inner = nodeRef.asInner();
+            size_t pos = inner->firstIntervalEndAfter(nodeRef.size(), query.begin());
+            if (pos == nodeRef.size())
+                return std::nullopt; // query is entirely after this subtree
             if (query.end() <= inner->interval(pos).begin())
-                return end(); // query is entirely before this subtree
-            path.append({ nodeRef, pos });
+                return std::nullopt; // query is entirely before this subtree
             // Otherwise, there may exist an overlapping interval in this subtree
-            nodeRef = &inner->child(pos);
+            nodeRef = inner->child(pos);
         }
-        LeafNode* leaf = nodeRef->asLeaf();
-        size_t index = leaf->firstIntervalEndAfter(nodeRef->size(), query.begin());
-        path.append({ nodeRef, index });
-        ASSERT(index < nodeRef->size()); // coverage check at parent level ensures this
+        LeafNode* leaf = nodeRef.asLeaf();
+        size_t index = leaf->firstIntervalEndAfter(nodeRef.size(), query.begin());
+        ASSERT(index < nodeRef.size()); // coverage check at parent level ensures this
         ASSERT(query.begin() < leaf->interval(index).end());
         if (query.end() <= leaf->interval(index).begin())
-            return end();
-        return iterator(WTFMove(path));
+            return std::nullopt;
+        return std::make_pair(leaf->interval(index), leaf->value(index));
     }
 
     // Returns true iff any stored interval overlaps with the query interval
