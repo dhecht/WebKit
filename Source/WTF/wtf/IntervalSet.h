@@ -422,12 +422,9 @@ private:
 
         size_t subtreeForInsert(size_t size, T endPoint) const
         {
+            ASSERT(size);
             ASSERT(size <= innerOrder);
-            // XXX: this only happens when the tree is empty or when creating a new level. Could we remove from this path?
-            if (!size) [[unlikely]]
-                return 0;
             for (size_t i = 0; i < size - 1; i++) {
-                // XXX: or maybe keep adjacent intervals together
                 if (endPoint <= this->intervals[i + 1].begin())
                     return i;
             }
