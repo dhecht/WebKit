@@ -243,6 +243,8 @@ public:
         dumpSubtree(out, m_root, m_height, 0);
     }
 
+    unsigned height() const { return m_height; }
+
 private:
     struct LeafNode;
     struct InnerNode;

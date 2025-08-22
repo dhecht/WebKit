@@ -113,10 +113,7 @@ TEST(WTF_IntervalSet, SingleInterval)
 TEST(WTF_IntervalSet, EraseTests)
 {
     IntervalSet<Point, Value> intervalSet;
-    
-    // Test erasing from empty set (should not crash)
-    // Note: This would actually assert in debug builds since erase expects the interval to exist
-    
+
     // Test basic erase functionality
     intervalSet.insert({ 10, 20 }, 100);
     intervalSet.insert({ 30, 40 }, 200);
@@ -240,7 +237,8 @@ static void stressTest(IntervalOrdering ordering)
         }
     };
 
-    IntervalSet<Point, Value, numCacheLines> intervalSet;
+    using TestIntervalSet = IntervalSet<Point, Value, numCacheLines>;
+    TestIntervalSet intervalSet;
     
     std::mt19937 gen(testing::UnitTest::GetInstance()->random_seed());
     std::uniform_int_distribution<size_t> gapDist(0, maxGap);
@@ -296,6 +294,15 @@ static void stressTest(IntervalOrdering ordering)
         
         maybeEraseInterval();
     }
+
+    // Validate that nodes are densely populated.
+    size_t capacity = TestIntervalSet::leafOrder;
+    unsigned expectedHeight = 0;
+    while (capacity < currentlyInserted.size()) {
+        capacity *= TestIntervalSet::innerOrder;
+        expectedHeight++;
+    }
+    EXPECT_EQ(intervalSet.height(), expectedHeight);
 
     // Validate iterator traversal: count and ordering
     size_t iteratorCount = 0;
@@ -357,7 +364,7 @@ static void stressTest(IntervalOrdering ordering)
     }
 }
 
-static constexpr unsigned stressNumCacheLines = 3;
+static constexpr unsigned stressNumCacheLines = 2;
 
 TEST(WTF_IntervalSet, AscendingStressTest)
 {
