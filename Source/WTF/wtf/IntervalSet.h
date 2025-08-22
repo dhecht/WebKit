@@ -787,7 +787,7 @@ private:
         if (insertionIndex <= nodeSize)
             node->insertAt(nodeSize, insertionIndex, interval, value);
         else
-            rightNode->insertAt(rightNodeSize, insertionIndex - numToMove, interval, value);
+            rightNode->insertAt(rightNodeSize, insertionIndex - nodeSize, interval, value);
         nodeRef->setSize(nodeSize);
         updateCoverage(path, depth, node->coverage(nodeSize));
         rightNodeRef->setSize(rightNodeSize);
