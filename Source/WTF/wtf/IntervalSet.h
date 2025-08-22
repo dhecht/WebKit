@@ -281,12 +281,28 @@ private:
                 intervals[i + size] = rightNode->intervals[i];
                 payloads[i + size] = rightNode->payloads[i];
             }
-            size += count;
             for (size_t i = 0; i < rightSize - count; i++) {
                 rightNode->intervals[i] = rightNode->intervals[i + count];
                 rightNode->payloads[i] = rightNode->payloads[i + count];
             }
+            size += count;
             rightSize -= count;
+        }
+
+        void shiftRightTo(size_t& size, NodeImpl* rightNode, size_t& rightSize, size_t count)
+        {
+            ASSERT(rightSize + count <= capacity);
+            ASSERT(count <= size);
+            for (size_t i = rightSize + count - 1; i >= count; i--) {
+                rightNode->intervals[i] = rightNode->intervals[i - count];
+                rightNode->payloads[i] = rightNode->payloads[i - count];
+            }
+            for (size_t i = 0; i < count; i++) {
+                rightNode->intervals[i] = intervals[size - count + i];
+                rightNode->payloads[i] = payloads[size - count + i];
+            }
+            size -= count;
+            rightSize += count;
         }
 
         // XXX: maybe move this to NodePtr so it can directly update size?
@@ -688,6 +704,8 @@ private:
         }
         if (tryRedistributeLeftAndInsert<NodeType>(path, depth, interval, value))
             return { NodeRef(), Interval() };
+        if (tryRedistributeRightAndInsert<NodeType>(path, depth, interval, value))
+            return { NodeRef(), Interval() };
         return splitNodeAndInsert<NodeType>(path, depth, interval, value); 
     }
 
@@ -704,6 +722,12 @@ private:
         if (leftPath.isEmpty())
             return false;
         
+        // Note that since interval begin is used as the boundary between nodes and intervals are not allowed to
+        // overlap, insertionIndex will never be 0 if there is a left node -- that node would have been chosen instead.
+        // Therefore if there is only one empty slot, the empty slot can be put into the right node without danger of
+        // shifting the insertionIndex into the left node.
+        ASSERT(0 < insertionIndex && insertionIndex <= nodeSize);
+
         NodeRef* leftNodeRef = leftPath[depth].nodeRef;
         size_t leftNodeSize = leftNodeRef->size();
         if (leftNodeSize == NodeType::capacity)
@@ -723,6 +747,51 @@ private:
         updateCoverage(leftPath, depth, leftNode->coverage(leftNodeSize));
         nodeRef->setSize(nodeSize);
         updateCoverage(path, depth, node->coverage(nodeSize));
+        return true;
+    }
+
+    template<typename NodeType>
+    bool tryRedistributeRightAndInsert(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
+    {
+        NodeRef* nodeRef = path[depth].nodeRef;
+        auto insertionIndex = path[depth].index;
+        auto node = nodeRef->template as<NodeType>();
+        size_t nodeSize = nodeRef->size();
+
+        Path rightPath(path, depth);
+        rightPath.toRightCousin();
+        if (rightPath.isEmpty())
+            return false;
+        
+        NodeRef* rightNodeRef = rightPath[depth].nodeRef;
+        size_t rightNodeSize = rightNodeRef->size();
+        if (rightNodeSize == NodeType::capacity)
+            return false;
+
+        auto rightNode = rightNodeRef->template as<NodeType>();
+        // If the insertion index is after all items of the left node and we only have one empty slot
+        // we need to just insert into the head of the right node.
+        if (insertionIndex == NodeType::capacity) {
+            rightNode->insertAt(rightNodeSize, 0, interval, value);
+            rightNodeRef->setSize(rightNodeSize);
+            updateCoverage(rightPath, depth, rightNode->coverage(rightNodeSize));
+            return true;
+        }
+        // Now, we know that insertionINdex < capacity, so if there's only one empty slot between both nodes,
+        // we should put it in the left node and the insertion point will still always be in the left node.
+        size_t newSize = (rightNodeSize + nodeSize) / 2;
+        ASSERT(newSize < NodeType::capacity);
+        size_t numToMove = nodeSize - newSize;
+        node->shiftRightTo(nodeSize, rightNode, rightNodeSize, numToMove);
+        ASSERT(nodeSize == newSize);
+        if (insertionIndex <= nodeSize)
+            node->insertAt(nodeSize, insertionIndex, interval, value);
+        else
+            rightNode->insertAt(rightNodeSize, insertionIndex - numToMove, interval, value);
+        nodeRef->setSize(nodeSize);
+        updateCoverage(path, depth, node->coverage(nodeSize));
+        rightNodeRef->setSize(rightNodeSize);
+        updateCoverage(rightPath, depth, rightNode->coverage(rightNodeSize));
         return true;
     }
 
