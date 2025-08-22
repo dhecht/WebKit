@@ -346,8 +346,8 @@ private:
             return size;
         }
 
-        Interval intervals[order];
-        Payload payloads[order];
+        std::array<Interval, order> intervals;
+        std::array<Payload, order> payloads;
     };
 
     class NodeRef {
