@@ -47,7 +47,6 @@ public:
     
     static constexpr size_t cpuCacheLineSize = 64;
     static constexpr size_t targetNodeSize = cacheLinesPerNode * cpuCacheLineSize;
-    static constexpr size_t nodesPerSlab = 8;
     
     // Calculate optimal order for each node type based on target cache line usage
     static constexpr size_t calculateLeafOrder() {
@@ -73,11 +72,7 @@ public:
 
     ~IntervalSet()
     {
-#ifdef USE_SLAB
-        freeAllocations();
-#else
         freeAllNodes();
-#endif
         ASSERT(!assertOnlyNumNodes);
     }
 
@@ -846,48 +841,6 @@ private:
         return false;
     }
 
-#ifdef USE_SLAB
-    // FIXME: should be made more flexible.
-    static constexpr size_t allocSize = std::max(sizeof(InnerNode), sizeof(LeafNode));
-
-    template<typename NodeType>
-    NodeType* allocNode()
-    {
-        static_assert(std::is_base_of_v<Node, NodeType>);     
-        if (m_slabs.isEmpty() || m_slabOffset >= nodesPerSlab)
-            allocateSlab();
-        
-        NodeType* node = reinterpret_cast<NodeType*>(m_slabs.last() + m_slabOffset * allocSize);
-        ASSERT(!(reinterpret_cast<uintptr_t>(node) % cpuCacheLineSize)); // Ensure cache line alignment
-        ++m_slabOffset;
-        return node;
-    }
-
-    template<typename NodeType>
-    void freeNode(NodeType* node)
-    {
-        // In slab allocator, individual nodes cannot be freed
-        // Memory is freed when the entire slab is freed
-        UNUSED_PARAM(node);
-    }
-
-    void allocateSlab()
-    {
-        size_t slabSize = allocSize * nodesPerSlab;
-        char* slab = static_cast<char*>(fastAlignedMalloc(cpuCacheLineSize, slabSize));
-        m_slabs.append(slab);
-        m_slabOffset = 0;
-    }
-
-    void freeAllocations()
-    {
-        for (auto& slab : m_slabs)
-            fastAlignedFree(slab);
-        m_slabs.clear();
-        m_slabOffset = 0;
-    }
-
-#else
     template<typename NodeType>
     NodeType* allocNode()
     {
@@ -924,7 +877,6 @@ private:
         }
     }
 
-#endif
     void dumpSubtree(PrintStream& out, NodeRef nodeRef, unsigned distanceToLeaf, unsigned indent) const
     {
         auto printIndent = [&] {
@@ -957,14 +909,8 @@ private:
     Interval m_rootInterval { T{}, T{} };
     unsigned m_height { 0 };
 
-#ifdef USE_SLAB
-    // Slab allocator state
-    Vector<char*, 8> m_slabs;
-    size_t m_slabOffset { 0 };
-#else
 #if ASSERT_ENABLED
     unsigned assertOnlyNumNodes { 0 };
-#endif
 #endif
 };
 
