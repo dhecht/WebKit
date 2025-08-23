@@ -92,12 +92,12 @@ public:
         // Descend down the tree, recording the path taken.
         for (unsigned depth = 0; depth < m_height; depth++) {
             InnerNode* inner = nodeRef->asInner();        
-            size_t index = inner->findSubtree(nodeRef->size(), interval.end());
+            size_t index = inner->findSubtree(nodeRef->size(), interval.begin());
             path.append({ nodeRef, index });
             nodeRef = &inner->child(index);
         }
         // Found the correct leaf for the insert, now determine the index within that leaf.
-        size_t insertionIndex = nodeRef->asLeaf()->firstIntervalEndAfter(nodeRef->size(), interval.end());
+        size_t insertionIndex = nodeRef->asLeaf()->firstIntervalEndAfter(nodeRef->size(), interval.begin());
         path.append( { nodeRef, insertionIndex });
         ASSERT(path.size() == m_height + 1);
 
@@ -120,9 +120,9 @@ public:
             ASSERT(m_root.size() + newNode.size() == (m_height ? innerOrder : leafOrder) + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
-            newRoot->boundary(0) = m_rootMin;
+            newRoot->endBoundary(0) = m_rootMin;
             newRoot->child(0) = m_root;
-            newRoot->boundary(1) = newNodeCoverage;
+            newRoot->endBoundary(1) = newNodeCoverage;
             newRoot->child(1) = newNode;
             m_height++;
             m_root = NodeRef(newRoot, 2);
@@ -140,13 +140,14 @@ public:
 
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = nodeRef->asInner();
-            size_t index = inner->findSubtree(nodeRef->size(), interval.end());
+            size_t index = inner->findSubtree(nodeRef->size(), interval.begin());
             ASSERT(index < nodeRef->size());
             path.append({ nodeRef, index });
             nodeRef = &inner->child(index);
         }
         LeafNode* leaf = nodeRef->asLeaf();
         size_t eraseIndex = leaf->firstIntervalEndAfter(nodeRef->size(), interval.begin());
+        ASSERT(eraseIndex < nodeRef->size());
         ASSERT(leaf->interval(eraseIndex).begin() == interval.begin() && leaf->interval(eraseIndex).end() == interval.end());
         path.append({ nodeRef, eraseIndex });
 
@@ -177,7 +178,7 @@ public:
         NodeRef nodeRef = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = nodeRef.asInner();
-            size_t pos = inner->findSubtree(nodeRef.size(), query.end());
+            size_t pos = inner->findSubtree(nodeRef.size(), query.begin());
             nodeRef = inner->child(pos);
         }
         LeafNode* leaf = nodeRef.asLeaf();
@@ -200,7 +201,7 @@ public:
         NodeRef nodeRef = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = nodeRef.asInner();
-            size_t index = inner->findSubtree(nodeRef.size(), query.end());
+            size_t index = inner->findSubtree(nodeRef.size(), query.begin());
             nodeRef = inner->child(index);
         }
 
@@ -378,9 +379,9 @@ private:
             return this->payloads[index];
         }
 
-        T coverage(size_t)
+        T coverage(size_t size)
         {
-            return interval(0).begin();
+            return interval(size - 1).end();
         }
 
         // Find the least interval with end greater than the given point, and return the index, if exists.
@@ -398,7 +399,7 @@ private:
 
     struct InnerNode : public NodeImpl<T, NodeRef, innerOrder> {
 
-        T& boundary(size_t index)
+        T& endBoundary(size_t index)
         {
             ASSERT(index < innerOrder);
             return this->keys[index];
@@ -410,17 +411,17 @@ private:
             return this->payloads[index];
         }
 
-        T coverage(size_t)
+        T coverage(size_t size)
         {
-            return boundary(0);
+            return endBoundary(size - 1);
         }
 
         size_t findSubtree(size_t size, T point) const
         {
             ASSERT(size);
             ASSERT(size <= innerOrder);
-            for (size_t i = 0; i < size - 1; i++) {
-                if (point <= this->keys[i + 1])
+            for (size_t i = 0; i < size; i++) {
+                if (point < this->keys[i])
                     return i;
             }
             return size - 1;
@@ -640,23 +641,23 @@ private:
 
     // After an interval within a node, give by path and depth, is modified, propagate the new interval
     // information upwards, as necessary, in order to keep inner nodes' "coverage" intervals consistent.
-    void updateCoverage(const Path& path, int depth, T start)
+    void updateCoverage(const Path& path, int depth, T end)
     {
         ASSERT(depth >= 0);
         depth--; // So that depth is at the parent of the node with 'coverage'.
         while (depth >= 0) {
             const PathEntry& entry = path[depth];
             InnerNode* inner = entry.nodeRef->asInner();
-            inner->boundary(entry.index) = start;
+            inner->endBoundary(entry.index) = end;
 
-            if (entry.index) {
-                // Since first/last of this node was not modified, its coverage hasn't changed - no need to continue upward.
+            if (entry.index != entry.nodeRef->size() - 1) {
+                // Since last of this node was not modified, its coverage hasn't changed - no need to continue upward.
                 verifyCoverageConsistency(path, depth, inner->coverage(entry.nodeRef->size()));
                 return;
             }
             depth--;
         }
-        m_rootMin = start;
+        m_rootMin = end;
     }
 
     void verifyCoverageConsistency(const Path& path, int depth, T coverage)
@@ -667,7 +668,7 @@ private:
         while (depth >= 0) {
             const PathEntry& entry = path[depth];
             InnerNode* inner = entry.nodeRef->asInner();
-            ASSERT(inner->boundary(entry.index) == coverage);
+            ASSERT(inner->endBoundary(entry.index) == coverage);
             coverage = inner->coverage(entry.nodeRef->size());
             depth--;
         }
@@ -693,13 +694,13 @@ private:
             auto node = nodeRef->template as<NodeType>();
             node->insertAt(nodeSize, insertionIndex, key, value);
             nodeRef->setSize(nodeSize);
-            if (!insertionIndex)
+            if (insertionIndex == nodeSize - 1)
                 updateCoverage(path, depth, node->coverage(nodeSize));
             return { NodeRef(), T() };
         }
-        if (tryRedistributeLeftAndInsert<NodeType>(path, depth, key, value))
-            return { NodeRef(), T() };
         if (tryRedistributeRightAndInsert<NodeType>(path, depth, key, value))
+            return { NodeRef(), T() };
+        if (tryRedistributeLeftAndInsert<NodeType>(path, depth, key, value))
             return { NodeRef(), T() };
         return splitNodeAndInsert<NodeType>(path, depth, key, value);
     }
@@ -716,19 +717,20 @@ private:
         leftPath.toLeftCousin();
         if (leftPath.isEmpty())
             return false;
-        
-        // Note that since interval begin is used as the boundary between nodes and intervals are not allowed to
-        // overlap, insertionIndex will never be 0 if there is a left node -- the left node would have been chosen instead.
-        // Therefore if there is only one empty slot, the empty slot can be put into the right node without danger of
-        // shifting the insertionIndex into the left node.
-        ASSERT(0 < insertionIndex && insertionIndex <= nodeSize);
-
+    
         NodeRef* leftNodeRef = leftPath[depth].nodeRef;
         size_t leftNodeSize = leftNodeRef->size();
         if (leftNodeSize == NodeType::capacity)
             return false;
 
         auto leftNode = leftNodeRef->template as<NodeType>();
+        if (!insertionIndex) {
+            leftNode->insertAt(leftNodeSize, leftNodeSize, key, value);
+            leftNodeRef->setSize(leftNodeSize);
+            updateCoverage(leftPath, depth, leftNode->coverage(leftNodeSize));
+            return true;
+        }
+
         size_t newSize = (leftNodeSize + nodeSize) / 2;
         ASSERT(newSize < NodeType::capacity);
         size_t numToMove = nodeSize - newSize;
@@ -737,13 +739,12 @@ private:
         if (insertionIndex < numToMove) {
             insertionIndex = leftNodeSize + insertionIndex - numToMove;
             leftNode->insertAt(leftNodeSize, insertionIndex, key, value);
-            if (!insertionIndex)
-                updateCoverage(leftPath, depth, leftNode->coverage(leftNodeSize));
         } else {
             insertionIndex -= numToMove;
             node->insertAt(nodeSize, insertionIndex, key, value);
         }
         leftNodeRef->setSize(leftNodeSize);
+        updateCoverage(leftPath, depth, leftNode->coverage(leftNodeSize));
         nodeRef->setSize(nodeSize);
         updateCoverage(path, depth, node->coverage(nodeSize));
         return true;
@@ -773,7 +774,6 @@ private:
         if (insertionIndex == NodeType::capacity) {
             rightNode->insertAt(rightNodeSize, 0, key, value);
             rightNodeRef->setSize(rightNodeSize);
-            updateCoverage(rightPath, depth, rightNode->coverage(rightNodeSize));
             return true;
         }
         // Now, we know that insertionINdex < capacity, so if there's only one empty slot between both nodes,
@@ -813,14 +813,15 @@ private:
         size_t newNodeSize = nodeSize - splitPoint;
         nodeSize = splitPoint;
         
+        // XXX should this be <= ?
         if (insertionIndex < nodeSize) {
             node->insertAt(nodeSize, insertionIndex, key, value);
-            if (!insertionIndex)
-                updateCoverage(path, depth, node->coverage(nodeSize));
         } else {
             newNode->insertAt(newNodeSize, insertionIndex - nodeSize, key, value);
         }
         nodeRef->setSize(nodeSize);
+        // Always update coverage for the original node since we moved intervals to newNode
+        updateCoverage(path, depth, node->coverage(nodeSize));
         return { NodeRef(newNode, newNodeSize), newNode->coverage(newNodeSize) };
     }
 
@@ -841,7 +842,7 @@ private:
             return true;
         }
         node->removeAt(nodeSize, eraseIndex);
-        if (isFirstOrLastIndex(*nodeRef, eraseIndex))
+        if (eraseIndex == nodeSize)  // Was the last element
             updateCoverage(path, depth, node->coverage(nodeSize));
         nodeRef->setSize(nodeSize);
         return false;
@@ -897,7 +898,7 @@ private:
             
             for (size_t i = 0; i < nodeRef.size(); ++i) {
                 printIndent();
-                out.println("  [", i, "] boundary=", inner->boundary(i));
+                out.println("  [", i, "] endBoundary=", inner->endBoundary(i));
                 dumpSubtree(out, inner->child(i), distanceToLeaf - 1, indent + 2);
             }
         } else {
