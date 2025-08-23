@@ -55,7 +55,7 @@ public:
     }
     
     static constexpr size_t calculateInnerOrder() {
-        constexpr size_t sizePerOrder = sizeof(Interval) + sizeof(uintptr_t);
+        constexpr size_t sizePerOrder = sizeof(T) + sizeof(uintptr_t);
         return targetNodeSize / sizePerOrder;
     }
     
@@ -74,7 +74,7 @@ public:
         ASSERT(!assertOnlyNumNodes);
     }
 
-    bool isEmpty() const { return !m_rootInterval; }
+    bool isEmpty() const { return !m_root; }
 
     // Insert an interval-value pair. interval must not overlap with an existing interval.
     // Invalidates all iterators.
@@ -92,7 +92,7 @@ public:
         // Descend down the tree, recording the path taken.
         for (unsigned depth = 0; depth < m_height; depth++) {
             InnerNode* inner = nodeRef->asInner();        
-            size_t index = inner->subtreeForInsert(nodeRef->size(), interval.end());
+            size_t index = inner->findSubtree(nodeRef->size(), interval.end());
             path.append({ nodeRef, index });
             nodeRef = &inner->child(index);
         }
@@ -120,13 +120,13 @@ public:
             ASSERT(m_root.size() + newNode.size() == (m_height ? innerOrder : leafOrder) + 1);
             // Need to add another level to the tree.
             InnerNode* newRoot = allocNode<InnerNode>();
-            newRoot->interval(0) = m_rootInterval;
+            newRoot->boundary(0) = m_rootMin;
             newRoot->child(0) = m_root;
-            newRoot->interval(1) = newNodeCoverage;
+            newRoot->boundary(1) = newNodeCoverage;
             newRoot->child(1) = newNode;
             m_height++;
             m_root = NodeRef(newRoot, 2);
-            m_rootInterval = newRoot->coverage(2);
+            m_rootMin = newRoot->coverage(2);
         }
     }
 
@@ -135,15 +135,13 @@ public:
     void erase(const Interval& interval)
     {
         Path path;
-        ASSERT(interval.overlaps(m_rootInterval));
         ASSERT(m_root);
         NodeRef* nodeRef = &m_root;
 
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = nodeRef->asInner();
-            size_t index = inner->firstIntervalEndAfter(nodeRef->size(), interval.begin());
+            size_t index = inner->findSubtree(nodeRef->size(), interval.end());
             ASSERT(index < nodeRef->size());
-            ASSERT(inner->interval(index).begin() < interval.end());
             path.append({ nodeRef, index });
             nodeRef = &inner->child(index);
         }
@@ -165,7 +163,7 @@ public:
         if (removedNode) [[unlikely]] {
             ASSERT(!assertOnlyNumNodes);
             ASSERT(!m_root);
-            m_rootInterval = Interval();
+            m_rootMin = T();
             m_height = 0;
         }
     }
@@ -173,23 +171,19 @@ public:
     // Returns the Interval and Value for the first interval, if any, that overlaps with the query interval
     std::optional<std::pair<Interval, Value>> find(const Interval& query) const
     {
-        if (!query.overlaps(m_rootInterval))
+        if (!m_root)
             return std::nullopt;
-
-        ASSERT(m_root);
+            
         NodeRef nodeRef = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = nodeRef.asInner();
-            size_t pos = inner->firstIntervalEndAfter(nodeRef.size(), query.begin());
-            if (pos == nodeRef.size())
-                return std::nullopt; // query is entirely after this subtree
-            if (query.end() <= inner->interval(pos).begin())
-                return std::nullopt; // query is entirely before this subtree
+            size_t pos = inner->findSubtree(nodeRef.size(), query.end());
             nodeRef = inner->child(pos);
         }
         LeafNode* leaf = nodeRef.asLeaf();
         size_t index = leaf->firstIntervalEndAfter(nodeRef.size(), query.begin());
-        ASSERT(index < nodeRef.size()); // coverage check at parent level ensures this
+        if (index >= nodeRef.size())
+            return std::nullopt;
         ASSERT(query.begin() < leaf->interval(index).end());
         if (query.end() <= leaf->interval(index).begin())
             return std::nullopt;
@@ -200,32 +194,20 @@ public:
     // terminate before descending the full depth since the value is not needed.
     bool hasOverlap(const Interval& query) const
     {
-        if (!query.overlaps(m_rootInterval))
+        if (!m_root)
             return false;
-
-        ASSERT(m_root);
+            
         NodeRef nodeRef = m_root;
         for (unsigned depth = 0; depth < m_height; ++depth) {
             InnerNode* inner = nodeRef.asInner();
-            size_t index = inner->firstIntervalEndAfter(nodeRef.size(), query.begin());
-            if (index == nodeRef.size())
-                return false; // query starts after all intervals
-            // query start lands either within the pos subtree or the gap immediately preceding that subtree
-            ASSERT(query.begin() < inner->interval(index).end());
-            if (query.end() <= inner->interval(index).begin())
-                return false; // query is entirely in the gap before this subtree
-            if (inner->interval(index).end() <= query.end())
-                return true; // query spans subtree end point so it must overlap the last interval
-            if (query.begin() <= inner->interval(index).begin())
-                return true; // query spans subtree start point so it must overlap the first interval
-            // Otherwise, subtree encompasses query so need to search subtree
-            ASSERT(inner->interval(index).begin() < query.begin() && query.end() < inner->interval(index).end());
+            size_t index = inner->findSubtree(nodeRef.size(), query.end());
             nodeRef = inner->child(index);
         }
 
         LeafNode* leaf = nodeRef.asLeaf();
         size_t index = leaf->firstIntervalEndAfter(nodeRef.size(), query.begin());
-        ASSERT(query.begin() < leaf->interval(index).end());
+        if (index >= nodeRef.size())
+            return false; // No interval found that ends after query.begin()
         return leaf->interval(index).begin() < query.end();
     }
 
@@ -237,7 +219,7 @@ public:
             out.print(" <empty>");
             return;
         }
-        out.println(" coverage=", m_rootInterval);
+        out.println(" coverage=", m_rootMin);
         dumpSubtree(out, m_root, m_height, 0);
     }
 
@@ -251,22 +233,11 @@ private:
     // Common base class for all nodes - provides type identity for NodeRef
     struct Node { };
 
-    template<typename Payload, size_t order>
+    template<typename Key, typename Payload, size_t order>
     struct NodeImpl : public Node {
+        using KeyType = Key;
         using PayloadType = Payload;
         static constexpr size_t capacity = order;
-        
-        Interval& interval(size_t index)
-        {
-            ASSERT(index < capacity);
-            return intervals[index];
-        }
-
-        const Interval coverage(size_t size) const
-        {
-            RELEASE_ASSERT(size);
-            return { intervals[0].begin(), intervals[size - 1].end() };
-        }
 
         // Transfer count intervals and values from the rightNode to this node, where the rightNode
         // is the immediate right cousin of this.
@@ -275,11 +246,11 @@ private:
             ASSERT(size + count <= capacity);
             ASSERT(count <= rightSize);
             for (size_t i = 0; i < count; i++) {
-                intervals[i + size] = rightNode->intervals[i];
+                keys[i + size] = rightNode->keys[i];
                 payloads[i + size] = rightNode->payloads[i];
             }
             for (size_t i = 0; i < rightSize - count; i++) {
-                rightNode->intervals[i] = rightNode->intervals[i + count];
+                rightNode->keys[i] = rightNode->keys[i + count];
                 rightNode->payloads[i] = rightNode->payloads[i + count];
             }
             size += count;
@@ -293,26 +264,26 @@ private:
             ASSERT(rightSize + count <= capacity);
             ASSERT(count <= size);
             for (size_t i = rightSize + count - 1; i >= count; i--) {
-                rightNode->intervals[i] = rightNode->intervals[i - count];
+                rightNode->keys[i] = rightNode->keys[i - count];
                 rightNode->payloads[i] = rightNode->payloads[i - count];
             }
             for (size_t i = 0; i < count; i++) {
-                rightNode->intervals[i] = intervals[size - count + i];
+                rightNode->keys[i] = keys[size - count + i];
                 rightNode->payloads[i] = payloads[size - count + i];
             }
             size -= count;
             rightSize += count;
         }
 
-        void insertAt(size_t& size, size_t index, const Interval& interval, const Payload& value)
+        void insertAt(size_t& size, size_t index, const Key& key, const Payload& value)
         {
             ASSERT(size < capacity);
             ASSERT(index <= size);
             for (size_t i = size; i > index; --i) {
-                intervals[i] = intervals[i - 1];
+                keys[i] = keys[i - 1];
                 payloads[i] = payloads[i - 1];
             }
-            intervals[index] = interval;
+            keys[index] = key;
             payloads[index] = value;
             size++;
         }
@@ -322,27 +293,15 @@ private:
             ASSERT(size <= capacity);
             ASSERT(index < size);
             for (size_t i = index; i < size - 1; ++i) {
-                intervals[i] = intervals[i + 1];
+                keys[i] = keys[i + 1];
                 payloads[i] = payloads[i + 1];
             }
             size--;
         }
 
-        // Find the least interval with end greater than the given point, and return the index, if exists.
-        // Otherwise, returns size if no such interval exists.
-        size_t firstIntervalEndAfter(size_t size, T point) const
-        {
-            ASSERT(size <= capacity);
-            for (size_t i = 0; i < size; i++) {
-                if (point < intervals[i].end())
-                    return i;
-            }
-            return size;
-        }
-
         // Intervals and payloads are stored separately for better cache access patterns in the case
         // that cacheLinesPerNode > 1.
-        std::array<Interval, order> intervals;
+        std::array<Key, order> keys;
         std::array<Payload, order> payloads; // Either the NodeRefs to children (InnerNode) or the values (LeafNode)
     };
 
@@ -405,27 +364,63 @@ private:
         uintptr_t m_bits;
     };
 
-    struct LeafNode : public NodeImpl<Value, leafOrder> {
+    struct LeafNode : public NodeImpl<Interval, Value, leafOrder> {
+
+        Interval& interval(size_t index)
+        {
+            ASSERT(index < this->capacity);
+            return this->keys[index];
+        }
+    
         Value& value(size_t index)
         {
             ASSERT(index < leafOrder);
             return this->payloads[index];
         }
+
+        T coverage(size_t)
+        {
+            return interval(0).begin();
+        }
+
+        // Find the least interval with end greater than the given point, and return the index, if exists.
+        // Otherwise, returns size if no such interval exists.
+        size_t firstIntervalEndAfter(size_t size, T point) const
+        {
+            ASSERT(size <= this->capacity);
+            for (size_t i = 0; i < size; i++) {
+                if (point < this->keys[i].end())
+                    return i;
+            }
+            return size;
+        }
     };
 
-    struct InnerNode : public NodeImpl<NodeRef, innerOrder> {
+    struct InnerNode : public NodeImpl<T, NodeRef, innerOrder> {
+
+        T& boundary(size_t index)
+        {
+            ASSERT(index < innerOrder);
+            return this->keys[index];
+        }
+
         NodeRef& child(size_t index)
         {
             ASSERT(index < innerOrder);
             return this->payloads[index];
         }
 
-        size_t subtreeForInsert(size_t size, T endPoint) const
+        T coverage(size_t)
+        {
+            return boundary(0);
+        }
+
+        size_t findSubtree(size_t size, T point) const
         {
             ASSERT(size);
             ASSERT(size <= innerOrder);
             for (size_t i = 0; i < size - 1; i++) {
-                if (endPoint <= this->intervals[i + 1].begin())
+                if (point <= this->keys[i + 1])
                     return i;
             }
             return size - 1;
@@ -645,27 +640,26 @@ private:
 
     // After an interval within a node, give by path and depth, is modified, propagate the new interval
     // information upwards, as necessary, in order to keep inner nodes' "coverage" intervals consistent.
-    void updateCoverage(const Path& path, int depth, Interval coverage)
+    void updateCoverage(const Path& path, int depth, T start)
     {
         ASSERT(depth >= 0);
         depth--; // So that depth is at the parent of the node with 'coverage'.
         while (depth >= 0) {
             const PathEntry& entry = path[depth];
             InnerNode* inner = entry.nodeRef->asInner();
-            inner->interval(entry.index) = coverage;
+            inner->boundary(entry.index) = start;
 
-            if (!isFirstOrLastIndex(*entry.nodeRef, entry.index)) {
+            if (entry.index) {
                 // Since first/last of this node was not modified, its coverage hasn't changed - no need to continue upward.
                 verifyCoverageConsistency(path, depth, inner->coverage(entry.nodeRef->size()));
                 return;
             }
-            coverage = inner->coverage(entry.nodeRef->size());
             depth--;
         }
-        m_rootInterval = coverage;
+        m_rootMin = start;
     }
 
-    void verifyCoverageConsistency(const Path& path, int depth, Interval coverage)
+    void verifyCoverageConsistency(const Path& path, int depth, T coverage)
     {
 #ifdef ASSERT_ENABLED
         ASSERT(depth >= 0);
@@ -673,22 +667,22 @@ private:
         while (depth >= 0) {
             const PathEntry& entry = path[depth];
             InnerNode* inner = entry.nodeRef->asInner();
-            ASSERT(inner->interval(entry.index) == coverage);
+            ASSERT(inner->boundary(entry.index) == coverage);
             coverage = inner->coverage(entry.nodeRef->size());
             depth--;
         }
-        if (m_rootInterval != coverage) {
-            dataLogLn("FAIL: m_rootInterval=", m_rootInterval, " coverage=", coverage, " Tree=", *this);
+        if (m_rootMin != coverage) {
+            dataLogLn("FAIL: m_rootMin=", m_rootMin, " coverage=", coverage, " Tree=", *this);
         }
-        ASSERT(m_rootInterval == coverage);
+        ASSERT(m_rootMin == coverage);
 #endif
     }
 
-    // Inserts interval and value into the node referred to by path at the given depth. Updates affected NodePtr 
+    // Inserts interval and value into the node referred to by path at the given depth. Updates affected NodePtr
     // sizes and coverages for the affected subtree. If the node needed to be split then returns the NodePtr and
-    // coverage interval for the new node so that the caller can insert the new node into the parent.
+    // coverage boundary for the new node so that the caller can insert the new node into the parent.
     template<typename NodeType>
-    std::pair<NodeRef, Interval> insertInNodeSplitIfNeeded(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
+    std::pair<NodeRef, T> insertInNodeSplitIfNeeded(const Path& path, int depth, const typename NodeType::KeyType& key, const typename NodeType::PayloadType& value)
     {
         NodeRef* nodeRef = path[depth].nodeRef;
         size_t nodeSize = nodeRef->size();
@@ -697,21 +691,21 @@ private:
         if (nodeSize < NodeType::capacity) [[likely]] {
             auto insertionIndex = path[depth].index;
             auto node = nodeRef->template as<NodeType>();
-            node->insertAt(nodeSize, insertionIndex, interval, value);
+            node->insertAt(nodeSize, insertionIndex, key, value);
             nodeRef->setSize(nodeSize);
-            if (isFirstOrLastIndex(*nodeRef, insertionIndex))
+            if (!insertionIndex)
                 updateCoverage(path, depth, node->coverage(nodeSize));
-            return { NodeRef(), Interval() };
+            return { NodeRef(), T() };
         }
-        if (tryRedistributeLeftAndInsert<NodeType>(path, depth, interval, value))
-            return { NodeRef(), Interval() };
-        if (tryRedistributeRightAndInsert<NodeType>(path, depth, interval, value))
-            return { NodeRef(), Interval() };
-        return splitNodeAndInsert<NodeType>(path, depth, interval, value); 
+        if (tryRedistributeLeftAndInsert<NodeType>(path, depth, key, value))
+            return { NodeRef(), T() };
+        if (tryRedistributeRightAndInsert<NodeType>(path, depth, key, value))
+            return { NodeRef(), T() };
+        return splitNodeAndInsert<NodeType>(path, depth, key, value);
     }
 
     template<typename NodeType>
-    bool tryRedistributeLeftAndInsert(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
+    bool tryRedistributeLeftAndInsert(const Path& path, int depth, const typename NodeType::KeyType& key, const typename NodeType::PayloadType& value)
     {
         NodeRef* nodeRef = path[depth].nodeRef;
         auto insertionIndex = path[depth].index;
@@ -740,19 +734,23 @@ private:
         size_t numToMove = nodeSize - newSize;
         leftNode->shiftLeftFrom(leftNodeSize, node, nodeSize, numToMove);
         ASSERT(nodeSize == newSize);
-        if (insertionIndex < numToMove)
-            leftNode->insertAt(leftNodeSize, leftNodeSize + insertionIndex - numToMove, interval, value);
-        else
-            node->insertAt(nodeSize, insertionIndex - numToMove, interval, value);
+        if (insertionIndex < numToMove) {
+            insertionIndex = leftNodeSize + insertionIndex - numToMove;
+            leftNode->insertAt(leftNodeSize, insertionIndex, key, value);
+            if (!insertionIndex)
+                updateCoverage(leftPath, depth, leftNode->coverage(leftNodeSize));
+        } else {
+            insertionIndex -= numToMove;
+            node->insertAt(nodeSize, insertionIndex, key, value);
+        }
         leftNodeRef->setSize(leftNodeSize);
-        updateCoverage(leftPath, depth, leftNode->coverage(leftNodeSize));
         nodeRef->setSize(nodeSize);
         updateCoverage(path, depth, node->coverage(nodeSize));
         return true;
     }
 
     template<typename NodeType>
-    bool tryRedistributeRightAndInsert(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value)
+    bool tryRedistributeRightAndInsert(const Path& path, int depth, const typename NodeType::KeyType& key, const typename NodeType::PayloadType& value)
     {
         NodeRef* nodeRef = path[depth].nodeRef;
         auto insertionIndex = path[depth].index;
@@ -773,7 +771,7 @@ private:
         // If the insertion index is after all items of the left node and we only have one empty slot
         // we need to insert into the head of the right node.
         if (insertionIndex == NodeType::capacity) {
-            rightNode->insertAt(rightNodeSize, 0, interval, value);
+            rightNode->insertAt(rightNodeSize, 0, key, value);
             rightNodeRef->setSize(rightNodeSize);
             updateCoverage(rightPath, depth, rightNode->coverage(rightNodeSize));
             return true;
@@ -786,9 +784,9 @@ private:
         node->shiftRightTo(nodeSize, rightNode, rightNodeSize, numToMove);
         ASSERT(nodeSize == newSize);
         if (insertionIndex <= nodeSize)
-            node->insertAt(nodeSize, insertionIndex, interval, value);
+            node->insertAt(nodeSize, insertionIndex, key, value);
         else
-            rightNode->insertAt(rightNodeSize, insertionIndex - nodeSize, interval, value);
+            rightNode->insertAt(rightNodeSize, insertionIndex - nodeSize, key, value);
         nodeRef->setSize(nodeSize);
         updateCoverage(path, depth, node->coverage(nodeSize));
         rightNodeRef->setSize(rightNodeSize);
@@ -797,7 +795,7 @@ private:
     }
 
     template<typename NodeType>
-    std::pair<NodeRef, Interval> splitNodeAndInsert(const Path& path, int depth, const Interval& interval, const typename NodeType::PayloadType& value) 
+    std::pair<NodeRef, T> splitNodeAndInsert(const Path& path, int depth, const typename NodeType::KeyType& key, const typename NodeType::PayloadType& value)
     {
         NodeRef* nodeRef = path[depth].nodeRef;
         auto insertionIndex = path[depth].index;
@@ -809,19 +807,20 @@ private:
         ASSERT(nodeSize == NodeType::capacity);
 
         for (size_t i = splitPoint; i < nodeSize; ++i) {
-            newNode->intervals[i - splitPoint] = node->intervals[i];
+            newNode->keys[i - splitPoint] = node->keys[i];
             newNode->payloads[i - splitPoint] = node->payloads[i];
         }
         size_t newNodeSize = nodeSize - splitPoint;
         nodeSize = splitPoint;
         
         if (insertionIndex < nodeSize) {
-            node->insertAt(nodeSize, insertionIndex, interval, value);
+            node->insertAt(nodeSize, insertionIndex, key, value);
+            if (!insertionIndex)
+                updateCoverage(path, depth, node->coverage(nodeSize));
         } else {
-            newNode->insertAt(newNodeSize, insertionIndex - nodeSize, interval, value);
-        }            
+            newNode->insertAt(newNodeSize, insertionIndex - nodeSize, key, value);
+        }
         nodeRef->setSize(nodeSize);
-        updateCoverage(path, depth, node->coverage(nodeSize));
         return { NodeRef(newNode, newNodeSize), newNode->coverage(newNodeSize) };
     }
 
@@ -833,6 +832,7 @@ private:
         auto node = nodeRef->template as<NodeType>();
         size_t nodeSize = nodeRef->size();
         ASSERT(nodeSize <= NodeType::capacity);
+        ASSERT(eraseIndex < nodeSize);
 
         if (nodeSize == 1) [[unlikely]] {
             ASSERT(!eraseIndex);
@@ -897,7 +897,7 @@ private:
             
             for (size_t i = 0; i < nodeRef.size(); ++i) {
                 printIndent();
-                out.println("  [", i, "] ", inner->interval(i));
+                out.println("  [", i, "] boundary=", inner->boundary(i));
                 dumpSubtree(out, inner->child(i), distanceToLeaf - 1, indent + 2);
             }
         } else {
@@ -912,7 +912,7 @@ private:
     }
 
     NodeRef m_root { };
-    Interval m_rootInterval { T{}, T{} };
+    T m_rootMin { };
     unsigned m_height { 0 };
 
 #if ASSERT_ENABLED
