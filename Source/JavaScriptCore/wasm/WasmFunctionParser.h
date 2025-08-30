@@ -403,14 +403,14 @@ auto FunctionParser<Context>::parseBlockSignatureAndNotifySIMDUseIfNeeded(BlockS
         return result;
 
     if (m_context.usesSIMD()) {
-        if (!Context::tierSupportsSIMD)
+        if (!Context::tierSupportsSIMD())
             WASM_TRY_ADD_TO_CONTEXT(addCrash());
         return result;
     }
 
     if (signature.m_signature->hasReturnVector()) {
         m_context.notifyFunctionUsesSIMD();
-        if (!Context::tierSupportsSIMD)
+        if (!Context::tierSupportsSIMD())
             WASM_TRY_ADD_TO_CONTEXT(addCrash());
     }
     return result;
@@ -443,7 +443,7 @@ auto FunctionParser<Context>::parse() -> Result
     const auto& signature = *m_signature.as<FunctionSignature>();
     if (signature.numVectors() || signature.numReturnVectors()) {
         m_context.notifyFunctionUsesSIMD();
-        if (!Context::tierSupportsSIMD)
+        if (!Context::tierSupportsSIMD())
             WASM_TRY_ADD_TO_CONTEXT(addCrash());
     }
     WASM_PARSER_FAIL_IF(!m_context.addArguments(m_signature), "can't add "_s, signature.argumentCount(), " arguments to Function"_s);
@@ -469,7 +469,7 @@ auto FunctionParser<Context>::parse() -> Result
 
         if (typeOfLocal.isV128()) {
             m_context.notifyFunctionUsesSIMD();
-            if (!Context::tierSupportsSIMD)
+            if (!Context::tierSupportsSIMD())
                 WASM_TRY_ADD_TO_CONTEXT(addCrash());
         }
 
@@ -501,7 +501,7 @@ auto FunctionParser<Context>::parseConstantExpression() -> Result
     const auto& signature = *m_signature.as<FunctionSignature>();
     if (signature.numVectors() || signature.numReturnVectors()) {
         m_context.notifyFunctionUsesSIMD();
-        if (!Context::tierSupportsSIMD)
+        if (!Context::tierSupportsSIMD())
             WASM_TRY_ADD_TO_CONTEXT(addCrash());
     }
     ASSERT(!signature.argumentCount());
@@ -930,7 +930,7 @@ template<bool isReachable, typename>
 auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSignMode signMode, B3::Air::Arg optionalRelation) -> PartialResult
 {
     UNUSED_PARAM(signMode);
-    if (!Context::tierSupportsSIMD)
+    if (!Context::tierSupportsSIMD())
         WASM_TRY_ADD_TO_CONTEXT(addCrash());
     m_context.notifyFunctionUsesSIMD();
 
@@ -1013,7 +1013,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if constexpr (!isReachable)
             return { };
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             m_expressionStack.constructAndAppend(Types::V128, m_context.addConstant(constant));
             return { };
         } else
@@ -1048,7 +1048,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         }
         WASM_VALIDATOR_FAIL_IF(!okType, "Wrong type to SIMD splat"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDSplat(lane, scalar, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1068,7 +1068,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_VALIDATOR_FAIL_IF(!vector.type().isV128(), "Shift vector must be v128"_s);
         WASM_VALIDATOR_FAIL_IF(!shift.type().isI32(), "Shift amount must be i32"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDShift(op, SIMDInfo { lane, signMode }, vector, shift, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1089,7 +1089,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_VALIDATOR_FAIL_IF(!lhs.type().isV128(), "extmul lhs vector must be v128"_s);
         WASM_VALIDATOR_FAIL_IF(!rhs.type().isV128(), "extmul rhs vector must be v128"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDExtmul(op, SIMDInfo { lane, signMode }, lhs, rhs, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1109,7 +1109,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if constexpr (!isReachable)
             return { };
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             if (op == SIMDLaneOperation::Load)
                 WASM_TRY_ADD_TO_CONTEXT(addSIMDLoad(pointer, offset, result));
@@ -1135,7 +1135,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if constexpr (!isReachable)
             return { };
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             WASM_TRY_ADD_TO_CONTEXT(addSIMDStore(val, pointer, offset));
             return { };
         } else
@@ -1175,7 +1175,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if constexpr (!isReachable)
             return { };
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDLoadLane(op, pointer, vector, offset, laneIndex, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1217,7 +1217,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if constexpr (!isReachable)
             return { };
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             WASM_TRY_ADD_TO_CONTEXT(addSIMDStoreLane(op, pointer, vector, offset, laneIndex));
             return { };
         } else
@@ -1237,7 +1237,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if constexpr (!isReachable)
             return { };
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDLoadExtend(op, pointer, offset, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1255,7 +1255,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if constexpr (!isReachable)
             return { };
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDLoadPad(op, pointer, offset, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1280,7 +1280,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_TRY_POP_EXPRESSION_STACK_INTO(a, "vector argument"_s);
         WASM_VALIDATOR_FAIL_IF(!a.type().isV128(), "shuffle input must be a vector"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDShuffle(imm, a, b, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1299,7 +1299,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_TRY_POP_EXPRESSION_STACK_INTO(v, "vector argument"_s);
         WASM_VALIDATOR_FAIL_IF(v.type() != Types::V128, "type mismatch for argument 0"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addExtractLane(SIMDInfo { lane, signMode }, laneIdx, v, result));
             m_expressionStack.constructAndAppend(simdScalarType(lane), result);
@@ -1321,7 +1321,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_VALIDATOR_FAIL_IF(v.type() != Types::V128, "type mismatch for argument 1"_s);
         WASM_VALIDATOR_FAIL_IF(s.type() != simdScalarType(lane), "type mismatch for argument 0"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addReplaceLane(SIMDInfo { lane, signMode }, laneIdx, v, s, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1339,7 +1339,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_TRY_POP_EXPRESSION_STACK_INTO(v, "vector argument"_s);
         WASM_VALIDATOR_FAIL_IF(v.type() != Types::V128, "type mismatch for argument 0"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDI_V(op, SIMDInfo { lane, signMode }, v, result));
             m_expressionStack.constructAndAppend(Types::I32, result);
@@ -1372,7 +1372,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_TRY_POP_EXPRESSION_STACK_INTO(v, "vector argument"_s);
         WASM_VALIDATOR_FAIL_IF(v.type() != Types::V128, "type mismatch for argument 0"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDV_V(op, SIMDInfo { lane, signMode }, v, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1395,7 +1395,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_VALIDATOR_FAIL_IF(v2.type() != Types::V128, "type mismatch for argument 1"_s);
         WASM_VALIDATOR_FAIL_IF(c.type() != Types::V128, "type mismatch for argument 0"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDBitwiseSelect(v1, v2, c, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1417,7 +1417,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_VALIDATOR_FAIL_IF(lhs.type() != Types::V128, "type mismatch for argument 1"_s);
         WASM_VALIDATOR_FAIL_IF(rhs.type() != Types::V128, "type mismatch for argument 0"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDRelOp(op, SIMDInfo { lane, signMode }, lhs, rhs, optionalRelation, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1437,7 +1437,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_VALIDATOR_FAIL_IF(lhs.type() != Types::V128, "type mismatch for argument 1"_s);
         WASM_VALIDATOR_FAIL_IF(rhs.type() != Types::V128, "type mismatch for argument 0"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDRelOp(op, SIMDInfo { lane, signMode }, lhs, rhs, optionalRelation, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1475,7 +1475,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_VALIDATOR_FAIL_IF(a.type() != Types::V128, "type mismatch for argument 1"_s);
         WASM_VALIDATOR_FAIL_IF(b.type() != Types::V128, "type mismatch for argument 0"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDV_VV(op, SIMDInfo { lane, signMode }, a, b, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -1497,7 +1497,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         WASM_VALIDATOR_FAIL_IF(b.type() != Types::V128, "type mismatch for argument 1"_s);
         WASM_VALIDATOR_FAIL_IF(c.type() != Types::V128, "type mismatch for argument 2"_s);
 
-        if constexpr (Context::tierSupportsSIMD) {
+        if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDRelaxedFMA(op, SIMDInfo { lane, signMode }, a, b, c, result));
             m_expressionStack.constructAndAppend(Types::V128, result);
@@ -2264,7 +2264,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (unpackedElementType.isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
@@ -2328,7 +2328,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (elementType.isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
@@ -2438,7 +2438,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (resultType.isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
@@ -2469,7 +2469,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (unpackedElementType.isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
@@ -2509,7 +2509,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (unpackedElementType.isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
@@ -2628,7 +2628,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (hasV128Args) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
@@ -2668,7 +2668,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (structGetInput.field.type.unpacked().isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
@@ -2692,7 +2692,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (field.type.unpacked().isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
@@ -3047,7 +3047,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         if (resultType.isV128()) {
             m_context.notifyFunctionUsesSIMD();
-            if (!Context::tierSupportsSIMD)
+            if (!Context::tierSupportsSIMD())
                 WASM_TRY_ADD_TO_CONTEXT(addCrash());
         }
 
@@ -3073,7 +3073,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         if (globalType.isV128()) {
             m_context.notifyFunctionUsesSIMD();
-            if (!Context::tierSupportsSIMD)
+            if (!Context::tierSupportsSIMD())
                 WASM_TRY_ADD_TO_CONTEXT(addCrash());
         }
 
@@ -3134,7 +3134,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             if (returnType.isV128()) {
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
             m_expressionStack.constructAndAppend(returnType, results[i]);
@@ -3203,7 +3203,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             if (returnType.isV128()) {
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
             m_expressionStack.constructAndAppend(returnType, results[i]);
@@ -3270,7 +3270,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             if (returnType.isV128()) {
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
             m_expressionStack.constructAndAppend(returnType, results[i]);
@@ -3412,7 +3412,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             Type argumentType = exceptionSignature.argumentType(i);
             if (argumentType.isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
             m_expressionStack.constructAndAppend(argumentType, results[i]);
@@ -3481,7 +3481,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
                     Type argumentType = exceptionSignature.argumentType(i);
                     if (argumentType.isV128()) {
                         m_context.notifyFunctionUsesSIMD();
-                        if constexpr (!Context::tierSupportsSIMD)
+                        if (!Context::tierSupportsSIMD())
                             WASM_TRY_ADD_TO_CONTEXT(addCrash());
                     }
                 }
@@ -3818,7 +3818,7 @@ auto FunctionParser<Context>::parseUnreachableExpression() -> PartialResult
             Type argumentType = exceptionSignature.argumentType(i);
             if (argumentType.isV128()) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD)
+                if (!Context::tierSupportsSIMD())
                     WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
             m_expressionStack.constructAndAppend(argumentType, results[i]);
