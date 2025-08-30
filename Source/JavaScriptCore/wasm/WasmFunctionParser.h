@@ -402,17 +402,9 @@ auto FunctionParser<Context>::parseBlockSignatureAndNotifySIMDUseIfNeeded(BlockS
     if (!result || !signature.m_signature)
         return result;
 
-    if (m_context.usesSIMD()) {
-        if (!Context::tierSupportsSIMD())
-            WASM_TRY_ADD_TO_CONTEXT(addCrash());
-        return result;
-    }
-
-    if (signature.m_signature->hasReturnVector()) {
+    if (!m_context.usesSIMD() && signature.m_signature->hasReturnVector())
         m_context.notifyFunctionUsesSIMD();
-        if (!Context::tierSupportsSIMD())
-            WASM_TRY_ADD_TO_CONTEXT(addCrash());
-    }
+
     return result;
 }
 
@@ -441,11 +433,9 @@ auto FunctionParser<Context>::parse() -> Result
 
     WASM_PARSER_FAIL_IF(!m_signature.is<FunctionSignature>(), "type signature was not a function signature"_s);
     const auto& signature = *m_signature.as<FunctionSignature>();
-    if (signature.numVectors() || signature.numReturnVectors()) {
+    if (signature.numVectors() || signature.numReturnVectors())
         m_context.notifyFunctionUsesSIMD();
-        if (!Context::tierSupportsSIMD())
-            WASM_TRY_ADD_TO_CONTEXT(addCrash());
-    }
+
     WASM_PARSER_FAIL_IF(!m_context.addArguments(m_signature), "can't add "_s, signature.argumentCount(), " arguments to Function"_s);
     WASM_PARSER_FAIL_IF(!parseVarUInt32(localGroupsCount), "can't get local groups count"_s);
 
@@ -467,11 +457,8 @@ auto FunctionParser<Context>::parse() -> Result
         if (!isDefaultableType(typeOfLocal)) [[unlikely]]
             totalNonDefaultableLocals++;
 
-        if (typeOfLocal.isV128()) {
+        if (typeOfLocal.isV128())
             m_context.notifyFunctionUsesSIMD();
-            if (!Context::tierSupportsSIMD())
-                WASM_TRY_ADD_TO_CONTEXT(addCrash());
-        }
 
         WASM_PARSER_FAIL_IF(!m_locals.tryReserveCapacity(totalNumberOfLocals), "can't allocate enough memory for function's "_s, totalNumberOfLocals, " locals"_s);
         m_locals.appendUsingFunctor(numberOfLocals, [&](size_t) { return typeOfLocal; });
@@ -501,8 +488,6 @@ auto FunctionParser<Context>::parseConstantExpression() -> Result
     const auto& signature = *m_signature.as<FunctionSignature>();
     if (signature.numVectors() || signature.numReturnVectors()) {
         m_context.notifyFunctionUsesSIMD();
-        if (!Context::tierSupportsSIMD())
-            WASM_TRY_ADD_TO_CONTEXT(addCrash());
     }
     ASSERT(!signature.argumentCount());
 
@@ -930,8 +915,6 @@ template<bool isReachable, typename>
 auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSignMode signMode, B3::Air::Arg optionalRelation) -> PartialResult
 {
     UNUSED_PARAM(signMode);
-    if (!Context::tierSupportsSIMD())
-        WASM_TRY_ADD_TO_CONTEXT(addCrash());
     m_context.notifyFunctionUsesSIMD();
 
     auto pushUnreachable = [&](auto type) -> PartialResult {
@@ -2262,11 +2245,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             WASM_VALIDATOR_FAIL_IF(!isSubtype(value.type(), unpackedElementType), "array.new value to type ", value.type(), " expected ", unpackedElementType);
             WASM_VALIDATOR_FAIL_IF(TypeKind::I32 != size.type().kind, "array.new index to type ", size.type(), " expected ", TypeKind::I32);
 
-            if (unpackedElementType.isV128()) {
+            if (unpackedElementType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayNew(typeIndex, size, value, result));
@@ -2326,11 +2306,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             // We already checked that the expression stack was deep enough, so it's safe to assert this
             RELEASE_ASSERT(argc == args.size());
 
-            if (elementType.isV128()) {
+            if (elementType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayNewFixed(typeIndex, args, result));
@@ -2436,11 +2413,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             WASM_VALIDATOR_FAIL_IF(!isSubtype(arrayref.type(), arrayRefType), opName, " arrayref to type ", arrayref.type(), " expected ", arrayRefType);
             WASM_VALIDATOR_FAIL_IF(TypeKind::I32 != index.type().kind, "array.get index to type ", index.type(), " expected ", TypeKind::I32);
 
-            if (resultType.isV128()) {
+            if (resultType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayGet(op, typeIndex, arrayref, index, result));
@@ -2467,11 +2441,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             WASM_VALIDATOR_FAIL_IF(TypeKind::I32 != index.type().kind, "array.set index to type ", index.type(), " expected ", TypeKind::I32);
             WASM_VALIDATOR_FAIL_IF(!isSubtype(value.type(), unpackedElementType), "array.set value to type ", value.type(), " expected ", unpackedElementType);
 
-            if (unpackedElementType.isV128()) {
+            if (unpackedElementType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
 
             WASM_TRY_ADD_TO_CONTEXT(addArraySet(typeIndex, arrayref, index, value));
 
@@ -2507,11 +2478,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             WASM_VALIDATOR_FAIL_IF(!isSubtype(value.type(), unpackedElementType), "array.fill value to type ", value.type(), " expected ", unpackedElementType);
             WASM_VALIDATOR_FAIL_IF(TypeKind::I32 != size.type().kind, "array.fill size to type ", size.type(), " expected ", TypeKind::I32);
 
-            if (unpackedElementType.isV128()) {
+            if (unpackedElementType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
 
             WASM_TRY_ADD_TO_CONTEXT(addArrayFill(typeIndex, arrayref, offset, value, size));
             break;
@@ -2628,8 +2596,6 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             if (hasV128Args) {
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
 
             ExpressionType result;
@@ -2666,11 +2632,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             if (op == ExtGCOpType::StructGet)
                 WASM_PARSER_FAIL_IF(structGetInput.field.type.template is<PackedType>(), opName, " applied to packed array of "_s, structGetInput.field.type.template as<PackedType>(), " -- use struct.get_s or struct.get_u"_s);
 
-            if (structGetInput.field.type.unpacked().isV128()) {
+            if (structGetInput.field.type.unpacked().isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
 
             ExpressionType result;
             const auto& structType = *m_info.typeSignatures[structGetInput.indices.structTypeIndex]->expand().template as<StructType>();
@@ -2690,11 +2653,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             WASM_PARSER_FAIL_IF(field.mutability != Mutability::Mutable, "the field "_s, structSetInput.indices.fieldIndex, " can't be set because it is immutable"_s);
             WASM_PARSER_FAIL_IF(!isSubtype(value.type(), field.type.unpacked()), "type mismatch in struct.set"_s);
 
-            if (field.type.unpacked().isV128()) {
+            if (field.type.unpacked().isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
 
             const auto& structType = *m_info.typeSignatures[structSetInput.indices.structTypeIndex]->expand().template as<StructType>();
             WASM_TRY_ADD_TO_CONTEXT(addStructSet(structSetInput.structReference, structType, structSetInput.indices.fieldIndex, value));
@@ -3045,11 +3005,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         Type resultType = m_info.globals[index].type;
         ASSERT(isValueType(resultType));
 
-        if (resultType.isV128()) {
+        if (resultType.isV128())
             m_context.notifyFunctionUsesSIMD();
-            if (!Context::tierSupportsSIMD())
-                WASM_TRY_ADD_TO_CONTEXT(addCrash());
-        }
 
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(getGlobal(index, result));
@@ -3071,11 +3028,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         WASM_VALIDATOR_FAIL_IF(!isSubtype(value.type(), globalType), "set_global "_s, index, " with type "_s, globalType.kind, " with a variable of type "_s, value.type().kind);
 
-        if (globalType.isV128()) {
+        if (globalType.isV128())
             m_context.notifyFunctionUsesSIMD();
-            if (!Context::tierSupportsSIMD())
-                WASM_TRY_ADD_TO_CONTEXT(addCrash());
-        }
 
         WASM_TRY_ADD_TO_CONTEXT(setGlobal(index, value));
         return { };
@@ -3134,8 +3088,6 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             if (returnType.isV128()) {
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
             m_expressionStack.constructAndAppend(returnType, results[i]);
         }
@@ -3203,8 +3155,6 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             if (returnType.isV128()) {
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
             m_expressionStack.constructAndAppend(returnType, results[i]);
         }
@@ -3270,8 +3220,6 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             if (returnType.isV128()) {
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
             }
             m_expressionStack.constructAndAppend(returnType, results[i]);
         }
@@ -3410,11 +3358,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         RELEASE_ASSERT(exceptionSignature.argumentCount() == results.size());
         for (unsigned i = 0; i < exceptionSignature.argumentCount(); ++i) {
             Type argumentType = exceptionSignature.argumentType(i);
-            if (argumentType.isV128()) {
+            if (argumentType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
             m_expressionStack.constructAndAppend(argumentType, results[i]);
         }
         resetLocalInitStackToHeight(controlEntry.localInitStackHeight);
@@ -3479,11 +3424,8 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
                 signature = &specifiedSignature;
                 for (unsigned i = 0; i < exceptionSignature.argumentCount(); ++i) {
                     Type argumentType = exceptionSignature.argumentType(i);
-                    if (argumentType.isV128()) {
+                    if (argumentType.isV128())
                         m_context.notifyFunctionUsesSIMD();
-                        if (!Context::tierSupportsSIMD())
-                            WASM_TRY_ADD_TO_CONTEXT(addCrash());
-                    }
                 }
             }
             WASM_PARSER_FAIL_IF(!parseVarUInt32(exceptionLabel), "can't read label of try_table catch at index "_s, i);
@@ -3816,11 +3758,8 @@ auto FunctionParser<Context>::parseUnreachableExpression() -> PartialResult
         RELEASE_ASSERT(exceptionSignature.argumentCount() == results.size());
         for (unsigned i = 0; i < exceptionSignature.argumentCount(); ++i) {
             Type argumentType = exceptionSignature.argumentType(i);
-            if (argumentType.isV128()) {
+            if (argumentType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-                if (!Context::tierSupportsSIMD())
-                    WASM_TRY_ADD_TO_CONTEXT(addCrash());
-            }
             m_expressionStack.constructAndAppend(argumentType, results[i]);
         }
         return { };
