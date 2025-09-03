@@ -4187,7 +4187,17 @@ ipintOp(_simd_f32x4_extract_lane, macro()
 end)
 
 unimplementedInstruction(_simd_f32x4_replace_lane)
-unimplementedInstruction(_simd_f64x2_extract_lane)
+ipintOp(_simd_f64x2_extract_lane, macro()
+    # f64x2.extract_lane (lane)
+    loadb 2[PC], t0  # lane index
+    andi 0x1, t0     # i:ImmLaneIdx2 (2 lanes: 0-1)
+    lshifti 3, t0    # multiply by 8 for 64-bit offset
+    loadd [sp, t0], ft0  # load 64-bit double value at lane index from stack
+    addp V128ISize, sp  # pop the v128 from stack
+    pushFloat64(ft0)
+    advancePC(3)
+    nextIPIntInstruction()
+end)
 unimplementedInstruction(_simd_f64x2_replace_lane)
 
 # 0xFD 0x23 - 0xFD 0x2C: i8x16 operations

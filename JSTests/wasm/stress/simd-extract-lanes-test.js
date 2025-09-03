@@ -9,6 +9,7 @@ const test_i16x8_const = "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0
 const test_i32x4_const = "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)";
 const test_i64x2_const = "(v128.const i64x2 0x123456789ABCDEF0 0xFEDCBA0987654321)";
 const test_f32x4_const = "(v128.const f32x4 1.5 -2.25 3.75 -4.125)";
+const test_f64x2_const = "(v128.const f64x2 1.25 -3.5)";
 
 let wat = `
 (module
@@ -107,6 +108,14 @@ let wat = `
         (f32x4.extract_lane 3 ${test_f32x4_const})
     )
 
+    ;; Test f64x2.extract_lane
+    (func (export "test_f64x2_extract_lane_0") (result f64)
+        (f64x2.extract_lane 0 ${test_f64x2_const})
+    )
+    (func (export "test_f64x2_extract_lane_1") (result f64)
+        (f64x2.extract_lane 1 ${test_f64x2_const})
+    )
+
     ;; Test v128.const basic functionality
     (func (export "test_v128_const") (result i32)
         (i8x16.extract_lane_u 0 (v128.const i8x16 0x42 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00))
@@ -126,6 +135,7 @@ async function test() {
         test_i32x4_extract_lane_0, test_i32x4_extract_lane_1,
         test_i64x2_extract_lane_0, test_i64x2_extract_lane_1,
         test_f32x4_extract_lane_0, test_f32x4_extract_lane_1, test_f32x4_extract_lane_2, test_f32x4_extract_lane_3,
+        test_f64x2_extract_lane_0, test_f64x2_extract_lane_1,
         test_v128_const
     } = instance.exports;
 
@@ -174,6 +184,10 @@ async function test() {
     assert.eq(test_f32x4_extract_lane_1(), -2.25);
     assert.eq(test_f32x4_extract_lane_2(), 3.75);
     assert.eq(test_f32x4_extract_lane_3(), -4.125);
+
+    // Test f64x2.extract_lane
+    assert.eq(test_f64x2_extract_lane_0(), 1.25);
+    assert.eq(test_f64x2_extract_lane_1(), -3.5);
 
     // Test v128.const
     assert.eq(test_v128_const(), 0x42);
