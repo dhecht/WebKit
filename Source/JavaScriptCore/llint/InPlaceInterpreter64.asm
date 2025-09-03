@@ -4099,49 +4099,9 @@ unimplementedInstruction(_simd_i8x16_extract_lane_s)
 ipintOp(_simd_i8x16_extract_lane_u, macro()
     # i8x16.extract_lane_u (lane)
     loadb 2[PC], t0  # lane index
-    andi 0xf, t0     # mask to 0-15 for 16 lanes
-    popv v0
-    if ARM64 or ARM64E
-        pcrtoaddr _simd_i8x16_extract_lane_u_0, t1
-        leap [t1, t0, 8], t0
-        emit "br x0"
-        _simd_i8x16_extract_lane_u_0:
-        umovi t0, v0_b, 0
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 1
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 2
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 3
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 4
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 5
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 6
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 7
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 8
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 9
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 10
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 11
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 12
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 13
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 14
-        jmp _simd_i8x16_extract_lane_u_end
-        umovi t0, v0_b, 15
-        jmp _simd_i8x16_extract_lane_u_end
-    elsif X86_64
-        # FIXME: implement SIMD instructions for x86 and finish this implementation!
-    end
-_simd_i8x16_extract_lane_u_end:
+    andi 0xf, t0     # i:ImmLaneIdx16
+    loadb [sp, t0], t0  # load byte at lane index from stack (unsigned)
+    addp V128ISize, sp  # pop the v128 from stack
     pushInt32(t0)
     advancePC(3)
     nextIPIntInstruction()
