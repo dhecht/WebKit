@@ -8,6 +8,7 @@ const test_i8x16_const = "(v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0
 const test_i16x8_const = "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)";
 const test_i32x4_const = "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)";
 const test_i64x2_const = "(v128.const i64x2 0x123456789ABCDEF0 0xFEDCBA0987654321)";
+const test_f32x4_const = "(v128.const f32x4 1.5 -2.25 3.75 -4.125)";
 
 let wat = `
 (module
@@ -92,6 +93,20 @@ let wat = `
         (i64x2.extract_lane 1 ${test_i64x2_const})
     )
 
+    ;; Test f32x4.extract_lane
+    (func (export "test_f32x4_extract_lane_0") (result f32)
+        (f32x4.extract_lane 0 ${test_f32x4_const})
+    )
+    (func (export "test_f32x4_extract_lane_1") (result f32)
+        (f32x4.extract_lane 1 ${test_f32x4_const})
+    )
+    (func (export "test_f32x4_extract_lane_2") (result f32)
+        (f32x4.extract_lane 2 ${test_f32x4_const})
+    )
+    (func (export "test_f32x4_extract_lane_3") (result f32)
+        (f32x4.extract_lane 3 ${test_f32x4_const})
+    )
+
     ;; Test v128.const basic functionality
     (func (export "test_v128_const") (result i32)
         (i8x16.extract_lane_u 0 (v128.const i8x16 0x42 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00))
@@ -109,7 +124,9 @@ async function test() {
         test_i16x8_extract_lane_s_4, test_i16x8_extract_lane_s_5,
         test_i16x8_extract_lane_u_0, test_i16x8_extract_lane_u_3, test_i16x8_extract_lane_u_4, test_i16x8_extract_lane_u_5,
         test_i32x4_extract_lane_0, test_i32x4_extract_lane_1,
-        test_i64x2_extract_lane_0, test_i64x2_extract_lane_1, test_v128_const
+        test_i64x2_extract_lane_0, test_i64x2_extract_lane_1,
+        test_f32x4_extract_lane_0, test_f32x4_extract_lane_1, test_f32x4_extract_lane_2, test_f32x4_extract_lane_3,
+        test_v128_const
     } = instance.exports;
 
     // Test i8x16.extract_lane_s (signed)
@@ -151,6 +168,12 @@ async function test() {
     // Note: i64x2.extract_lane returns signed 64-bit integers
     assert.eq(test_i64x2_extract_lane_0(), 0x123456789ABCDEF0n);
     assert.eq(test_i64x2_extract_lane_1(), -81986143110479071n); // 0xFEDCBA0987654321 as signed i64
+
+    // Test f32x4.extract_lane
+    assert.eq(test_f32x4_extract_lane_0(), 1.5);
+    assert.eq(test_f32x4_extract_lane_1(), -2.25);
+    assert.eq(test_f32x4_extract_lane_2(), 3.75);
+    assert.eq(test_f32x4_extract_lane_3(), -4.125);
 
     // Test v128.const
     assert.eq(test_v128_const(), 0x42);
