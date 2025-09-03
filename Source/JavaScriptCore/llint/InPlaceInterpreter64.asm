@@ -4094,7 +4094,17 @@ unimplementedInstruction(_simd_f32x4_splat)
 unimplementedInstruction(_simd_f64x2_splat)
 
 # 0xFD 0x15 - 0xFD 0x22: extract and replace lanes
-unimplementedInstruction(_simd_i8x16_extract_lane_s)
+ipintOp(_simd_i8x16_extract_lane_s, macro()
+    # i8x16.extract_lane_s (lane)
+    loadb 2[PC], t0  # lane index
+    andi 0xf, t0     # i:ImmLaneIdx16
+    loadb [sp, t0], t0  # load byte at lane index from stack
+    sxb2i t0, t0     # sign-extend byte to 32-bit integer
+    addp V128ISize, sp  # pop the v128 from stack
+    pushInt32(t0)
+    advancePC(3)
+    nextIPIntInstruction()
+end)
 
 ipintOp(_simd_i8x16_extract_lane_u, macro()
     # i8x16.extract_lane_u (lane)
