@@ -78,6 +78,14 @@ let wat = `
         (i32x4.extract_lane 1 (v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222))
     )
 
+    ;; Test i64x2.extract_lane
+    (func (export "test_i64x2_extract_lane_0") (result i64)
+        (i64x2.extract_lane 0 (v128.const i64x2 0x123456789ABCDEF0 0xFEDCBA0987654321))
+    )
+    (func (export "test_i64x2_extract_lane_1") (result i64)
+        (i64x2.extract_lane 1 (v128.const i64x2 0x123456789ABCDEF0 0xFEDCBA0987654321))
+    )
+
     ;; Test v128.const basic functionality
     (func (export "test_v128_const") (result i32)
         (i8x16.extract_lane_u 0 (v128.const i8x16 0x42 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00))
@@ -94,7 +102,8 @@ async function test() {
         test_i16x8_extract_lane_s_0, test_i16x8_extract_lane_s_2, test_i16x8_extract_lane_s_3,
         test_i16x8_extract_lane_s_4, test_i16x8_extract_lane_s_5,
         test_i16x8_extract_lane_u_0, test_i16x8_extract_lane_u_3, test_i16x8_extract_lane_u_4, test_i16x8_extract_lane_u_5,
-        test_i32x4_extract_lane_0, test_i32x4_extract_lane_1, test_v128_const
+        test_i32x4_extract_lane_0, test_i32x4_extract_lane_1,
+        test_i64x2_extract_lane_0, test_i64x2_extract_lane_1, test_v128_const
     } = instance.exports;
 
     // Test i8x16.extract_lane_s (signed)
@@ -131,6 +140,11 @@ async function test() {
     // Test i32x4.extract_lane
     assert.eq(test_i32x4_extract_lane_0(), 0x12345678);
     assert.eq(test_i32x4_extract_lane_1(), 0x9ABCDEF0 | 0); // Force to signed 32-bit
+
+    // Test i64x2.extract_lane
+    // Note: i64x2.extract_lane returns signed 64-bit integers
+    assert.eq(test_i64x2_extract_lane_0(), 0x123456789ABCDEF0n);
+    assert.eq(test_i64x2_extract_lane_1(), -81986143110479071n); // 0xFEDCBA0987654321 as signed i64
 
     // Test v128.const
     assert.eq(test_v128_const(), 0x42);
