@@ -3,87 +3,93 @@
 import { instantiate } from "../wabt-wrapper.js"
 import * as assert from "../assert.js"
 
+// Test data constants to avoid duplication
+const test_i8x16_const = "(v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B)";
+const test_i16x8_const = "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)";
+const test_i32x4_const = "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)";
+const test_i64x2_const = "(v128.const i64x2 0x123456789ABCDEF0 0xFEDCBA0987654321)";
+
 let wat = `
 (module
     ;; Test i8x16.extract_lane_s (signed byte extraction) - individual functions for each lane
     (func (export "test_i8x16_extract_lane_s_0") (result i32)
-        (i8x16.extract_lane_s 0 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_s 0 ${test_i8x16_const})
     )
     (func (export "test_i8x16_extract_lane_s_1") (result i32)
-        (i8x16.extract_lane_s 1 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_s 1 ${test_i8x16_const})
     )
     (func (export "test_i8x16_extract_lane_s_2") (result i32)
-        (i8x16.extract_lane_s 2 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_s 2 ${test_i8x16_const})
     )
     (func (export "test_i8x16_extract_lane_s_3") (result i32)
-        (i8x16.extract_lane_s 3 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_s 3 ${test_i8x16_const})
     )
     (func (export "test_i8x16_extract_lane_s_4") (result i32)
-        (i8x16.extract_lane_s 4 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_s 4 ${test_i8x16_const})
     )
     (func (export "test_i8x16_extract_lane_s_5") (result i32)
-        (i8x16.extract_lane_s 5 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_s 5 ${test_i8x16_const})
     )
 
     ;; Test i8x16.extract_lane_u (unsigned byte extraction) - key test cases
     (func (export "test_i8x16_extract_lane_u_0") (result i32)
-        (i8x16.extract_lane_u 0 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_u 0 ${test_i8x16_const})
     )
     (func (export "test_i8x16_extract_lane_u_3") (result i32)
-        (i8x16.extract_lane_u 3 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_u 3 ${test_i8x16_const})
     )
     (func (export "test_i8x16_extract_lane_u_4") (result i32)
-        (i8x16.extract_lane_u 4 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_u 4 ${test_i8x16_const})
     )
     (func (export "test_i8x16_extract_lane_u_5") (result i32)
-        (i8x16.extract_lane_u 5 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
+        (i8x16.extract_lane_u 5 ${test_i8x16_const})
     )
 
     ;; Test i16x8.extract_lane_s (signed 16-bit extraction)
     (func (export "test_i16x8_extract_lane_s_0") (result i32)
-        (i16x8.extract_lane_s 0 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_s 0 ${test_i16x8_const})
     )
     (func (export "test_i16x8_extract_lane_s_2") (result i32)
-        (i16x8.extract_lane_s 2 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_s 2 ${test_i16x8_const})
     )
     (func (export "test_i16x8_extract_lane_s_3") (result i32)
-        (i16x8.extract_lane_s 3 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_s 3 ${test_i16x8_const})
     )
     (func (export "test_i16x8_extract_lane_s_4") (result i32)
-        (i16x8.extract_lane_s 4 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_s 4 ${test_i16x8_const})
     )
     (func (export "test_i16x8_extract_lane_s_5") (result i32)
-        (i16x8.extract_lane_s 5 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_s 5 ${test_i16x8_const})
     )
 
     ;; Test i16x8.extract_lane_u (unsigned 16-bit extraction)
     (func (export "test_i16x8_extract_lane_u_0") (result i32)
-        (i16x8.extract_lane_u 0 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_u 0 ${test_i16x8_const})
     )
     (func (export "test_i16x8_extract_lane_u_3") (result i32)
-        (i16x8.extract_lane_u 3 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_u 3 ${test_i16x8_const})
     )
     (func (export "test_i16x8_extract_lane_u_4") (result i32)
-        (i16x8.extract_lane_u 4 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_u 4 ${test_i16x8_const})
     )
     (func (export "test_i16x8_extract_lane_u_5") (result i32)
-        (i16x8.extract_lane_u 5 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+        (i16x8.extract_lane_u 5 ${test_i16x8_const})
     )
 
     ;; Test i32x4.extract_lane
     (func (export "test_i32x4_extract_lane_0") (result i32)
-        (i32x4.extract_lane 0 (v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222))
+        (i32x4.extract_lane 0 ${test_i32x4_const})
     )
     (func (export "test_i32x4_extract_lane_1") (result i32)
-        (i32x4.extract_lane 1 (v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222))
+        (i32x4.extract_lane 1 ${test_i32x4_const})
     )
 
     ;; Test i64x2.extract_lane
     (func (export "test_i64x2_extract_lane_0") (result i64)
-        (i64x2.extract_lane 0 (v128.const i64x2 0x123456789ABCDEF0 0xFEDCBA0987654321))
+        (i64x2.extract_lane 0 ${test_i64x2_const})
     )
     (func (export "test_i64x2_extract_lane_1") (result i64)
-        (i64x2.extract_lane 1 (v128.const i64x2 0x123456789ABCDEF0 0xFEDCBA0987654321))
+        (i64x2.extract_lane 1 ${test_i64x2_const})
     )
 
     ;; Test v128.const basic functionality
