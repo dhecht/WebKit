@@ -4118,8 +4118,29 @@ ipintOp(_simd_i8x16_extract_lane_u, macro()
 end)
 
 unimplementedInstruction(_simd_i8x16_replace_lane)
-unimplementedInstruction(_simd_i16x8_extract_lane_s)
-unimplementedInstruction(_simd_i16x8_extract_lane_u)
+ipintOp(_simd_i16x8_extract_lane_s, macro()
+    # i16x8.extract_lane_s (lane)
+    loadb 2[PC], t0  # lane index
+    andi 0x7, t0     # i:ImmLaneIdx8 (8 lanes: 0-7)
+    lshifti 1, t0    # multiply by 2 for 16-bit offset
+    loadh [sp, t0], t0  # load 16-bit value at lane index from stack
+    sxh2i t0, t0     # sign-extend 16-bit to 32-bit integer
+    addp V128ISize, sp  # pop the v128 from stack
+    pushInt32(t0)
+    advancePC(3)
+    nextIPIntInstruction()
+end)
+ipintOp(_simd_i16x8_extract_lane_u, macro()
+    # i16x8.extract_lane_u (lane)
+    loadb 2[PC], t0  # lane index
+    andi 0x7, t0     # i:ImmLaneIdx8 (8 lanes: 0-7)
+    lshifti 1, t0    # multiply by 2 for 16-bit offset
+    loadh [sp, t0], t0  # load 16-bit value at lane index from stack (unsigned)
+    addp V128ISize, sp  # pop the v128 from stack
+    pushInt32(t0)
+    advancePC(3)
+    nextIPIntInstruction()
+end)
 unimplementedInstruction(_simd_i16x8_replace_lane)
 
 ipintOp(_simd_i32x4_extract_lane, macro()

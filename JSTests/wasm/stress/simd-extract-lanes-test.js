@@ -39,6 +39,37 @@ let wat = `
         (i8x16.extract_lane_u 5 (v128.const i8x16 0x00 0x01 0x7F 0x80 0xFF 0x81 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0A 0x0B))
     )
 
+    ;; Test i16x8.extract_lane_s (signed 16-bit extraction)
+    (func (export "test_i16x8_extract_lane_s_0") (result i32)
+        (i16x8.extract_lane_s 0 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+    (func (export "test_i16x8_extract_lane_s_2") (result i32)
+        (i16x8.extract_lane_s 2 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+    (func (export "test_i16x8_extract_lane_s_3") (result i32)
+        (i16x8.extract_lane_s 3 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+    (func (export "test_i16x8_extract_lane_s_4") (result i32)
+        (i16x8.extract_lane_s 4 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+    (func (export "test_i16x8_extract_lane_s_5") (result i32)
+        (i16x8.extract_lane_s 5 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+
+    ;; Test i16x8.extract_lane_u (unsigned 16-bit extraction)
+    (func (export "test_i16x8_extract_lane_u_0") (result i32)
+        (i16x8.extract_lane_u 0 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+    (func (export "test_i16x8_extract_lane_u_3") (result i32)
+        (i16x8.extract_lane_u 3 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+    (func (export "test_i16x8_extract_lane_u_4") (result i32)
+        (i16x8.extract_lane_u 4 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+    (func (export "test_i16x8_extract_lane_u_5") (result i32)
+        (i16x8.extract_lane_u 5 (v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003))
+    )
+
     ;; Test i32x4.extract_lane
     (func (export "test_i32x4_extract_lane_0") (result i32)
         (i32x4.extract_lane 0 (v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222))
@@ -56,17 +87,20 @@ let wat = `
 
 async function test() {
     const instance = await instantiate(wat, {}, { simd: true });
-    const { 
-        test_i8x16_extract_lane_s_0, test_i8x16_extract_lane_s_1, test_i8x16_extract_lane_s_2, 
+    const {
+        test_i8x16_extract_lane_s_0, test_i8x16_extract_lane_s_1, test_i8x16_extract_lane_s_2,
         test_i8x16_extract_lane_s_3, test_i8x16_extract_lane_s_4, test_i8x16_extract_lane_s_5,
         test_i8x16_extract_lane_u_0, test_i8x16_extract_lane_u_3, test_i8x16_extract_lane_u_4, test_i8x16_extract_lane_u_5,
-        test_i32x4_extract_lane_0, test_i32x4_extract_lane_1, test_v128_const 
+        test_i16x8_extract_lane_s_0, test_i16x8_extract_lane_s_2, test_i16x8_extract_lane_s_3,
+        test_i16x8_extract_lane_s_4, test_i16x8_extract_lane_s_5,
+        test_i16x8_extract_lane_u_0, test_i16x8_extract_lane_u_3, test_i16x8_extract_lane_u_4, test_i16x8_extract_lane_u_5,
+        test_i32x4_extract_lane_0, test_i32x4_extract_lane_1, test_v128_const
     } = instance.exports;
 
     // Test i8x16.extract_lane_s (signed)
     // Expected values: 0x00=0, 0x01=1, 0x7F=127, 0x80=-128, 0xFF=-1, 0x81=-127, etc.
     assert.eq(test_i8x16_extract_lane_s_0(), 0);      // 0x00 -> 0
-    assert.eq(test_i8x16_extract_lane_s_1(), 1);      // 0x01 -> 1  
+    assert.eq(test_i8x16_extract_lane_s_1(), 1);      // 0x01 -> 1
     assert.eq(test_i8x16_extract_lane_s_2(), 127);    // 0x7F -> 127
     assert.eq(test_i8x16_extract_lane_s_3(), -128);   // 0x80 -> -128 (sign extended)
     assert.eq(test_i8x16_extract_lane_s_4(), -1);     // 0xFF -> -1 (sign extended)
@@ -78,6 +112,21 @@ async function test() {
     assert.eq(test_i8x16_extract_lane_u_3(), 128);    // 0x80 -> 128 (unsigned)
     assert.eq(test_i8x16_extract_lane_u_4(), 255);    // 0xFF -> 255 (unsigned)
     assert.eq(test_i8x16_extract_lane_u_5(), 129);    // 0x81 -> 129 (unsigned)
+
+    // Test i16x8.extract_lane_s (signed)
+    // Expected values: 0x0000=0, 0x0001=1, 0x7FFF=32767, 0x8000=-32768, 0xFFFF=-1, 0x8001=-32767, etc.
+    assert.eq(test_i16x8_extract_lane_s_0(), 0);        // 0x0000 -> 0
+    assert.eq(test_i16x8_extract_lane_s_2(), 32767);    // 0x7FFF -> 32767
+    assert.eq(test_i16x8_extract_lane_s_3(), -32768);   // 0x8000 -> -32768 (sign extended)
+    assert.eq(test_i16x8_extract_lane_s_4(), -1);       // 0xFFFF -> -1 (sign extended)
+    assert.eq(test_i16x8_extract_lane_s_5(), -32767);   // 0x8001 -> -32767 (sign extended)
+
+    // Test i16x8.extract_lane_u (unsigned)
+    // Expected values: all 16-bit values interpreted as unsigned 0-65535
+    assert.eq(test_i16x8_extract_lane_u_0(), 0);        // 0x0000 -> 0
+    assert.eq(test_i16x8_extract_lane_u_3(), 32768);    // 0x8000 -> 32768 (unsigned)
+    assert.eq(test_i16x8_extract_lane_u_4(), 65535);    // 0xFFFF -> 65535 (unsigned)
+    assert.eq(test_i16x8_extract_lane_u_5(), 32769);    // 0x8001 -> 32769 (unsigned)
 
     // Test i32x4.extract_lane
     assert.eq(test_i32x4_extract_lane_0(), 0x12345678);
