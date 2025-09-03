@@ -4118,6 +4118,7 @@ ipintOp(_simd_i8x16_extract_lane_u, macro()
 end)
 
 unimplementedInstruction(_simd_i8x16_replace_lane)
+
 ipintOp(_simd_i16x8_extract_lane_s, macro()
     # i16x8.extract_lane_s (lane)
     loadb 2[PC], t0  # lane index
@@ -4130,6 +4131,7 @@ ipintOp(_simd_i16x8_extract_lane_s, macro()
     advancePC(3)
     nextIPIntInstruction()
 end)
+
 ipintOp(_simd_i16x8_extract_lane_u, macro()
     # i16x8.extract_lane_u (lane)
     loadb 2[PC], t0  # lane index
@@ -4141,30 +4143,16 @@ ipintOp(_simd_i16x8_extract_lane_u, macro()
     advancePC(3)
     nextIPIntInstruction()
 end)
+
 unimplementedInstruction(_simd_i16x8_replace_lane)
 
 ipintOp(_simd_i32x4_extract_lane, macro()
     # i32x4.extract_lane (lane)
     loadb 2[PC], t0  # lane index
-    andi 0x3, t0
-    popv v0
-    if ARM64 or ARM64E
-        pcrtoaddr _simd_i32x4_extract_lane_0, t1
-        leap [t1, t0, 8], t0
-        emit "br x0"
-        _simd_i32x4_extract_lane_0:
-        umovi t0, v0_i, 0
-        jmp _simd_i32x4_extract_lane_end
-        umovi t0, v0_i, 1
-        jmp _simd_i32x4_extract_lane_end
-        umovi t0, v0_i, 2
-        jmp _simd_i32x4_extract_lane_end
-        umovi t0, v0_i, 3
-        jmp _simd_i32x4_extract_lane_end
-    elsif X86_64
-        # FIXME: implement SIMD instructions for x86 and finish this implementation!
-    end
-_simd_i32x4_extract_lane_end:
+    andi 0x3, t0     # i:ImmLaneIdx4 (4 lanes: 0-3)
+    lshifti 2, t0    # multiply by 4 for 32-bit offset
+    loadi [sp, t0], t0  # load 32-bit value at lane index from stack
+    addp V128ISize, sp  # pop the v128 from stack
     pushInt32(t0)
     advancePC(3)
     nextIPIntInstruction()
