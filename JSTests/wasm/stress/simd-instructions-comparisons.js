@@ -3,7 +3,7 @@
 import { instantiate } from "../wabt-wrapper.js"
 import * as assert from "../assert.js"
 
-const verbose = true;
+const verbose = false;
 
 // Table-driven test data for SIMD comparison instructions
 // Each entry: [instruction, input0, input1, expected_output]
@@ -141,6 +141,12 @@ const comparisonTests = [
         "(v128.const i16x8 0x0001 0x0002 0x8000 0x7FFF 0x0000 0x8002 0x0003 0x0004)",
         [0xFFFF, 0xFFFF, 0x0000, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // 0<1, 1<2, 0x7FFF>0x8000(signed), 0x8000<0x7FFF(signed), -1<0, etc.
     ],
+    [
+        "i16x8.lt_s",
+        "(v128.const i16x8 0x0001 0x0000 0x7FFF 0x8001 0xFFFF 0x0002 0x8000 0x0005)",
+        "(v128.const i16x8 0x0000 0x0001 0x8000 0x8000 0x0000 0x0001 0x7FFF 0x0004)",
+        [0x0000, 0xFFFF, 0x0000, 0x0000, 0xFFFF, 0x0000, 0xFFFF, 0x0000] // Mixed results: false, true, false, false, true, false, true, false
+    ],
 
     // i16x8.lt_u tests (unsigned less than)
     [
@@ -148,6 +154,12 @@ const comparisonTests = [
         "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
         "(v128.const i16x8 0x0001 0x0002 0x8000 0x8001 0x0000 0x8002 0x0003 0x0004)",
         [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0x0000, 0xFFFF, 0xFFFF, 0xFFFF] // All unsigned comparisons
+    ],
+    [
+        "i16x8.lt_u",
+        "(v128.const i16x8 0x0001 0x0000 0x8000 0x7FFF 0x0002 0xFFFF 0x8001 0x0005)",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0x0001 0x0000 0x8002 0x0004)",
+        [0x0000, 0xFFFF, 0x0000, 0xFFFF, 0x0000, 0x0000, 0xFFFF, 0x0000] // Mixed results: false, true, false, true, false, false, true, false
     ],
 
     // i16x8.gt_s tests (signed greater than)
@@ -157,6 +169,12 @@ const comparisonTests = [
         "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
         [0xFFFF, 0xFFFF, 0x0000, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // Reverse of lt_s test
     ],
+    [
+        "i16x8.gt_s",
+        "(v128.const i16x8 0x0000 0x0001 0x8000 0x8000 0x0000 0x0001 0x7FFF 0x0004)",
+        "(v128.const i16x8 0x0001 0x0000 0x7FFF 0x8001 0xFFFF 0x0002 0x8000 0x0005)",
+        [0x0000, 0xFFFF, 0x0000, 0x0000, 0xFFFF, 0x0000, 0xFFFF, 0x0000] // Mixed results: false, true, false, false, true, false, true, false
+    ],
 
     // i16x8.gt_u tests (unsigned greater than)
     [
@@ -164,6 +182,12 @@ const comparisonTests = [
         "(v128.const i16x8 0x0001 0x0002 0x8000 0x8001 0x0000 0x8002 0x0003 0x0004)",
         "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
         [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0x0000, 0xFFFF, 0xFFFF, 0xFFFF] // Reverse of lt_u test
+    ],
+    [
+        "i16x8.gt_u",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0x0001 0x0000 0x8002 0x0004)",
+        "(v128.const i16x8 0x0001 0x0000 0x8000 0x7FFF 0x0002 0xFFFF 0x8001 0x0005)",
+        [0x0000, 0xFFFF, 0x0000, 0xFFFF, 0x0000, 0x0000, 0xFFFF, 0x0000] // Mixed results: false, true, false, true, false, false, true, false
     ],
 
     // i16x8.le_s tests (signed less than or equal)
@@ -231,7 +255,13 @@ const comparisonTests = [
         "i32x4.lt_s",
         "(v128.const i32x4 0x00000000 0x7FFFFFFF 0x80000000 0xFFFFFFFF)",
         "(v128.const i32x4 0x00000001 0x80000000 0x7FFFFFFF 0x00000000)",
-        [0xFFFFFFFF, 0x0000000, 0xFFFFFFFF, 0xFFFFFFFF] // 0<1, 0x7FFFFFFF>0x80000000(signed), 0x80000000<0x7FFFFFFF(signed), -1<0
+        [0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF] // 0<1, 0x7FFFFFFF>0x80000000(signed), 0x80000000<0x7FFFFFFF(signed), -1<0
+    ],
+    [
+        "i32x4.lt_s",
+        "(v128.const i32x4 0x00000001 0x80000000 0x00000000 0x7FFFFFFF)",
+        "(v128.const i32x4 0x00000000 0x7FFFFFFF 0xFFFFFFFF 0x80000000)",
+        [0x00000000, 0xFFFFFFFF, 0x00000000, 0x00000000] // Mixed results: false, true, false, false
     ],
 
     // i32x4.lt_u tests (unsigned less than)
@@ -241,6 +271,12 @@ const comparisonTests = [
         "(v128.const i32x4 0x00000001 0x80000000 0x80000001 0x00000000)",
         [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000] // All unsigned comparisons
     ],
+    [
+        "i32x4.lt_u",
+        "(v128.const i32x4 0x00000001 0x80000000 0x00000000 0x7FFFFFFF)",
+        "(v128.const i32x4 0x00000000 0x7FFFFFFF 0xFFFFFFFF 0x80000000)",
+        [0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF] // Mixed results: false, false, true, true
+    ],
 
     // i32x4.gt_s tests (signed greater than)
     [
@@ -249,6 +285,12 @@ const comparisonTests = [
         "(v128.const i32x4 0x00000000 0x7FFFFFFF 0x80000000 0xFFFFFFFF)",
         [0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF] // Reverse of lt_s test
     ],
+    [
+        "i32x4.gt_s",
+        "(v128.const i32x4 0x00000000 0x7FFFFFFF 0xFFFFFFFF 0x80000000)",
+        "(v128.const i32x4 0x00000001 0x80000000 0x00000000 0x7FFFFFFF)",
+        [0x00000000, 0xFFFFFFFF, 0x00000000, 0x00000000] // Mixed results: false, true, false, false
+    ],
 
     // i32x4.gt_u tests (unsigned greater than)
     [
@@ -256,6 +298,12 @@ const comparisonTests = [
         "(v128.const i32x4 0x00000001 0x80000000 0x80000001 0x00000000)",
         "(v128.const i32x4 0x00000000 0x7FFFFFFF 0x80000000 0xFFFFFFFF)",
         [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000] // Reverse of lt_u test
+    ],
+    [
+        "i32x4.gt_u",
+        "(v128.const i32x4 0x00000000 0x7FFFFFFF 0xFFFFFFFF 0x80000000)",
+        "(v128.const i32x4 0x00000001 0x80000000 0x00000000 0x7FFFFFFF)",
+        [0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF] // Mixed results: false, false, true, true
     ],
 
     // i32x4.le_s tests (signed less than or equal)
