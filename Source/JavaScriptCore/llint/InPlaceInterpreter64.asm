@@ -5088,7 +5088,20 @@ ipintOp(_simd_i8x16_sub_sat_s, macro()
     advancePC(2)
     nextIPIntInstruction()
 end)
-unimplementedInstruction(_simd_i8x16_sub_sat_u)
+
+ipintOp(_simd_i8x16_sub_sat_u, macro()
+    # i8x16.sub_sat_u - subtract 16 8-bit unsigned integers with saturation
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "uqsub v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x74 - 0xFD 0x75: f64x2 operations
 unimplementedInstruction(_simd_f64x2_ceil)
