@@ -211,6 +211,9 @@ async function test() {
         comparisonTests.forEach((test, testIndex) => {
             const [instruction, input0, input1, expected] = test;
             
+            if (verbose)
+                print(`Testing ${instruction} test ${testIndex}...`);
+            
             clearMemory();
             
             // Call the test function
