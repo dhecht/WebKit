@@ -111,13 +111,13 @@ const comparisonTests = [
         "i16x8.eq",
         "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
         "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
-        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // All equal
     ],
     [
         "i16x8.eq",
         "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
         "(v128.const i16x8 0x0001 0x0000 0x8000 0x7FFF 0x8001 0xFFFF 0x0003 0x0002)",
-        [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000] // All different
     ],
 
     // i32x4.eq tests
@@ -125,13 +125,13 @@ const comparisonTests = [
         "i32x4.eq",
         "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
         "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
-        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // All equal
     ],
     [
         "i32x4.eq",
         "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
         "(v128.const i32x4 0x12345679 0x9ABCDEF0 0x11111110 0x22222222)",
-        [0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF]
+        [0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF] // Different, equal, different, equal
     ],
 
     // f32x4.eq tests
@@ -139,13 +139,13 @@ const comparisonTests = [
         "f32x4.eq",
         "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
         "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
-        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // All equal
     ],
     [
         "f32x4.eq",
         "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
         "(v128.const f32x4 1.6 -2.25 3.76 -4.125)",
-        [0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF]
+        [0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF] // Different, equal, different, equal
     ],
 
     // f64x2.eq tests
@@ -153,13 +153,13 @@ const comparisonTests = [
         "f64x2.eq",
         "(v128.const f64x2 1.25 -3.5)",
         "(v128.const f64x2 1.25 -3.5)",
-        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        [0xFFFFFFFFFFFFFFFFn, 0xFFFFFFFFFFFFFFFFn] // Both equal
     ],
     [
         "f64x2.eq",
         "(v128.const f64x2 1.25 -3.5)",
         "(v128.const f64x2 1.26 -3.5)",
-        [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        [0x0000000000000000n, 0xFFFFFFFFFFFFFFFFn] // Different, equal
     ]
 ];
 
@@ -198,6 +198,9 @@ async function test() {
     const memory = instance.exports.memory;
     const buffer = memory.buffer;
     const u8 = new Uint8Array(buffer);
+    const u16 = new Uint16Array(buffer);
+    const u32 = new Uint32Array(buffer);
+    const u64 = new BigUint64Array(buffer);
 
     function clearMemory() {
         u8.fill(0);
@@ -214,29 +217,32 @@ async function test() {
             const testFunc = instance.exports[`test_${testIndex}`];
             testFunc(0);
             
-            // Verify the result
-            for (let byteIndex = 0; byteIndex < 16; byteIndex++) {
-                const actual = u8[byteIndex];
-                const expectedByte = expected[byteIndex];
-                
-                if (actual !== expectedByte) {
-                    throw new Error(
-                        `Test ${testIndex} (${instruction}) failed at byte ${byteIndex}: ` +
-                        `expected 0x${expectedByte.toString(16).padStart(2, '0')}, ` +
-                        `got 0x${actual.toString(16).padStart(2, '0')}`
-                    );
-                }
+            // Verify the result using appropriate data type
+            if (instruction.startsWith('i8x16.')) {
+                // i8x16 instructions: verify as bytes
+                for (let j = 0; j < 16; j++)
+                    assert.eq(u8[j], expected[j]);
+            } else if (instruction.startsWith('i16x8.')) {
+                // i16x8 instructions: verify as 16-bit words
+                for (let j = 0; j < 8; j++)
+                    assert.eq(u16[j], expected[j]);
+            } else if (instruction.startsWith('i32x4.') || instruction.startsWith('f32x4.')) {
+                // i32x4 and f32x4 instructions: verify as 32-bit words
+                for (let j = 0; j < 4; j++)
+                    assert.eq(u32[j], expected[j]);
+            } else if (instruction.startsWith('f64x2.')) {
+                // f64x2 instructions: verify as 64-bit words
+                for (let j = 0; j < 2; j++)
+                    assert.eq(u64[j], expected[j]);
             }
             
-            if (verbose) {
+            if (verbose)
                 print(`✓ ${instruction} test ${testIndex} passed`);
-            }
         });
     }
     
-    if (verbose) {
+    if (verbose)
         print(`All ${comparisonTests.length} SIMD comparison tests passed!`);
-    }
 }
 
 await assert.asyncTest(test())
