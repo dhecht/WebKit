@@ -5019,6 +5019,7 @@ unimplementedInstruction(_simd_f32x4_nearest)
 unimplementedInstruction(_simd_i8x16_shl)
 unimplementedInstruction(_simd_i8x16_shr_s)
 unimplementedInstruction(_simd_i8x16_shr_u)
+
 ipintOp(_simd_i8x16_add, macro()
     # i8x16.add - add 16 8-bit integers
     popVec(v1)
