@@ -5389,28 +5389,21 @@ reservedOpcode(0xfdd401)
 
 ipintOp(_simd_i64x2_mul, macro()
     # i64x2.mul - multiply 2 64-bit integers (low 64 bits of result)
-    popVec(v1)
-    popVec(v0)
-    if ARM64 or ARM64E
-        # ARM64 doesn't have direct 64-bit multiply in NEON, use scalar multiply in loop
-        emit "dup d18, v16.d[0]"
-        emit "dup d19, v17.d[0]"
-        emit "fmov x0, d18"
-        emit "fmov x1, d19"
-        emit "mul x0, x0, x1"
-        emit "fmov d18, x0"
-        emit "dup d20, v16.d[1]"
-        emit "dup d21, v17.d[1]"
-        emit "fmov x0, d20"
-        emit "fmov x1, d21"
-        emit "mul x0, x0, x1"
-        emit "fmov d19, x0"
-        emit "mov v16.d[0], v18.d[0]"
-        emit "mov v16.d[1], v19.d[0]"
-    else
-        break # Not implemented
-    end
-    pushVec(v0)
+
+    # Extract and multiply lane 0 (first 64-bit element)
+    loadq [sp], t0            # Load lane 0 of vector1
+    loadq 16[sp], t1          # Load lane 0 of vector0
+    mulq t1, t0               # Multiply: t0 = t0 * t1
+    storeq t0, 16[sp]         # Store result back to vector0
+
+    # Extract and multiply lane 1 (second 64-bit element)
+    loadq 8[sp], t0           # Load lane 1 of vector1
+    loadq 24[sp], t1          # Load lane 1 of vector0
+    mulq t1, t0               # Multiply: t0 = t0 * t1
+    storeq t0, 24[sp]         # Store result back to vector0
+
+    # Pop vector1, result in vector0
+    addp V128ISize, sp        # Remove first vector from stack, leaving result
     advancePC(2)
     nextIPIntInstruction()
 end)
