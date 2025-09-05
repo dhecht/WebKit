@@ -4250,7 +4250,40 @@ ipintOp(_simd_v128_const, macro()
 end)
 
 # 0xFD 0x0D - 0xFD 0x14: splat (+ shuffle/swizzle)
-unimplementedInstruction(_simd_i8x16_shuffle)
+ipintOp(_simd_i8x16_shuffle, macro()
+    # i8x16.shuffle - shuffle bytes from two v128 operands using 16-byte immediate mask
+    popVec(v1)  # second operand
+    popVec(v0)  # first operand
+    
+    if ARM64 or ARM64E
+        # Load 16-byte shuffle mask from PC+2 (after opcode bytes)
+        loadv 2[PC], v2
+        
+        # Create mask to identify indices >= 16 (second operand)
+        # Compare mask indices with 16 using unsigned comparison
+        emit "movi v3.16b, #16"
+        emit "cmhs v4.16b, v2.16b, v3.16b"  # v4 = (mask >= 16) ? 0xFF : 0x00
+        
+        # Adjust indices for second operand by subtracting 16
+        emit "sub v5.16b, v2.16b, v3.16b"   # v5 = mask - 16
+        
+        # Use original mask for first operand, adjusted mask for second
+        emit "tbl v6.16b, {v0.16b}, v2.16b"  # lookup from first operand
+        emit "tbl v7.16b, {v1.16b}, v5.16b"  # lookup from second operand
+        
+        # Select results based on comparison mask
+        emit "bsl v4.16b, v7.16b, v6.16b"   # v4 = mask ? second : first
+        
+        # Move result to v0 for pushing
+        emit "mov v16.16b, v4.16b"
+    else
+        break # Not implemented for other architectures
+    end
+    
+    pushVec(v0)
+    advancePC(18)  # 2 bytes opcode + 16 bytes shuffle mask
+    nextIPIntInstruction()
+end)
 unimplementedInstruction(_simd_i8x16_swizzle)
 unimplementedInstruction(_simd_i8x16_splat)
 unimplementedInstruction(_simd_i16x8_splat)
