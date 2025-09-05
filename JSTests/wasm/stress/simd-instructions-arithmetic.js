@@ -164,12 +164,54 @@ const arithmeticTests = [
         [0x0000000000000001n, 0x7FFFFFFFFFFFFFFFn]
     ],
 
-    // i64x2.mul tests
+    // i64x2.mul tests - comprehensive testing including wrapping
     [
         "i64x2.mul",
         "(v128.const i64x2 0x0000000000000002 0x0000000000000003)",
         "(v128.const i64x2 0x0000000000000002 0x0000000000000003)",
         [0x0000000000000004n, 0x0000000000000009n]
+    ],
+    // Test wrapping behavior with large numbers
+    [
+        "i64x2.mul",
+        "(v128.const i64x2 0xFFFFFFFFFFFFFFFF 0x8000000000000000)",
+        "(v128.const i64x2 0x0000000000000002 0x0000000000000002)",
+        [0xFFFFFFFFFFFFFFFEn, 0x0000000000000000n]  // -1 * 2 = -2 (0xFFFE...), MIN_INT64 * 2 = 0 (wraps)
+    ],
+    // Test multiplication that causes overflow/wrapping
+    [
+        "i64x2.mul",
+        "(v128.const i64x2 0x0000000100000000 0x0000000200000000)",
+        "(v128.const i64x2 0x0000000100000000 0x0000000200000000)",
+        [0x0000000000000000n, 0x0000000000000000n]  // Both overflow and wrap to 0
+    ],
+    // Test with maximum positive values
+    [
+        "i64x2.mul",
+        "(v128.const i64x2 0x7FFFFFFFFFFFFFFF 0x0000000000000001)",
+        "(v128.const i64x2 0x0000000000000002 0x7FFFFFFFFFFFFFFF)",
+        [0xFFFFFFFFFFFFFFFEn, 0x7FFFFFFFFFFFFFFFn]  // MAX_INT64 * 2 wraps to -2, 1 * MAX_INT64 = MAX_INT64
+    ],
+    // Test edge case: multiply by zero
+    [
+        "i64x2.mul",
+        "(v128.const i64x2 0xFFFFFFFFFFFFFFFF 0x8000000000000000)",
+        "(v128.const i64x2 0x0000000000000000 0x0000000000000000)",
+        [0x0000000000000000n, 0x0000000000000000n]
+    ],
+    // Test edge case: multiply by one
+    [
+        "i64x2.mul",
+        "(v128.const i64x2 0xFFFFFFFFFFFFFFFF 0x8000000000000000)",
+        "(v128.const i64x2 0x0000000000000001 0x0000000000000001)",
+        [0xFFFFFFFFFFFFFFFFn, 0x8000000000000000n]
+    ],
+    // Test large prime numbers that will cause wrapping
+    [
+        "i64x2.mul",
+        "(v128.const i64x2 0x00000000FFFFFFFF 0x0000FFFFFFFFFFFF)",
+        "(v128.const i64x2 0x00000000FFFFFFFF 0x0000000000000010)",
+        [0xFFFFFFFE00000001n, 0x000FFFFFFFFFFFF0n]  // Test 32-bit and 48-bit boundary cases
     ]
 ];
 
