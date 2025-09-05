@@ -120,6 +120,84 @@ const comparisonTests = [
         [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000] // All different
     ],
 
+    // i16x8.ne tests
+    [
+        "i16x8.ne",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000] // All equal, so ne = false
+    ],
+    [
+        "i16x8.ne",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        "(v128.const i16x8 0x0001 0x0000 0x8000 0x7FFF 0x8001 0xFFFF 0x0003 0x0002)",
+        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // All different
+    ],
+
+    // i16x8.lt_s tests (signed less than)
+    [
+        "i16x8.lt_s",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        "(v128.const i16x8 0x0001 0x0002 0x8000 0x7FFF 0x0000 0x8002 0x0003 0x0004)",
+        [0xFFFF, 0xFFFF, 0x0000, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // 0<1, 1<2, 0x7FFF>0x8000(signed), 0x8000<0x7FFF(signed), -1<0, etc.
+    ],
+
+    // i16x8.lt_u tests (unsigned less than)
+    [
+        "i16x8.lt_u",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        "(v128.const i16x8 0x0001 0x0002 0x8000 0x8001 0x0000 0x8002 0x0003 0x0004)",
+        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0x0000, 0xFFFF, 0xFFFF, 0xFFFF] // All unsigned comparisons
+    ],
+
+    // i16x8.gt_s tests (signed greater than)
+    [
+        "i16x8.gt_s",
+        "(v128.const i16x8 0x0001 0x0002 0x8000 0x7FFF 0x0000 0x8002 0x0003 0x0004)",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        [0xFFFF, 0xFFFF, 0x0000, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // Reverse of lt_s test
+    ],
+
+    // i16x8.gt_u tests (unsigned greater than)
+    [
+        "i16x8.gt_u",
+        "(v128.const i16x8 0x0001 0x0002 0x8000 0x8001 0x0000 0x8002 0x0003 0x0004)",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0x0000, 0xFFFF, 0xFFFF, 0xFFFF] // Reverse of lt_u test
+    ],
+
+    // i16x8.le_s tests (signed less than or equal)
+    [
+        "i16x8.le_s",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // All equal
+    ],
+
+    // i16x8.le_u tests (unsigned less than or equal)
+    [
+        "i16x8.le_u",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // All equal
+    ],
+
+    // i16x8.ge_s tests (signed greater than or equal)
+    [
+        "i16x8.ge_s",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // All equal
+    ],
+
+    // i16x8.ge_u tests (unsigned greater than or equal)
+    [
+        "i16x8.ge_u",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        "(v128.const i16x8 0x0000 0x0001 0x7FFF 0x8000 0xFFFF 0x8001 0x0002 0x0003)",
+        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF] // All equal
+    ],
+
     // i32x4.eq tests
     [
         "i32x4.eq",
@@ -132,6 +210,84 @@ const comparisonTests = [
         "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
         "(v128.const i32x4 0x12345679 0x9ABCDEF0 0x11111110 0x22222222)",
         [0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF] // Different, equal, different, equal
+    ],
+
+    // i32x4.ne tests
+    [
+        "i32x4.ne",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        [0x00000000, 0x00000000, 0x00000000, 0x00000000] // All equal, so ne = false
+    ],
+    [
+        "i32x4.ne",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        "(v128.const i32x4 0x12345679 0x9ABCDEF0 0x11111110 0x22222222)",
+        [0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000] // Different, equal, different, equal
+    ],
+
+    // i32x4.lt_s tests (signed less than)
+    [
+        "i32x4.lt_s",
+        "(v128.const i32x4 0x00000000 0x7FFFFFFF 0x80000000 0xFFFFFFFF)",
+        "(v128.const i32x4 0x00000001 0x80000000 0x7FFFFFFF 0x00000000)",
+        [0xFFFFFFFF, 0x0000000, 0xFFFFFFFF, 0xFFFFFFFF] // 0<1, 0x7FFFFFFF>0x80000000(signed), 0x80000000<0x7FFFFFFF(signed), -1<0
+    ],
+
+    // i32x4.lt_u tests (unsigned less than)
+    [
+        "i32x4.lt_u",
+        "(v128.const i32x4 0x00000000 0x7FFFFFFF 0x80000000 0xFFFFFFFF)",
+        "(v128.const i32x4 0x00000001 0x80000000 0x80000001 0x00000000)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000] // All unsigned comparisons
+    ],
+
+    // i32x4.gt_s tests (signed greater than)
+    [
+        "i32x4.gt_s",
+        "(v128.const i32x4 0x00000001 0x80000000 0x7FFFFFFF 0x00000000)",
+        "(v128.const i32x4 0x00000000 0x7FFFFFFF 0x80000000 0xFFFFFFFF)",
+        [0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF] // Reverse of lt_s test
+    ],
+
+    // i32x4.gt_u tests (unsigned greater than)
+    [
+        "i32x4.gt_u",
+        "(v128.const i32x4 0x00000001 0x80000000 0x80000001 0x00000000)",
+        "(v128.const i32x4 0x00000000 0x7FFFFFFF 0x80000000 0xFFFFFFFF)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000] // Reverse of lt_u test
+    ],
+
+    // i32x4.le_s tests (signed less than or equal)
+    [
+        "i32x4.le_s",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // All equal
+    ],
+
+    // i32x4.le_u tests (unsigned less than or equal)
+    [
+        "i32x4.le_u",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // All equal
+    ],
+
+    // i32x4.ge_s tests (signed greater than or equal)
+    [
+        "i32x4.ge_s",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // All equal
+    ],
+
+    // i32x4.ge_u tests (unsigned greater than or equal)
+    [
+        "i32x4.ge_u",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        "(v128.const i32x4 0x12345678 0x9ABCDEF0 0x11111111 0x22222222)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // All equal
     ],
 
     // f32x4.eq tests
@@ -148,6 +304,52 @@ const comparisonTests = [
         [0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF] // Different, equal, different, equal
     ],
 
+    // f32x4.ne tests
+    [
+        "f32x4.ne",
+        "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
+        "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
+        [0x00000000, 0x00000000, 0x00000000, 0x00000000] // All equal, so ne = false
+    ],
+    [
+        "f32x4.ne",
+        "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
+        "(v128.const f32x4 1.6 -2.25 3.76 -4.125)",
+        [0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000] // Different, equal, different, equal
+    ],
+
+    // f32x4.lt tests
+    [
+        "f32x4.lt",
+        "(v128.const f32x4 1.0 -2.0 3.0 -4.0)",
+        "(v128.const f32x4 2.0 -1.0 4.0 -3.0)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // 1.0<2.0, -2.0<-1.0, 3.0<4.0, -4.0<-3.0
+    ],
+
+    // f32x4.gt tests
+    [
+        "f32x4.gt",
+        "(v128.const f32x4 2.0 -1.0 4.0 -3.0)",
+        "(v128.const f32x4 1.0 -2.0 3.0 -4.0)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // 2.0>1.0, -1.0>-2.0, 4.0>3.0, -3.0>-4.0
+    ],
+
+    // f32x4.le tests
+    [
+        "f32x4.le",
+        "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
+        "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // All equal
+    ],
+
+    // f32x4.ge tests
+    [
+        "f32x4.ge",
+        "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
+        "(v128.const f32x4 1.5 -2.25 3.75 -4.125)",
+        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF] // All equal
+    ],
+
     // f64x2.eq tests
     [
         "f64x2.eq",
@@ -160,6 +362,52 @@ const comparisonTests = [
         "(v128.const f64x2 1.25 -3.5)",
         "(v128.const f64x2 1.26 -3.5)",
         [0x0000000000000000n, 0xFFFFFFFFFFFFFFFFn] // Different, equal
+    ],
+
+    // f64x2.ne tests
+    [
+        "f64x2.ne",
+        "(v128.const f64x2 1.25 -3.5)",
+        "(v128.const f64x2 1.25 -3.5)",
+        [0x0000000000000000n, 0x0000000000000000n] // Both equal, so ne = false
+    ],
+    [
+        "f64x2.ne",
+        "(v128.const f64x2 1.25 -3.5)",
+        "(v128.const f64x2 1.26 -3.5)",
+        [0xFFFFFFFFFFFFFFFFn, 0x0000000000000000n] // Different, equal
+    ],
+
+    // f64x2.lt tests
+    [
+        "f64x2.lt",
+        "(v128.const f64x2 1.0 -2.0)",
+        "(v128.const f64x2 2.0 -1.0)",
+        [0xFFFFFFFFFFFFFFFFn, 0xFFFFFFFFFFFFFFFFn] // 1.0<2.0, -2.0<-1.0
+    ],
+
+    // f64x2.gt tests
+    [
+        "f64x2.gt",
+        "(v128.const f64x2 2.0 -1.0)",
+        "(v128.const f64x2 1.0 -2.0)",
+        [0xFFFFFFFFFFFFFFFFn, 0xFFFFFFFFFFFFFFFFn] // 2.0>1.0, -1.0>-2.0
+    ],
+
+    // f64x2.le tests
+    [
+        "f64x2.le",
+        "(v128.const f64x2 1.25 -3.5)",
+        "(v128.const f64x2 1.25 -3.5)",
+        [0xFFFFFFFFFFFFFFFFn, 0xFFFFFFFFFFFFFFFFn] // Both equal
+    ],
+
+    // f64x2.ge tests
+    [
+        "f64x2.ge",
+        "(v128.const f64x2 1.25 -3.5)",
+        "(v128.const f64x2 1.25 -3.5)",
+        [0xFFFFFFFFFFFFFFFFn, 0xFFFFFFFFFFFFFFFFn] // Both equal
     ]
 ];
 

@@ -4366,7 +4366,6 @@ ipintOp(_simd_i8x16_eq, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 bytes for equality, result is 0xFF for equal, 0x00 for not equal
         emit "cmeq v16.16b, v16.16b, v17.16b"
     else
         break # Not implemented
@@ -4382,8 +4381,6 @@ ipintOp(_simd_i8x16_ne, macro()
     popVec(v0)
     if ARM64 or ARM64E
         # Compare 16 bytes for equality, then invert the result
-        # cmeq gives 0xFF for equal, 0x00 for not equal
-        # mvn inverts this to give 0x00 for equal, 0xFF for not equal
         emit "cmeq v16.16b, v16.16b, v17.16b"
         emit "mvn v16.16b, v16.16b"
     else
@@ -4399,7 +4396,6 @@ ipintOp(_simd_i8x16_lt_s, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 signed bytes: v0 < v1
         # cmgt v17, v16 gives us v1 > v0, which is equivalent to v0 < v1
         emit "cmgt v16.16b, v17.16b, v16.16b"
     else
@@ -4415,7 +4411,6 @@ ipintOp(_simd_i8x16_lt_u, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 unsigned bytes: v0 < v1
         # cmhi v17, v16 gives us v1 > v0 (unsigned), which is equivalent to v0 < v1
         emit "cmhi v16.16b, v17.16b, v16.16b"
     else
@@ -4431,8 +4426,6 @@ ipintOp(_simd_i8x16_gt_s, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 signed bytes: v0 > v1
-        # cmgt v16, v17 gives us v0 > v1 (signed)
         emit "cmgt v16.16b, v16.16b, v17.16b"
     else
         break # Not implemented
@@ -4447,8 +4440,6 @@ ipintOp(_simd_i8x16_gt_u, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 unsigned bytes: v0 > v1
-        # cmhi v16, v17 gives us v0 > v1 (unsigned)
         emit "cmhi v16.16b, v16.16b, v17.16b"
     else
         break # Not implemented
@@ -4463,7 +4454,6 @@ ipintOp(_simd_i8x16_le_s, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 signed bytes: v0 <= v1
         # cmge v17, v16 gives us v1 >= v0, which is equivalent to v0 <= v1
         emit "cmge v16.16b, v17.16b, v16.16b"
     else
@@ -4479,7 +4469,6 @@ ipintOp(_simd_i8x16_le_u, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 unsigned bytes: v0 <= v1
         # cmhs v17, v16 gives us v1 >= v0 (unsigned), which is equivalent to v0 <= v1
         emit "cmhs v16.16b, v17.16b, v16.16b"
     else
@@ -4495,8 +4484,6 @@ ipintOp(_simd_i8x16_ge_s, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 signed bytes: v0 >= v1
-        # cmge v16, v17 gives us v0 >= v1 (signed)
         emit "cmge v16.16b, v16.16b, v17.16b"
     else
         break # Not implemented
@@ -4511,8 +4498,6 @@ ipintOp(_simd_i8x16_ge_u, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 16 unsigned bytes: v0 >= v1
-        # cmhs v16, v17 gives us v0 >= v1 (unsigned)
         emit "cmhs v16.16b, v16.16b, v17.16b"
     else
         break # Not implemented
@@ -4528,7 +4513,6 @@ ipintOp(_simd_i16x8_eq, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 8 halfwords for equality, result is 0xFFFF for equal, 0x0000 for not equal
         emit "cmeq v16.8h, v16.8h, v17.8h"
     else
         break # Not implemented
@@ -4538,15 +4522,136 @@ ipintOp(_simd_i16x8_eq, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_i16x8_ne)
-unimplementedInstruction(_simd_i16x8_lt_s)
-unimplementedInstruction(_simd_i16x8_lt_u)
-unimplementedInstruction(_simd_i16x8_gt_s)
-unimplementedInstruction(_simd_i16x8_gt_u)
-unimplementedInstruction(_simd_i16x8_le_s)
-unimplementedInstruction(_simd_i16x8_le_u)
-unimplementedInstruction(_simd_i16x8_ge_s)
-unimplementedInstruction(_simd_i16x8_ge_u)
+ipintOp(_simd_i16x8_ne, macro()
+    # i16x8.ne - compare 8 16-bit integers for inequality
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmeq v16.8h, v16.8h, v17.8h"
+        emit "mvn v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_lt_s, macro()
+    # i16x8.lt_s - compare 8 16-bit signed integers for less than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmgt v17, v16 gives us v1 > v0, which is equivalent to v0 < v1
+        emit "cmgt v16.8h, v17.8h, v16.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_lt_u, macro()
+    # i16x8.lt_u - compare 8 16-bit unsigned integers for less than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmhi v17, v16 gives us v1 > v0 (unsigned), which is equivalent to v0 < v1
+        emit "cmhi v16.8h, v17.8h, v16.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_gt_s, macro()
+    # i16x8.gt_s - compare 8 16-bit signed integers for greater than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmgt v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_gt_u, macro()
+    # i16x8.gt_u - compare 8 16-bit unsigned integers for greater than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmhi v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_le_s, macro()
+    # i16x8.le_s - compare 8 16-bit signed integers for less than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmge v17, v16 gives us v1 >= v0, which is equivalent to v0 <= v1
+        emit "cmge v16.8h, v17.8h, v16.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_le_u, macro()
+    # i16x8.le_u - compare 8 16-bit unsigned integers for less than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmhs v17, v16 gives us v1 >= v0 (unsigned), which is equivalent to v0 <= v1
+        emit "cmhs v16.8h, v17.8h, v16.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_ge_s, macro()
+    # i16x8.ge_s - compare 8 16-bit signed integers for greater than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmge v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_ge_u, macro()
+    # i16x8.ge_u - compare 8 16-bit unsigned integers for greater than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmhs v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x37 - 0xFD 0x40: i32x4 operations
 ipintOp(_simd_i32x4_eq, macro()
@@ -4554,7 +4659,6 @@ ipintOp(_simd_i32x4_eq, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 4 words for equality, result is 0xFFFFFFFF for equal, 0x00000000 for not equal
         emit "cmeq v16.4s, v16.4s, v17.4s"
     else
         break # Not implemented
@@ -4563,15 +4667,137 @@ ipintOp(_simd_i32x4_eq, macro()
     advancePC(2)
     nextIPIntInstruction()
 end)
-unimplementedInstruction(_simd_i32x4_ne)
-unimplementedInstruction(_simd_i32x4_lt_s)
-unimplementedInstruction(_simd_i32x4_lt_u)
-unimplementedInstruction(_simd_i32x4_gt_s)
-unimplementedInstruction(_simd_i32x4_gt_u)
-unimplementedInstruction(_simd_i32x4_le_s)
-unimplementedInstruction(_simd_i32x4_le_u)
-unimplementedInstruction(_simd_i32x4_ge_s)
-unimplementedInstruction(_simd_i32x4_ge_u)
+
+ipintOp(_simd_i32x4_ne, macro()
+    # i32x4.ne - compare 4 32-bit integers for inequality
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmeq v16.4s, v16.4s, v17.4s"
+        emit "mvn v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_lt_s, macro()
+    # i32x4.lt_s - compare 4 32-bit signed integers for less than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmgt v17, v16 gives us v1 > v0, which is equivalent to v0 < v1
+        emit "cmgt v16.4s, v17.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_lt_u, macro()
+    # i32x4.lt_u - compare 4 32-bit unsigned integers for less than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmhi v17, v16 gives us v1 > v0 (unsigned), which is equivalent to v0 < v1
+        emit "cmhi v16.4s, v17.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_gt_s, macro()
+    # i32x4.gt_s - compare 4 32-bit signed integers for greater than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmgt v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_gt_u, macro()
+    # i32x4.gt_u - compare 4 32-bit unsigned integers for greater than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmhi v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_le_s, macro()
+    # i32x4.le_s - compare 4 32-bit signed integers for less than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmge v17, v16 gives us v1 >= v0, which is equivalent to v0 <= v1
+        emit "cmge v16.4s, v17.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_le_u, macro()
+    # i32x4.le_u - compare 4 32-bit unsigned integers for less than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmhs v17, v16 gives us v1 >= v0 (unsigned), which is equivalent to v0 <= v1
+        emit "cmhs v16.4s, v17.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_ge_s, macro()
+    # i32x4.ge_s - compare 4 32-bit signed integers for greater than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmge v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_ge_u, macro()
+    # i32x4.ge_u - compare 4 32-bit unsigned integers for greater than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmhs v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x41 - 0xFD 0x46: f32x4 operations
 ipintOp(_simd_f32x4_eq, macro()
@@ -4579,7 +4805,6 @@ ipintOp(_simd_f32x4_eq, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 4 single-precision floats for equality, result is 0xFFFFFFFF for equal, 0x00000000 for not equal
         emit "fcmeq v16.4s, v16.4s, v17.4s"
     else
         break # Not implemented
@@ -4588,11 +4813,79 @@ ipintOp(_simd_f32x4_eq, macro()
     advancePC(2)
     nextIPIntInstruction()
 end)
-unimplementedInstruction(_simd_f32x4_ne)
-unimplementedInstruction(_simd_f32x4_lt)
-unimplementedInstruction(_simd_f32x4_gt)
-unimplementedInstruction(_simd_f32x4_le)
-unimplementedInstruction(_simd_f32x4_ge)
+
+ipintOp(_simd_f32x4_ne, macro()
+    # f32x4.ne - compare 4 32-bit floats for inequality
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fcmeq v16.4s, v16.4s, v17.4s"
+        emit "mvn v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_lt, macro()
+    # f32x4.lt - compare 4 32-bit floats for less than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # fcmgt v17, v16 gives us v1 > v0, which is equivalent to v0 < v1
+        emit "fcmgt v16.4s, v17.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_gt, macro()
+    # f32x4.gt - compare 4 32-bit floats for greater than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fcmgt v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_le, macro()
+    # f32x4.le - compare 4 32-bit floats for less than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # fcmge v17, v16 gives us v1 >= v0, which is equivalent to v0 <= v1
+        emit "fcmge v16.4s, v17.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_ge, macro()
+    # f32x4.ge - compare 4 32-bit floats for greater than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fcmge v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x47 - 0xFD 0x4c: f64x2 operations
 ipintOp(_simd_f64x2_eq, macro()
@@ -4600,7 +4893,6 @@ ipintOp(_simd_f64x2_eq, macro()
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
-        # Compare 2 double-precision floats for equality, result is 0xFFFFFFFFFFFFFFFF for equal, 0x0000000000000000 for not equal
         emit "fcmeq v16.2d, v16.2d, v17.2d"
     else
         break # Not implemented
@@ -4609,11 +4901,79 @@ ipintOp(_simd_f64x2_eq, macro()
     advancePC(2)
     nextIPIntInstruction()
 end)
-unimplementedInstruction(_simd_f64x2_ne)
-unimplementedInstruction(_simd_f64x2_lt)
-unimplementedInstruction(_simd_f64x2_gt)
-unimplementedInstruction(_simd_f64x2_le)
-unimplementedInstruction(_simd_f64x2_ge)
+
+ipintOp(_simd_f64x2_ne, macro()
+    # f64x2.ne - compare 2 64-bit floats for inequality
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fcmeq v16.2d, v16.2d, v17.2d"
+        emit "mvn v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_lt, macro()
+    # f64x2.lt - compare 2 64-bit floats for less than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # fcmgt v17, v16 gives us v1 > v0, which is equivalent to v0 < v1
+        emit "fcmgt v16.2d, v17.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_gt, macro()
+    # f64x2.gt - compare 2 64-bit floats for greater than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fcmgt v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_le, macro()
+    # f64x2.le - compare 2 64-bit floats for less than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # fcmge v17, v16 gives us v1 >= v0, which is equivalent to v0 <= v1
+        emit "fcmge v16.2d, v17.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_ge, macro()
+    # f64x2.ge - compare 2 64-bit floats for greater than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fcmge v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x4D - 0xFD 0x53: v128 operations
 unimplementedInstruction(_simd_v128_not)
