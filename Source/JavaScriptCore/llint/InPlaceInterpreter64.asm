@@ -4368,12 +4368,11 @@ ipintOp(_simd_i8x16_eq, macro()
     if ARM64 or ARM64E
         # Compare 16 bytes for equality, result is 0xFF for equal, 0x00 for not equal
         emit "cmeq v16.16b, v16.16b, v17.16b"
-        pushVec(v0)
     else
-        # Fallback for other architectures - not implemented yet
-        break
+        break # Not implemented
     end
-    advancePC(3)
+    pushVec(v0)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4391,7 +4390,7 @@ ipintOp(_simd_i8x16_ne, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4407,7 +4406,7 @@ ipintOp(_simd_i8x16_lt_s, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4423,7 +4422,7 @@ ipintOp(_simd_i8x16_lt_u, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4439,7 +4438,7 @@ ipintOp(_simd_i8x16_gt_s, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4455,7 +4454,7 @@ ipintOp(_simd_i8x16_gt_u, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4471,7 +4470,7 @@ ipintOp(_simd_i8x16_le_s, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4487,7 +4486,7 @@ ipintOp(_simd_i8x16_le_u, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4503,7 +4502,7 @@ ipintOp(_simd_i8x16_ge_s, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4519,7 +4518,7 @@ ipintOp(_simd_i8x16_ge_u, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 
@@ -4535,9 +4534,10 @@ ipintOp(_simd_i16x8_eq, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
+
 unimplementedInstruction(_simd_i16x8_ne)
 unimplementedInstruction(_simd_i16x8_lt_s)
 unimplementedInstruction(_simd_i16x8_lt_u)
@@ -4560,7 +4560,7 @@ ipintOp(_simd_i32x4_eq, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 unimplementedInstruction(_simd_i32x4_ne)
@@ -4585,7 +4585,7 @@ ipintOp(_simd_f32x4_eq, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 unimplementedInstruction(_simd_f32x4_ne)
@@ -4606,7 +4606,7 @@ ipintOp(_simd_f64x2_eq, macro()
         break # Not implemented
     end
     pushVec(v0)
-    advancePC(3)
+    advancePC(2)
     nextIPIntInstruction()
 end)
 unimplementedInstruction(_simd_f64x2_ne)
