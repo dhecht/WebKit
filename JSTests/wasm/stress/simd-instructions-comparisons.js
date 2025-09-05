@@ -459,8 +459,4 @@ const comparisonTests = [
     ]
 ];
 
-async function test() {
-    await runSIMDTests(comparisonTests, verbose, "SIMD comparison");
-}
-
-await assert.asyncTest(test())
+await runSIMDTests(comparisonTests, verbose, "SIMD comparison");

@@ -173,8 +173,4 @@ const arithmeticTests = [
     ]
 ];
 
-async function test() {
-    await runSIMDTests(arithmeticTests, verbose, "SIMD arithmetic");
-}
-
-await assert.asyncTest(test())
+await runSIMDTests(arithmeticTests, verbose, "SIMD arithmetic");
