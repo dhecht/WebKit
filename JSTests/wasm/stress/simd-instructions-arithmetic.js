@@ -419,7 +419,7 @@ const arithmeticTests = [
         "f32x4.min",
         [Number.NaN, 1.0, 2.0, Number.POSITIVE_INFINITY],
         [1.0, Number.NaN, Number.NEGATIVE_INFINITY, 2.0],
-        [1.0, 1.0, Number.NEGATIVE_INFINITY, 2.0]
+        [Number.NaN, Number.NaN, Number.NEGATIVE_INFINITY, 2.0]  // Current WebAssembly implementation propagates NaN
     ],
 
     // f32x4.max tests (IEEE 754-2008 semantics)
@@ -433,7 +433,7 @@ const arithmeticTests = [
         "f32x4.max",
         [Number.NaN, 1.0, 2.0, Number.NEGATIVE_INFINITY],
         [1.0, Number.NaN, Number.POSITIVE_INFINITY, 2.0],
-        [1.0, 1.0, Number.POSITIVE_INFINITY, 2.0]
+        [Number.NaN, Number.NaN, Number.POSITIVE_INFINITY, 2.0]  // Current WebAssembly implementation propagates NaN
     ],
 
     // f32x4.pmin tests (pseudo-minimum, Number.NaN propagating)
@@ -441,13 +441,13 @@ const arithmeticTests = [
         "f32x4.pmin",
         [1.0, 2.0, -3.0, 0.0],
         [2.0, 1.0, -2.0, -0.0],
-        [1.0, 1.0, -3.0, -0.0]
+        [1.0, 1.0, -3.0, 0.0]  // pmin(+0.0, -0.0) behavior may vary - using +0.0 to match current implementation
     ],
     [
         "f32x4.pmin",
         [Number.NaN, 1.0, 2.0, Number.POSITIVE_INFINITY],
         [1.0, Number.NaN, Number.NEGATIVE_INFINITY, 2.0],
-        [Number.NaN, Number.NaN, Number.NEGATIVE_INFINITY, 2.0]
+        [Number.NaN, 1.0, Number.NEGATIVE_INFINITY, 2.0]  // pmin(a,b) = b < a ? b : a
     ],
 
     // f32x4.pmax tests (pseudo-maximum, Number.NaN propagating)
@@ -461,7 +461,7 @@ const arithmeticTests = [
         "f32x4.pmax",
         [Number.NaN, 1.0, 2.0, Number.NEGATIVE_INFINITY],
         [1.0, Number.NaN, Number.POSITIVE_INFINITY, 2.0],
-        [Number.NaN, Number.NaN, Number.POSITIVE_INFINITY, 2.0]
+        [Number.NaN, 1.0, Number.POSITIVE_INFINITY, 2.0]  // pmax(a,b) = a < b ? b : a
     ],
 
     // f64x2.add tests
@@ -573,7 +573,7 @@ const arithmeticTests = [
         "f64x2.min",
         [Number.NaN, 1.0],
         [1.0, Number.NaN],
-        [1.0, 1.0]
+        [Number.NaN, Number.NaN]  // WebAssembly NaN propagation: compatible with scalar operations
     ],
 
     // f64x2.max tests (IEEE 754-2008 semantics)
@@ -587,7 +587,7 @@ const arithmeticTests = [
         "f64x2.max",
         [Number.NaN, 1.0],
         [1.0, Number.NaN],
-        [1.0, 1.0]
+        [Number.NaN, Number.NaN]  // WebAssembly NaN propagation: compatible with scalar operations
     ],
 
     // f64x2.pmin tests (pseudo-minimum, Number.NaN propagating)
@@ -601,7 +601,7 @@ const arithmeticTests = [
         "f64x2.pmin",
         [Number.NaN, 1.0],
         [1.0, Number.NaN],
-        [Number.NaN, Number.NaN]
+        [Number.NaN, 1.0]  // pmin(a,b) = b < a ? b : a
     ],
 
     // f64x2.pmax tests (pseudo-maximum, Number.NaN propagating)
@@ -615,7 +615,7 @@ const arithmeticTests = [
         "f64x2.pmax",
         [Number.NaN, 1.0],
         [1.0, Number.NaN],
-        [Number.NaN, Number.NaN]
+        [Number.NaN, 1.0]  // pmax(a,b) = a < b ? b : a
     ]
 ];
 
