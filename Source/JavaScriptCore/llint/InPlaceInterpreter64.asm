@@ -4976,7 +4976,18 @@ ipintOp(_simd_f64x2_ge, macro()
 end)
 
 # 0xFD 0x4D - 0xFD 0x53: v128 operations
-unimplementedInstruction(_simd_v128_not)
+ipintOp(_simd_v128_not, macro()
+    # v128.not - bitwise NOT of 128-bit vector
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "mvn v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 ipintOp(_simd_v128_and, macro()
     # v128.and - bitwise AND of two 128-bit vectors
@@ -5054,8 +5065,33 @@ unimplementedInstruction(_simd_f32x4_demote_f64x2_zero)
 unimplementedInstruction(_simd_f64x2_promote_low_f32x4)
 
 # 0xFD 0x60 - 0x66: i8x16 operations
-unimplementedInstruction(_simd_i8x16_abs)
-unimplementedInstruction(_simd_i8x16_neg)
+
+ipintOp(_simd_i8x16_abs, macro()
+    # i8x16.abs - absolute value of 16 8-bit signed integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "abs v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i8x16_neg, macro()
+    # i8x16.neg - negate 16 8-bit integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "neg v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 unimplementedInstruction(_simd_i8x16_popcnt)
 unimplementedInstruction(_simd_i8x16_all_true)
 unimplementedInstruction(_simd_i8x16_bitmask)
@@ -5232,8 +5268,32 @@ unimplementedInstruction(_simd_i32x4_extadd_pairwise_i16x8_u)
 
 # 0xFD 0x80 0x01 - 0xFD 0x93 0x01: i16x8 operations
 
-unimplementedInstruction(_simd_i16x8_abs)
-unimplementedInstruction(_simd_i16x8_neg)
+ipintOp(_simd_i16x8_abs, macro()
+    # i16x8.abs - absolute value of 8 16-bit signed integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "abs v16.8h, v16.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_neg, macro()
+    # i16x8.neg - negate 8 16-bit integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "neg v16.8h, v16.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 unimplementedInstruction(_simd_i16x8_q15mulr_sat_s)
 unimplementedInstruction(_simd_i16x8_all_true)
 unimplementedInstruction(_simd_i16x8_bitmask)
@@ -5416,8 +5476,32 @@ unimplementedInstruction(_simd_i16x8_extmul_high_i8x16_u)
 
 # 0xFD 0xA0 0x01 - 0xFD 0xBF 0x01: i32x4 operations
 
-unimplementedInstruction(_simd_i32x4_abs)
-unimplementedInstruction(_simd_i32x4_neg)
+ipintOp(_simd_i32x4_abs, macro()
+    # i32x4.abs - absolute value of 4 32-bit signed integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "abs v16.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_neg, macro()
+    # i32x4.neg - negate 4 32-bit integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "neg v16.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 reservedOpcode(0xfda201)
 unimplementedInstruction(_simd_i32x4_all_true)
 unimplementedInstruction(_simd_i32x4_bitmask)
@@ -5545,8 +5629,32 @@ unimplementedInstruction(_simd_i32x4_extmul_high_i16x8_u)
 
 # 0xFD 0xC0 0x01 - 0xFD 0xDF 0x01: i64x2 operations
 
-unimplementedInstruction(_simd_i64x2_abs)
-unimplementedInstruction(_simd_i64x2_neg)
+ipintOp(_simd_i64x2_abs, macro()
+    # i64x2.abs - absolute value of 2 64-bit signed integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "abs v16.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_neg, macro()
+    # i64x2.neg - negate 2 64-bit integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "neg v16.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 reservedOpcode(0xfdc201)
 unimplementedInstruction(_simd_i64x2_all_true)
 unimplementedInstruction(_simd_i64x2_bitmask)
