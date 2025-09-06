@@ -10,7 +10,7 @@ import * as assert from "../assert.js"
  * @returns {string} - v128.const string
  */
 function arrayToV128Const(array, instruction) {
-    if (instruction.startsWith('i8x16.')) {
+    if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) {
         const hexValues = array.map(val => `0x${val.toString(16).padStart(2, '0').toUpperCase()}`);
         return `(v128.const i8x16 ${hexValues.join(' ')})`;
     } else if (instruction.startsWith('i16x8.')) {
@@ -90,7 +90,7 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
             testFunc(0);
             
             // Verify the result using appropriate data type
-            if (instruction.startsWith('i8x16.')) {
+            if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) {
                 for (let j = 0; j < 16; j++)
                     assert.eq(u8[j], expected[j]);
             } else if (instruction.startsWith('i16x8.')) {
@@ -102,6 +102,8 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
             } else if (instruction.startsWith('i64x2.') || instruction.startsWith('f64x2.')) {
                 for (let j = 0; j < 2; j++)
                     assert.eq(u64[j], expected[j]);
+            } else {
+                assert.fail(`Unhandled instruction format: ${instruction}`);
             }
             
             if (verbose)
