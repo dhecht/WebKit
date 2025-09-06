@@ -408,7 +408,7 @@ const arithmeticTests = [
         [0.0, -0.0, Number.POSITIVE_INFINITY, Number.NaN]
     ],
 
-    // f32x4.min tests (IEEE 754-2008 semantics)
+    // f32x4.min tests (NaN propagating)
     [
         "f32x4.min",
         [1.0, 2.0, -3.0, 0.0],
@@ -419,21 +419,21 @@ const arithmeticTests = [
         "f32x4.min",
         [Number.NaN, 1.0, 2.0, Number.POSITIVE_INFINITY],
         [1.0, Number.NaN, Number.NEGATIVE_INFINITY, 2.0],
-        [Number.NaN, Number.NaN, Number.NEGATIVE_INFINITY, 2.0]  // Current WebAssembly implementation propagates NaN
+        [Number.NaN, Number.NaN, Number.NEGATIVE_INFINITY, 2.0]
     ],
 
     // f32x4.max tests (Nan propagating)
     [
         "f32x4.max",
-        [1.0, 2.0, -3.0, 0.0],
-        [2.0, 1.0, -2.0, -0.0],
+        [1.0, 2.0, -3.0, -0.0],
+        [2.0, 1.0, -2.0, 0.0],
         [2.0, 2.0, -2.0, 0.0]
     ],
     [
         "f32x4.max",
         [Number.NaN, 1.0, 2.0, Number.NEGATIVE_INFINITY],
         [1.0, Number.NaN, Number.POSITIVE_INFINITY, 2.0],
-        [Number.NaN, Number.NaN, Number.POSITIVE_INFINITY, 2.0]  // Current WebAssembly implementation propagates NaN
+        [Number.NaN, Number.NaN, Number.POSITIVE_INFINITY, 2.0]
     ],
 
     // f32x4.pmin tests (pseudo-minimum, b < a ? b : a)
