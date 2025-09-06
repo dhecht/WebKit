@@ -5162,10 +5162,61 @@ unimplementedInstruction(_simd_f64x2_ceil)
 unimplementedInstruction(_simd_f64x2_floor)
 
 # 0xFD 0x76 - 0xFD 0x79: i8x16 binary operations
-unimplementedInstruction(_simd_i8x16_min_s)
-unimplementedInstruction(_simd_i8x16_min_u)
-unimplementedInstruction(_simd_i8x16_max_s)
-unimplementedInstruction(_simd_i8x16_max_u)
+ipintOp(_simd_i8x16_min_s, macro()
+    # i8x16.min_s - minimum of 16 8-bit signed integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smin v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i8x16_min_u, macro()
+    # i8x16.min_u - minimum of 16 8-bit unsigned integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umin v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i8x16_max_s, macro()
+    # i8x16.max_s - maximum of 16 8-bit signed integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smax v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i8x16_max_u, macro()
+    # i8x16.max_u - maximum of 16 8-bit unsigned integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umax v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x7A: f64x2 trunc
 unimplementedInstruction(_simd_f64x2_trunc)
@@ -5300,10 +5351,62 @@ ipintOp(_simd_i16x8_mul, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_i16x8_min_s)
-unimplementedInstruction(_simd_i16x8_min_u)
-unimplementedInstruction(_simd_i16x8_max_s)
-unimplementedInstruction(_simd_i16x8_max_u)
+ipintOp(_simd_i16x8_min_s, macro()
+    # i16x8.min_s - minimum of 8 16-bit signed integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smin v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_min_u, macro()
+    # i16x8.min_u - minimum of 8 16-bit unsigned integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umin v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_max_s, macro()
+    # i16x8.max_s - maximum of 8 16-bit signed integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smax v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_max_u, macro()
+    # i16x8.max_u - maximum of 8 16-bit unsigned integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umax v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 reservedOpcode(0xfd9a01)
 unimplementedInstruction(_simd_i16x8_avgr_u)
 unimplementedInstruction(_simd_i16x8_extmul_low_i8x16_s)
@@ -5377,10 +5480,62 @@ ipintOp(_simd_i32x4_mul, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_i32x4_min_s)
-unimplementedInstruction(_simd_i32x4_min_u)
-unimplementedInstruction(_simd_i32x4_max_s)
-unimplementedInstruction(_simd_i32x4_max_u)
+ipintOp(_simd_i32x4_min_s, macro()
+    # i32x4.min_s - minimum of 4 32-bit signed integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smin v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_min_u, macro()
+    # i32x4.min_u - minimum of 4 32-bit unsigned integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umin v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_max_s, macro()
+    # i32x4.max_s - maximum of 4 32-bit signed integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smax v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_max_u, macro()
+    # i32x4.max_u - maximum of 4 32-bit unsigned integers
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umax v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 unimplementedInstruction(_simd_i32x4_dot_i16x8_s)
 reservedOpcode(0xfdbb01)
 unimplementedInstruction(_simd_i32x4_extmul_low_i16x8_s)
