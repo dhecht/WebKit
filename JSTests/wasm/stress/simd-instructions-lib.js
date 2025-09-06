@@ -4,6 +4,18 @@ import { instantiate } from "../wabt-wrapper.js"
 import * as assert from "../assert.js"
 
 /**
+ * Convert a floating point value to WebAssembly text format
+ * @param {number} val - JavaScript number value
+ * @returns {string} - WebAssembly text format representation
+ */
+function floatToWasmText(val) {
+    if (val === Number.POSITIVE_INFINITY) return 'inf';
+    if (val === Number.NEGATIVE_INFINITY) return '-inf';
+    if (Number.isNaN(val)) return 'nan';
+    return val.toString();
+}
+
+/**
  * Convert array to v128.const string based on instruction type
  * @param {Array} array - Input array
  * @param {string} instruction - SIMD instruction name
@@ -26,9 +38,11 @@ function arrayToV128Const(array, instruction) {
         });
         return `(v128.const i64x2 ${hexValues.join(' ')})`;
     } else if (instruction.startsWith('f32x4.')) {
-        return `(v128.const f32x4 ${array.join(' ')})`;
+        const wasmValues = array.map(floatToWasmText);
+        return `(v128.const f32x4 ${wasmValues.join(' ')})`;
     } else if (instruction.startsWith('f64x2.')) {
-        return `(v128.const f64x2 ${array.join(' ')})`;
+        const wasmValues = array.map(floatToWasmText);
+        return `(v128.const f64x2 ${wasmValues.join(' ')})`;
     }
     // Default fallback - assume it's already a string
     return array;
@@ -51,11 +65,12 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
         const [instruction, input0, input1, expected] = test;
         const input0Str = Array.isArray(input0) ? arrayToV128Const(input0, instruction) : input0;
         const input1Str = Array.isArray(input1) ? arrayToV128Const(input1, instruction) : input1;
-
+        const isUnaryOp = instruction.includes('.abs') || instruction.includes('.neg') || instruction.includes('.sqrt');
+        
         wat += `
     (func (export "test_${index}") (param $addr i32)
         (v128.store (local.get $addr)
-            (${instruction} ${input0Str} ${input1Str}))
+            (${instruction} ${input0Str}${isUnaryOp ? '' : ' ' + input1Str}))
     )
 `;
     });
@@ -63,6 +78,11 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
     wat += `
 )
 `;
+
+    if (verbose) {
+        print("Generated WebAssembly text:");
+        print(wat);
+    }
 
     const instance = await instantiate(wat, {}, { simd: true });
     const memory = instance.exports.memory;

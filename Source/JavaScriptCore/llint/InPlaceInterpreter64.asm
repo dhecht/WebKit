@@ -5710,33 +5710,313 @@ unimplementedInstruction(_simd_i64x2_extmul_high_i32x4_u)
 
 # 0xFD 0xE0 0x01 - 0xFD 0xEB 0x01: f32x4 operations
 
-unimplementedInstruction(_simd_f32x4_abs)
-unimplementedInstruction(_simd_f32x4_neg)
+ipintOp(_simd_f32x4_abs, macro()
+    # f32x4.abs - absolute value of 4 32-bit floats
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fabs v16.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_neg, macro()
+    # f32x4.neg - negate 4 32-bit floats
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fneg v16.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 reservedOpcode(0xfde201)
-unimplementedInstruction(_simd_f32x4_sqrt)
-unimplementedInstruction(_simd_f32x4_add)
-unimplementedInstruction(_simd_f32x4_sub)
-unimplementedInstruction(_simd_f32x4_mul)
-unimplementedInstruction(_simd_f32x4_div)
-unimplementedInstruction(_simd_f32x4_min)
-unimplementedInstruction(_simd_f32x4_max)
-unimplementedInstruction(_simd_f32x4_pmin)
-unimplementedInstruction(_simd_f32x4_pmax)
+
+ipintOp(_simd_f32x4_sqrt, macro()
+    # f32x4.sqrt - square root of 4 32-bit floats
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fsqrt v16.4s, v16.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_add, macro()
+    # f32x4.add - add 4 32-bit floats
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fadd v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_sub, macro()
+    # f32x4.sub - subtract 4 32-bit floats
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fsub v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_mul, macro()
+    # f32x4.mul - multiply 4 32-bit floats
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fmul v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_div, macro()
+    # f32x4.div - divide 4 32-bit floats
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fdiv v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_min, macro()
+    # f32x4.min - minimum of 4 32-bit floats (IEEE 754-2008 semantics)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fmin v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_max, macro()
+    # f32x4.max - maximum of 4 32-bit floats (IEEE 754-2008 semantics)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fmax v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_pmin, macro()
+    # f32x4.pmin - pseudo-minimum of 4 32-bit floats (always propagate NaN)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fminnm v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_pmax, macro()
+    # f32x4.pmax - pseudo-maximum of 4 32-bit floats (always propagate NaN)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fmaxnm v16.4s, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0xEC 0x01 - 0xFD 0xF7 0x01: f64x2 operations
 
-unimplementedInstruction(_simd_f64x2_abs)
-unimplementedInstruction(_simd_f64x2_neg)
+ipintOp(_simd_f64x2_abs, macro()
+    # f64x2.abs - absolute value of 2 64-bit floats
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fabs v16.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_neg, macro()
+    # f64x2.neg - negate 2 64-bit floats
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fneg v16.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 reservedOpcode(0xfdee01)
-unimplementedInstruction(_simd_f64x2_sqrt)
-unimplementedInstruction(_simd_f64x2_add)
-unimplementedInstruction(_simd_f64x2_sub)
-unimplementedInstruction(_simd_f64x2_mul)
-unimplementedInstruction(_simd_f64x2_div)
-unimplementedInstruction(_simd_f64x2_min)
-unimplementedInstruction(_simd_f64x2_max)
-unimplementedInstruction(_simd_f64x2_pmin)
-unimplementedInstruction(_simd_f64x2_pmax)
+
+ipintOp(_simd_f64x2_sqrt, macro()
+    # f64x2.sqrt - square root of 2 64-bit floats
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fsqrt v16.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_add, macro()
+    # f64x2.add - add 2 64-bit floats
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fadd v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_sub, macro()
+    # f64x2.sub - subtract 2 64-bit floats
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fsub v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_mul, macro()
+    # f64x2.mul - multiply 2 64-bit floats
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fmul v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_div, macro()
+    # f64x2.div - divide 2 64-bit floats
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fdiv v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_min, macro()
+    # f64x2.min - minimum of 2 64-bit floats (IEEE 754-2008 semantics)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fmin v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_max, macro()
+    # f64x2.max - maximum of 2 64-bit floats (IEEE 754-2008 semantics)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fmax v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_pmin, macro()
+    # f64x2.pmin - pseudo-minimum of 2 64-bit floats (always propagate NaN)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fminnm v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_pmax, macro()
+    # f64x2.pmax - pseudo-maximum of 2 64-bit floats (always propagate NaN)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "fmaxnm v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0xF8 0x01 - 0xFD 0xFF 0x01: trunc/convert
 
