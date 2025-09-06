@@ -5944,7 +5944,7 @@ ipintOp(_simd_f32x4_max, macro()
 end)
 
 ipintOp(_simd_f32x4_pmin, macro()
-    # f32x4.pmin - pseudo-minimum of 4 32-bit floats (always propagate NaN)
+    # f32x4.pmin - pseudo-minimum of 4 32-bit floats (b < a ? b : a)
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
@@ -5958,7 +5958,7 @@ ipintOp(_simd_f32x4_pmin, macro()
 end)
 
 ipintOp(_simd_f32x4_pmax, macro()
-    # f32x4.pmax - pseudo-maximum of 4 32-bit floats (always propagate NaN)
+    # f32x4.pmax - pseudo-maximum of 4 32-bit floats (a < b ? b : a)
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
@@ -6085,7 +6085,7 @@ ipintOp(_simd_f64x2_min, macro()
 end)
 
 ipintOp(_simd_f64x2_max, macro()
-    # f64x2.max - maximum of 2 64-bit floats (IEEE 754-2008 semantics)
+    # f64x2.max - maximum of 2 64-bit floats (propagate NaN)
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
@@ -6099,7 +6099,7 @@ ipintOp(_simd_f64x2_max, macro()
 end)
 
 ipintOp(_simd_f64x2_pmin, macro()
-    # f64x2.pmin - pseudo-minimum of 2 64-bit floats (always propagate NaN)
+    # f64x2.pmin - pseudo-minimum of 2 64-bit floats (b < a ? b : a)
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
@@ -6113,7 +6113,7 @@ ipintOp(_simd_f64x2_pmin, macro()
 end)
 
 ipintOp(_simd_f64x2_pmax, macro()
-    # f64x2.pmax - pseudo-maximum of 2 64-bit floats (always propagate NaN)
+    # f64x2.pmax - pseudo-maximum of 2 64-bit floats (a < b ? b : a)
     popVec(v1)
     popVec(v0)
     if ARM64 or ARM64E
