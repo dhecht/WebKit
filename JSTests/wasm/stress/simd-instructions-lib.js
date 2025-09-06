@@ -12,6 +12,8 @@ function floatToWasmText(val) {
     if (val === Number.POSITIVE_INFINITY) return 'inf';
     if (val === Number.NEGATIVE_INFINITY) return '-inf';
     if (Number.isNaN(val)) return 'nan';
+    // Handle signed zero: -0.0 should be represented as "-0.0" in WebAssembly text
+    if (val === 0 && 1/val === -Infinity) return '-0.0';
     return val.toString();
 }
 
@@ -91,6 +93,8 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
     const u16 = new Uint16Array(buffer);
     const u32 = new Uint32Array(buffer);
     const u64 = new BigUint64Array(buffer);
+    const f32 = new Float32Array(buffer);
+    const f64 = new Float64Array(buffer);
 
     function clearMemory() {
         u8.fill(0);
@@ -116,12 +120,18 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
             } else if (instruction.startsWith('i16x8.')) {
                 for (let j = 0; j < 8; j++)
                     assert.eq(u16[j], expected[j]);
-            } else if (instruction.startsWith('i32x4.') || instruction.startsWith('f32x4.')) {
+            } else if (instruction.startsWith('i32x4.')) {
                 for (let j = 0; j < 4; j++)
                     assert.eq(u32[j], expected[j]);
-            } else if (instruction.startsWith('i64x2.') || instruction.startsWith('f64x2.')) {
+            } else if (instruction.startsWith('f32x4.')) {
+                for (let j = 0; j < 4; j++)
+                    assert.eq(f32[j], expected[j]);
+            } else if (instruction.startsWith('i64x2.')) {
                 for (let j = 0; j < 2; j++)
                     assert.eq(u64[j], expected[j]);
+            } else if (instruction.startsWith('f64x2.')) {
+                for (let j = 0; j < 2; j++)
+                    assert.eq(f64[j], expected[j]);
             } else {
                 assert.fail(`Unhandled instruction format: ${instruction}`);
             }
