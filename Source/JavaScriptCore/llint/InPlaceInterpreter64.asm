@@ -5616,12 +5616,93 @@ ipintOp(_simd_i64x2_mul, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_i64x2_eq)
-unimplementedInstruction(_simd_i64x2_ne)
-unimplementedInstruction(_simd_i64x2_lt_s)
-unimplementedInstruction(_simd_i64x2_gt_s)
-unimplementedInstruction(_simd_i64x2_le_s)
-unimplementedInstruction(_simd_i64x2_ge_s)
+ipintOp(_simd_i64x2_eq, macro()
+    # i64x2.eq - compare 2 64-bit integers for equality
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmeq v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_ne, macro()
+    # i64x2.ne - compare 2 64-bit integers for inequality
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmeq v16.2d, v16.2d, v17.2d"
+        emit "mvn v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_lt_s, macro()
+    # i64x2.lt_s - compare 2 64-bit signed integers for less than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmgt v17, v16 gives us v1 > v0, which is equivalent to v0 < v1
+        emit "cmgt v16.2d, v17.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_gt_s, macro()
+    # i64x2.gt_s - compare 2 64-bit signed integers for greater than
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmgt v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_le_s, macro()
+    # i64x2.le_s - compare 2 64-bit signed integers for less than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # cmge v17, v16 gives us v1 >= v0, which is equivalent to v0 <= v1
+        emit "cmge v16.2d, v17.2d, v16.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_ge_s, macro()
+    # i64x2.ge_s - compare 2 64-bit signed integers for greater than or equal
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmge v16.2d, v16.2d, v17.2d"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 unimplementedInstruction(_simd_i64x2_extmul_low_i32x4_s)
 unimplementedInstruction(_simd_i64x2_extmul_high_i32x4_s)
 unimplementedInstruction(_simd_i64x2_extmul_low_i32x4_u)
