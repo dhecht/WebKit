@@ -67,7 +67,7 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
         const [instruction, input0, input1, expected] = test;
         const input0Str = Array.isArray(input0) ? arrayToV128Const(input0, instruction) : input0;
         const input1Str = Array.isArray(input1) ? arrayToV128Const(input1, instruction) : input1;
-        const isUnaryOp = instruction.includes('.abs') || instruction.includes('.neg') || instruction.includes('.sqrt');
+        const isUnaryOp = instruction.includes('.abs') || instruction.includes('.neg') || instruction.includes('.sqrt') || instruction.includes('.not');
         
         wat += `
     (func (export "test_${index}") (param $addr i32)
