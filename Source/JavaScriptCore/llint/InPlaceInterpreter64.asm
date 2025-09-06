@@ -4977,10 +4977,63 @@ end)
 
 # 0xFD 0x4D - 0xFD 0x53: v128 operations
 unimplementedInstruction(_simd_v128_not)
-unimplementedInstruction(_simd_v128_and)
-unimplementedInstruction(_simd_v128_andnot)
-unimplementedInstruction(_simd_v128_or)
-unimplementedInstruction(_simd_v128_xor)
+
+ipintOp(_simd_v128_and, macro()
+    # v128.and - bitwise AND of two 128-bit vectors
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "and v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_v128_andnot, macro()
+    # v128.andnot - bitwise AND NOT of two 128-bit vectors (v0 & ~v1)
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "bic v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_v128_or, macro()
+    # v128.or - bitwise OR of two 128-bit vectors
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "orr v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_v128_xor, macro()
+    # v128.xor - bitwise XOR of two 128-bit vectors
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "eor v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 unimplementedInstruction(_simd_v128_bitselect)
 unimplementedInstruction(_simd_v128_any_true)
 
