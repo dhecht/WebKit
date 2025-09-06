@@ -3,7 +3,7 @@
 import { runSIMDTests } from "./simd-instructions-lib.js"
 import * as assert from "../assert.js"
 
-const verbose = true;
+const verbose = false;
 
 // Table-driven test data for SIMD integer arithmetic instructions
 // Each entry: [instruction, input0, input1, expected_output]
