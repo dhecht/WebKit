@@ -5154,18 +5154,30 @@ ipintOp(_simd_i8x16_all_true, macro()
     advancePC(2)
     nextIPIntInstruction()
 end)
+
 ipintOp(_simd_i8x16_bitmask, macro()
     # i8x16.bitmask - extract most significant bit from each 8-bit lane into a 16-bit integer
     popVec(v0)
     if ARM64 or ARM64E
-        emit "sshr v17.16b, v16.16b, #7"  # Arithmetic right shift by 7 to get sign bit
-        emit "movi v18.2d, #0"            # Clear result register
-        emit "zip1 v19.16b, v17.16b, v18.16b"  # Interleave with zeros for bit positions
-        emit "zip1 v20.8h, v19.8h, v18.8h"    # Continue expanding
-        emit "zip1 v21.4s, v20.4s, v18.4s"    # Continue expanding
-        emit "addv s17, v21.4s"               # Sum all bits (they're positioned correctly)
-        emit "fmov w0, s17"                   # Move to general register
-        emit "and w0, w0, #0xffff"            # Mask to 16 bits
+        # Create bit position constants like BBQ does
+        # Pattern: 0x8040201008040201 (bit positions for bytes)
+        emit "movz x0, #0x201"
+        emit "movk x0, #0x804, lsl #16"
+        emit "movk x0, #0x2010, lsl #32"
+        emit "movk x0, #0x8040, lsl #48"
+        emit "dup v17.2d, x0"
+        
+        # Shift input to get sign bits
+        emit "sshr v16.16b, v16.16b, #7"
+        
+        # Apply bit position mask
+        emit "and v16.16b, v16.16b, v17.16b"
+        
+        # Horizontal add to collect bits
+        emit "addv h16, v16.16b"
+        
+        # Extract result to general register
+        emit "fmov w0, s16"
     else
         break # Not implemented
     end
@@ -5173,6 +5185,7 @@ ipintOp(_simd_i8x16_bitmask, macro()
     advancePC(2)
     nextIPIntInstruction()
 end)
+
 unimplementedInstruction(_simd_i8x16_narrow_i16x8_s)
 unimplementedInstruction(_simd_i8x16_narrow_i16x8_u)
 
@@ -5452,13 +5465,31 @@ ipintOp(_simd_i16x8_bitmask, macro()
     # i16x8.bitmask - extract most significant bit from each 16-bit lane into an 8-bit integer
     popVec(v0)
     if ARM64 or ARM64E
-        emit "sshr v17.8h, v16.8h, #15"  # Arithmetic right shift by 15 to get sign bit
-        emit "movi v18.2d, #0"           # Clear result register
-        emit "zip1 v19.8h, v17.8h, v18.8h"   # Interleave with zeros for bit positions
-        emit "zip1 v20.4s, v19.4s, v18.4s"   # Continue expanding
-        emit "addv s17, v20.4s"              # Sum all bits (they're positioned correctly)
-        emit "fmov w0, s17"                  # Move to general register
-        emit "and w0, w0, #0xff"             # Mask to 8 bits
+        # Create bit position constants for 16-bit lanes
+        # Pattern: 0x8040201008040201 but for 16-bit positions
+        emit "movz x0, #0x1"
+        emit "movk x0, #0x2, lsl #16"
+        emit "movk x0, #0x4, lsl #32"
+        emit "movk x0, #0x8, lsl #48"
+        emit "dup v17.4h, w0"
+        emit "movz x0, #0x10"
+        emit "movk x0, #0x20, lsl #16"
+        emit "movk x0, #0x40, lsl #32"
+        emit "movk x0, #0x80, lsl #48"
+        emit "ins v17.d[1], x0"
+        
+        # Shift input to get sign bits
+        emit "sshr v16.8h, v16.8h, #15"
+        
+        # Apply bit position mask
+        emit "and v16.8h, v16.8h, v17.8h"
+        
+        # Horizontal add to collect bits
+        emit "addv h16, v16.8h"
+        
+        # Extract result to general register
+        emit "fmov w0, s16"
+        emit "and w0, w0, #0xff"
     else
         break # Not implemented
     end
@@ -5753,12 +5784,26 @@ ipintOp(_simd_i32x4_bitmask, macro()
     # i32x4.bitmask - extract most significant bit from each 32-bit lane into a 4-bit integer
     popVec(v0)
     if ARM64 or ARM64E
-        emit "sshr v17.4s, v16.4s, #31"  # Arithmetic right shift by 31 to get sign bit
-        emit "movi v18.2d, #0"           # Clear result register
-        emit "zip1 v19.4s, v17.4s, v18.4s"   # Interleave with zeros for bit positions
-        emit "addv s17, v19.4s"              # Sum all bits (they're positioned correctly)
-        emit "fmov w0, s17"                  # Move to general register
-        emit "and w0, w0, #0xf"              # Mask to 4 bits
+        # Create bit position constants for 32-bit lanes (1, 2, 4, 8)
+        emit "movi v17.4s, #1"
+        emit "shl v18.4s, v17.4s, #1"    # v18 = {2, 2, 2, 2}
+        emit "ins v17.s[1], v18.s[0]"    # v17 = {1, 2, 1, 1}
+        emit "shl v18.4s, v17.4s, #2"    # v18 = {4, 8, 4, 4}
+        emit "ins v17.s[2], v18.s[0]"    # v17 = {1, 2, 4, 1}
+        emit "ins v17.s[3], v18.s[1]"    # v17 = {1, 2, 4, 8}
+        
+        # Shift input to get sign bits
+        emit "sshr v16.4s, v16.4s, #31"
+        
+        # Apply bit position mask
+        emit "and v16.4s, v16.4s, v17.4s"
+        
+        # Horizontal add to collect bits
+        emit "addv s16, v16.4s"
+        
+        # Extract result to general register
+        emit "fmov w0, s16"
+        emit "and w0, w0, #0xf"
     else
         break # Not implemented
     end
@@ -5998,10 +6043,23 @@ ipintOp(_simd_i64x2_bitmask, macro()
     # i64x2.bitmask - extract most significant bit from each 64-bit lane into a 2-bit integer
     popVec(v0)
     if ARM64 or ARM64E
-        emit "sshr v17.2d, v16.2d, #63"  # Arithmetic right shift by 63 to get sign bit
-        emit "addp d17, v17.2d"          # Add pair - combines the two bits
-        emit "fmov x0, d17"              # Move to general register
-        emit "and w0, w0, #0x3"          # Mask to 2 bits
+        # Create bit position constants for 64-bit lanes (1, 2)
+        emit "movi v17.2d, #1"
+        emit "shl d18, d17, #1"          # d18 = 2
+        emit "ins v17.d[1], v18.d[0]"    # v17 = {1, 2}
+        
+        # Shift input to get sign bits
+        emit "sshr v16.2d, v16.2d, #63"
+        
+        # Apply bit position mask
+        emit "and v16.2d, v16.2d, v17.2d"
+        
+        # Horizontal add to collect bits
+        emit "addp d16, v16.2d"
+        
+        # Extract result to general register
+        emit "fmov x0, d16"
+        emit "and w0, w0, #0x3"
     else
         break # Not implemented
     end
