@@ -5157,30 +5157,28 @@ end)
 
 ipintOp(_simd_i8x16_bitmask, macro()
     # i8x16.bitmask - extract most significant bit from each 8-bit lane into a 16-bit integer
-    popVec(v0)
-    if ARM64 or ARM64E
-        # Create bit position constants like BBQ does
-        # Pattern: 0x8040201008040201 (bit positions for bytes)
-        emit "movz x0, #0x201"
-        emit "movk x0, #0x804, lsl #16"
-        emit "movk x0, #0x2010, lsl #32"
-        emit "movk x0, #0x8040, lsl #48"
-        emit "dup v17.2d, x0"
-        
-        # Shift input to get sign bits
-        emit "sshr v16.16b, v16.16b, #7"
-        
-        # Apply bit position mask
-        emit "and v16.16b, v16.16b, v17.16b"
-        
-        # Horizontal add to collect bits
-        emit "addv b16, v16.16b"
-        
-        # Extract result to general register
-        emit "fmov w0, s16"
-    else
-        break # Not implemented
-    end
+    # Simple loop over the 16 bytes on the stack
+    
+    move 0, t0          # Initialize result
+    move 0, t1          # Byte counter
+    move sp, t2         # Pointer to vector data
+    
+.bitmask_i8x16_loop:
+    # Load byte and check sign bit
+    loadb [t2, t1], t3
+    andq 0x80, t3       # Extract sign bit
+    btiz t3, .bitmask_i8x16_next
+    
+    # Set corresponding bit in result
+    move 1, t3
+    lshiftq t1, t3      # Shift to bit position
+    orq t3, t0
+    
+.bitmask_i8x16_next:
+    addq 1, t1          # Next byte
+    bilt t1, 16, .bitmask_i8x16_loop
+    
+    addp V128ISize, sp  # Pop the vector
     pushInt32(t0)
     advancePC(2)
     nextIPIntInstruction()
@@ -5463,36 +5461,28 @@ end)
 
 ipintOp(_simd_i16x8_bitmask, macro()
     # i16x8.bitmask - extract most significant bit from each 16-bit lane into an 8-bit integer
-    popVec(v0)
-    if ARM64 or ARM64E
-        # Create bit position constants for 16-bit lanes
-        # Pattern: 0x8040201008040201 but for 16-bit positions
-        emit "movz x0, #0x1"
-        emit "movk x0, #0x2, lsl #16"
-        emit "movk x0, #0x4, lsl #32"
-        emit "movk x0, #0x8, lsl #48"
-        emit "dup v17.4h, w0"
-        emit "movz x0, #0x10"
-        emit "movk x0, #0x20, lsl #16"
-        emit "movk x0, #0x40, lsl #32"
-        emit "movk x0, #0x80, lsl #48"
-        emit "ins v17.d[1], x0"
-        
-        # Shift input to get sign bits
-        emit "sshr v16.8h, v16.8h, #15"
-        
-        # Apply bit position mask
-        emit "and v16.16b, v16.16b, v17.16b"
-        
-        # Horizontal add to collect bits
-        emit "addv h16, v16.8h"
-        
-        # Extract result to general register
-        emit "fmov w0, s16"
-        emit "and w0, w0, #0xff"
-    else
-        break # Not implemented
-    end
+    # Simple loop over the 8 16-bit values on the stack
+    
+    move 0, t0          # Initialize result
+    move 0, t1          # Lane counter
+    move sp, t2         # Pointer to vector data
+    
+.bitmask_i16x8_loop:
+    # Load 16-bit value and check sign bit
+    loadh [t2, t1, 2], t3  # Load 16-bit value at offset t1*2
+    andq 0x8000, t3     # Extract sign bit (bit 15)
+    btiz t3, .bitmask_i16x8_next
+    
+    # Set corresponding bit in result
+    move 1, t3
+    lshiftq t1, t3      # Shift to bit position
+    orq t3, t0
+    
+.bitmask_i16x8_next:
+    addq 1, t1          # Next lane
+    bilt t1, 8, .bitmask_i16x8_loop
+    
+    addp V128ISize, sp  # Pop the vector
     pushInt32(t0)
     advancePC(2)
     nextIPIntInstruction()
@@ -5782,31 +5772,28 @@ end)
 
 ipintOp(_simd_i32x4_bitmask, macro()
     # i32x4.bitmask - extract most significant bit from each 32-bit lane into a 4-bit integer
-    popVec(v0)
-    if ARM64 or ARM64E
-        # Create bit position constants for 32-bit lanes (1, 2, 4, 8)
-        emit "movi v17.4s, #1"
-        emit "shl v18.4s, v17.4s, #1"    # v18 = {2, 2, 2, 2}
-        emit "ins v17.s[1], v18.s[0]"    # v17 = {1, 2, 1, 1}
-        emit "shl v18.4s, v17.4s, #2"    # v18 = {4, 8, 4, 4}
-        emit "ins v17.s[2], v18.s[0]"    # v17 = {1, 2, 4, 1}
-        emit "ins v17.s[3], v18.s[1]"    # v17 = {1, 2, 4, 8}
-        
-        # Shift input to get sign bits
-        emit "sshr v16.4s, v16.4s, #31"
-        
-        # Apply bit position mask
-        emit "and v16.16b, v16.16b, v17.16b"
-        
-        # Horizontal add to collect bits
-        emit "addv s16, v16.4s"
-        
-        # Extract result to general register
-        emit "fmov w0, s16"
-        emit "and w0, w0, #0xf"
-    else
-        break # Not implemented
-    end
+    # Simple loop over the 4 32-bit values on the stack
+    
+    move 0, t0          # Initialize result
+    move 0, t1          # Lane counter
+    move sp, t2         # Pointer to vector data
+    
+.bitmask_i32x4_loop:
+    # Load 32-bit value and check sign bit
+    loadi [t2, t1, 4], t3  # Load 32-bit value at offset t1*4
+    andq 0x80000000, t3 # Extract sign bit (bit 31)
+    btiz t3, .bitmask_i32x4_next
+    
+    # Set corresponding bit in result
+    move 1, t3
+    lshiftq t1, t3      # Shift to bit position
+    orq t3, t0
+    
+.bitmask_i32x4_next:
+    addq 1, t1          # Next lane
+    bilt t1, 4, .bitmask_i32x4_loop
+    
+    addp V128ISize, sp  # Pop the vector
     pushInt32(t0)
     advancePC(2)
     nextIPIntInstruction()
@@ -6041,30 +6028,30 @@ end)
 
 ipintOp(_simd_i64x2_bitmask, macro()
     # i64x2.bitmask - extract most significant bit from each 64-bit lane into a 2-bit integer
-    popVec(v0)
-    if ARM64 or ARM64E
-        # Create bit position constants for 64-bit lanes (1, 2)
-        emit "mov x0, #1"
-        emit "mov x1, #2"
-        emit "fmov d17, x0"
-        emit "ins v17.d[1], x1"
-        
-        # Shift input to get sign bits
-        emit "sshr v16.2d, v16.2d, #63"
-        
-        # Apply bit position mask
-        emit "and v16.16b, v16.16b, v17.16b"
-        
-        # Horizontal add to collect bits
-        emit "addp d16, v16.2d"
-        
-        # Extract result to general register
-        emit "fmov x0, d16"
-        emit "and w0, w0, #0x3"
-    else
-        break # Not implemented
-    end
-    pushInt32(t0)
+    # Handle both 64-bit values directly
+    
+    # Load both 64-bit values
+    loadq [sp], t0      # Load lane 0
+    loadq 8[sp], t1     # Load lane 1
+    addp V128ISize, sp  # Pop the vector
+    
+    # Initialize result
+    move 0, t2
+    
+    # Check lane 0 sign bit (bit 63)
+    move 0x8000000000000000, t3
+    andq t3, t0
+    btiz t0, .bitmask_i64x2_lane1
+    orq 1, t2           # Set bit 0
+    
+.bitmask_i64x2_lane1:
+    # Check lane 1 sign bit (bit 63)
+    andq t3, t1
+    btiz t1, .bitmask_i64x2_done
+    orq 2, t2           # Set bit 1
+    
+.bitmask_i64x2_done:
+    pushInt32(t2)
     advancePC(2)
     nextIPIntInstruction()
 end)
