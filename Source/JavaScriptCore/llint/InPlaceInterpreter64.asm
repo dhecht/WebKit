@@ -5174,7 +5174,7 @@ ipintOp(_simd_i8x16_bitmask, macro()
         emit "and v16.16b, v16.16b, v17.16b"
         
         # Horizontal add to collect bits
-        emit "addv h16, v16.16b"
+        emit "addv b16, v16.16b"
         
         # Extract result to general register
         emit "fmov w0, s16"
@@ -5482,7 +5482,7 @@ ipintOp(_simd_i16x8_bitmask, macro()
         emit "sshr v16.8h, v16.8h, #15"
         
         # Apply bit position mask
-        emit "and v16.8h, v16.8h, v17.8h"
+        emit "and v16.16b, v16.16b, v17.16b"
         
         # Horizontal add to collect bits
         emit "addv h16, v16.8h"
@@ -5796,7 +5796,7 @@ ipintOp(_simd_i32x4_bitmask, macro()
         emit "sshr v16.4s, v16.4s, #31"
         
         # Apply bit position mask
-        emit "and v16.4s, v16.4s, v17.4s"
+        emit "and v16.16b, v16.16b, v17.16b"
         
         # Horizontal add to collect bits
         emit "addv s16, v16.4s"
@@ -6044,15 +6044,16 @@ ipintOp(_simd_i64x2_bitmask, macro()
     popVec(v0)
     if ARM64 or ARM64E
         # Create bit position constants for 64-bit lanes (1, 2)
-        emit "movi v17.2d, #1"
-        emit "shl d18, d17, #1"          # d18 = 2
-        emit "ins v17.d[1], v18.d[0]"    # v17 = {1, 2}
+        emit "mov x0, #1"
+        emit "mov x1, #2"
+        emit "fmov d17, x0"
+        emit "ins v17.d[1], x1"
         
         # Shift input to get sign bits
         emit "sshr v16.2d, v16.2d, #63"
         
         # Apply bit position mask
-        emit "and v16.2d, v16.2d, v17.2d"
+        emit "and v16.16b, v16.16b, v17.16b"
         
         # Horizontal add to collect bits
         emit "addp d16, v16.2d"
