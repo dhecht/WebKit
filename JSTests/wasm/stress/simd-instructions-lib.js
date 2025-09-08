@@ -58,17 +58,11 @@ function arrayToV128Const(array, instruction) {
  */
 export async function runSIMDTests(testData, verbose = false, testType = "SIMD") {
 
-    function numInputs(instruction) {
-        if (instruction.includes('.abs') || instruction.includes('.neg') || instruction.includes('.sqrt') || instruction.includes('.not') || instruction.includes('.any_true'))
-            return 1;
-        if (instruction.includes('.bitselect'))
-            return 3;
-        return 2;
-    }
+    const numInputs = instruction =>
+        instruction.includes('.bitselect') ? 3 :
+        ['.abs', '.neg', '.sqrt', '.not', '.any_true'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
 
-    function returnsI32(instruction) {
-        return instruction.includes('.any_true');
-    }
+    const returnsI32 = instruction => instruction.includes('.any_true');
 
     // Generate WebAssembly module
     let wat = `
@@ -106,9 +100,8 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
             const input1Str = Array.isArray(arg1) ? arrayToV128Const(arg1, instruction) : arg1;
             const input2Str = Array.isArray(arg2) ? arrayToV128Const(arg2, instruction) : arg2;
             wat += `            (${instruction} ${input0Str} ${input1Str} ${input2Str})`;
-        } else {
+        } else
             assert.fail(`Unsupported number of arguments: ${numArgs} for instruction: ${instruction}`);
-        }
 
         wat += `)
     )
@@ -218,9 +211,8 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
             } else if (instruction.startsWith('f64x2.')) {
                 for (let j = 0; j < 2; j++)
                     assertEqWithContext(f64[j], expected[j], j, f64.slice(0, 2));
-            } else {
+            } else
                 assert.fail(`Unhandled instruction format: ${instruction}`);
-            }
             
             if (verbose)
                 print(`✓ ${instruction} test ${testIndex} passed`);
