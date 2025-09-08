@@ -6041,13 +6041,13 @@ ipintOp(_simd_i64x2_bitmask, macro()
     # Check lane 0 sign bit (bit 63)
     move 0x8000000000000000, t3
     andq t3, t0
-    btiz t0, .bitmask_i64x2_lane1
+    btqz t0, .bitmask_i64x2_lane1
     orq 1, t2           # Set bit 0
     
 .bitmask_i64x2_lane1:
     # Check lane 1 sign bit (bit 63)
     andq t3, t1
-    btiz t1, .bitmask_i64x2_done
+    btqz t1, .bitmask_i64x2_done
     orq 2, t2           # Set bit 1
     
 .bitmask_i64x2_done:
