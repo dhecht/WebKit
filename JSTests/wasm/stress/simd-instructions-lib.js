@@ -57,6 +57,19 @@ function arrayToV128Const(array, instruction) {
  * @param {string} testType - Description of test type for logging
  */
 export async function runSIMDTests(testData, verbose = false, testType = "SIMD") {
+
+    function numInputs(instruction) {
+        if (instruction.includes('.abs') || instruction.includes('.neg') || instruction.includes('.sqrt') || instruction.includes('.not') || instruction.includes('.any_true'))
+            return 1;
+        if (instruction.includes('.bitselect'))
+            return 3;
+        return 2;
+    }
+
+    function returnsI32(instruction) {
+        return instruction.includes('.any_true');
+    }
+
     // Generate WebAssembly module
     let wat = `
 (module
@@ -64,15 +77,40 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
 `;
 
     testData.forEach((test, index) => {
-        const [instruction, input0, input1, expected] = test;
-        const input0Str = Array.isArray(input0) ? arrayToV128Const(input0, instruction) : input0;
-        const input1Str = Array.isArray(input1) ? arrayToV128Const(input1, instruction) : input1;
-        const isUnaryOp = instruction.includes('.abs') || instruction.includes('.neg') || instruction.includes('.sqrt') || instruction.includes('.not');
+        const [instruction, arg0, arg1, arg2, arg3] = test;
+
+        const numArgs = numInputs(instruction);
+
+        const input0Str = Array.isArray(arg0) ? arrayToV128Const(arg0, instruction) : arg0;
         
-        wat += `
+        if (returnsI32(instruction)) {
+            // Instructions that return i32 (like v128.any_true) store to i32 memory location
+            wat += `
+    (func (export "test_${index}") (param $addr i32)
+        (i32.store (local.get $addr)
+`;
+        } else {
+            // Instructions that return v128 store to v128 memory location
+            wat += `
     (func (export "test_${index}") (param $addr i32)
         (v128.store (local.get $addr)
-            (${instruction} ${input0Str}${isUnaryOp ? '' : ' ' + input1Str}))
+`;
+        }
+        
+        if (numArgs === 1) {
+            wat += `            (${instruction} ${input0Str})`;
+        } else if (numArgs === 2) {
+            const input1Str = Array.isArray(arg1) ? arrayToV128Const(arg1, instruction) : arg1;
+            wat += `            (${instruction} ${input0Str} ${input1Str})`;
+        } else if (numArgs === 3) {
+            const input1Str = Array.isArray(arg1) ? arrayToV128Const(arg1, instruction) : arg1;
+            const input2Str = Array.isArray(arg2) ? arrayToV128Const(arg2, instruction) : arg2;
+            wat += `            (${instruction} ${input0Str} ${input1Str} ${input2Str})`;
+        } else {
+            assert.fail(`Unsupported number of arguments: ${numArgs} for instruction: ${instruction}`);
+        }
+
+        wat += `)
     )
 `;
     });
@@ -102,8 +140,18 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
 
     for (let i = 0; i < wasmTestLoopCount; ++i) {
         testData.forEach((test, testIndex) => {
-            const [instruction, input0, input1, expected] = test;
-            
+            const [instruction, arg0, arg1, arg2, arg3] = test;
+            const numArgs = numInputs(instruction);
+            let expected;
+            if (numArgs === 1)
+                expected = arg1;
+            else if (numArgs === 2)
+                expected = arg2;
+            else if (numArgs === 3)
+                expected = arg3;
+            else
+                assert.fail(`Unsupported number of arguments: ${numArgs} for instruction: ${instruction}`);
+
             if (verbose)
                 print(`Testing ${instruction} test ${testIndex}...`);
             
@@ -121,9 +169,18 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
                     print(`\n=== TEST CASE FAILURE ===`);
                     print(`Test Index: ${testIndex}`);
                     print(`Instruction: ${instruction}`);
-                    print(`Input 0: ${Array.isArray(input0) ? `[${input0.join(', ')}]` : input0}`);
-                    print(`Input 1: ${Array.isArray(input1) ? `[${input1.join(', ')}]` : input1}`);
-                    print(`Expected Array: [${expected.join(', ')}]`);
+                    print(`Input 0: ${Array.isArray(arg0) ? `[${arg0.join(', ')}]` : arg0}`);
+                    if (numArgs >= 2) {
+                        print(`Input 1: ${Array.isArray(arg1) ? `[${arg1.join(', ')}]` : arg1}`);
+                    }
+                    if (numArgs >= 3) {
+                        print(`Input 2: ${Array.isArray(arg2) ? `[${arg2.join(', ')}]` : arg2}`);
+                    }
+                    if (returnsI32(instruction)) {
+                        print(`Expected Value: ${expected}`);
+                    } else {
+                        print(`Expected Array: [${expected.join(', ')}]`);
+                    }
                     print(`Actual Array: [${Array.from(actualArray).join(', ')}]`);
                     print(`Lane: ${lane}`);
                     print(`Expected Value: ${expectedValue}`);
@@ -134,7 +191,10 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
             }
 
             // Verify the result using appropriate data type
-            if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) {
+            if (returnsI32(instruction)) {
+                // Instructions that return i32 (like v128.any_true)
+                assertEqWithContext(u32[0], expected, 0, [u32[0]]);
+            } else if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) {
                 for (let j = 0; j < 16; j++)
                     assertEqWithContext(u8[j], expected[j], j, u8.slice(0, 16));
             } else if (instruction.startsWith('i16x8.')) {
