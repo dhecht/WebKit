@@ -5145,8 +5145,8 @@ ipintOp(_simd_i8x16_all_true, macro()
         emit "cmeq v17.16b, v16.16b, #0"  # Compare each lane with 0
         emit "umaxv b17, v17.16b"         # Find maximum (any zero lane will make this non-zero)
         emit "fmov w0, s17"               # Move to general register
-        emit "eor w0, w0, #0xff"          # Invert: 0 if any lane was 0, 0xff if all non-zero
-        emit "and w0, w0, #1"             # Convert 0xff to 1, keep 0 as 0
+        emit "cmp w0, #0"                 # Compare with 0
+        emit "cset w0, eq"                # Set to 1 if equal (all lanes non-zero), 0 otherwise
     else
         break # Not implemented
     end
@@ -5438,8 +5438,8 @@ ipintOp(_simd_i16x8_all_true, macro()
         emit "cmeq v17.8h, v16.8h, #0"   # Compare each lane with 0
         emit "umaxv h17, v17.8h"         # Find maximum (any zero lane will make this non-zero)
         emit "fmov w0, s17"              # Move to general register
-        emit "eor w0, w0, #0xffff"       # Invert: 0 if any lane was 0, 0xffff if all non-zero
-        emit "and w0, w0, #1"            # Convert 0xffff to 1, keep 0 as 0
+        emit "cmp w0, #0"                # Compare with 0
+        emit "cset w0, eq"               # Set to 1 if equal (all lanes non-zero), 0 otherwise
     else
         break # Not implemented
     end
@@ -5739,8 +5739,8 @@ ipintOp(_simd_i32x4_all_true, macro()
         emit "cmeq v17.4s, v16.4s, #0"   # Compare each lane with 0
         emit "umaxv s17, v17.4s"         # Find maximum (any zero lane will make this non-zero)
         emit "fmov w0, s17"              # Move to general register
-        emit "eor w0, w0, #0xffffffff"   # Invert: 0 if any lane was 0, 0xffffffff if all non-zero
-        emit "and w0, w0, #1"            # Convert 0xffffffff to 1, keep 0 as 0
+        emit "cmp w0, #0"                # Compare with 0
+        emit "cset w0, eq"               # Set to 1 if equal (all lanes non-zero), 0 otherwise
     else
         break # Not implemented
     end
@@ -5982,10 +5982,10 @@ ipintOp(_simd_i64x2_all_true, macro()
     popVec(v0)
     if ARM64 or ARM64E
         emit "cmeq v17.2d, v16.2d, #0"   # Compare each lane with 0
-        emit "umaxp d17, v17.2d"         # Find maximum across pair (any zero lane will make this non-zero)
+        emit "addp d17, v17.2d"          # Add pair - if any lane was 0, result will be non-zero
         emit "fmov x0, d17"              # Move to general register
-        emit "eor x0, x0, #0xffffffffffffffff"  # Invert: 0 if any lane was 0, all 1s if all non-zero
-        emit "and w0, w0, #1"            # Convert to 1 or 0
+        emit "cmp x0, #0"                # Compare with 0
+        emit "cset w0, eq"               # Set to 1 if equal (all lanes non-zero), 0 otherwise
     else
         break # Not implemented
     end
