@@ -4,7 +4,6 @@ import { runSIMDTests } from "./simd-instructions-lib.js"
 
 const verbose = false;
 
-// Table-driven test data for SIMD bit shift instructions
 // Each entry: [instruction, input0, input1, expected_output]
 // Two test cases per instruction: shift < lane_width and shift >= lane_width
 const bitshiftTests = [
@@ -18,8 +17,8 @@ const bitshiftTests = [
     [
         "i8x16.shl",
         [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0xFF, 0x7F, 0x3F, 0x1F, 0x0F, 0x07, 0x03, 0x01],
-        "(i32.const 8)",
-        [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0xFF, 0x7F, 0x3F, 0x1F, 0x0F, 0x07, 0x03, 0x01]
+        "(i32.const 11)",
+        [0x08, 0x10, 0x20, 0x40, 0x80, 0x00, 0x00, 0x00, 0xF8, 0xF8, 0xF8, 0xF8, 0x78, 0x38, 0x18, 0x08]
     ],
     
     [
@@ -98,8 +97,8 @@ const bitshiftTests = [
     [
         "i32x4.shl",
         [0x00000001, 0x00000002, 0x80000000, 0x40000000],
-        "(i32.const 32)",
-        [0x00000001, 0x00000002, 0x80000000, 0x40000000]
+        "(i32.const 40)",
+        [0x00000100, 0x00000200, 0x00000000, 0x00000000]
     ],
     
     [
@@ -124,8 +123,8 @@ const bitshiftTests = [
     [
         "i32x4.shr_u",
         [0x80000000, 0x40000000, 0x20000000, 0x10000000],
-        "(i32.const 32)",
-        [0x80000000, 0x40000000, 0x20000000, 0x10000000]
+        "(i32.const 36)",
+        [0x08000000, 0x04000000, 0x02000000, 0x01000000]
     ],
 
     // i64x2 shift operations (lane width = 64 bits)
@@ -138,8 +137,8 @@ const bitshiftTests = [
     [
         "i64x2.shl",
         [0x0000000000000001n, 0x8000000000000000n],
-        "(i32.const 64)",
-        [0x0000000000000001n, 0x8000000000000000n]
+        "(i32.const 80)",
+        [0x0000000000010000n, 0x0000000000000000n]
     ],
     
     [
