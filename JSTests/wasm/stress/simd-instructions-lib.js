@@ -25,18 +25,32 @@ function floatToWasmText(val) {
  */
 function arrayToV128Const(array, instruction) {
     if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) {
-        const hexValues = array.map(val => `0x${val.toString(16).padStart(2, '0').toUpperCase()}`);
+        const hexValues = array.map(val => {
+            // Convert to unsigned 8-bit
+            const unsigned = (val & 0xFF) >>> 0;
+            return `0x${unsigned.toString(16).padStart(2, '0').toUpperCase()}`;
+        });
         return `(v128.const i8x16 ${hexValues.join(' ')})`;
     } else if (instruction.startsWith('i16x8.')) {
-        const hexValues = array.map(val => `0x${val.toString(16).padStart(4, '0').toUpperCase()}`);
+        const hexValues = array.map(val => {
+            // Convert to unsigned 16-bit
+            const unsigned = (val & 0xFFFF) >>> 0;
+            return `0x${unsigned.toString(16).padStart(4, '0').toUpperCase()}`;
+        });
         return `(v128.const i16x8 ${hexValues.join(' ')})`;
     } else if (instruction.startsWith('i32x4.')) {
-        const hexValues = array.map(val => `0x${val.toString(16).padStart(8, '0').toUpperCase()}`);
+        const hexValues = array.map(val => {
+            // Convert to unsigned 32-bit
+            const unsigned = val >>> 0;
+            return `0x${unsigned.toString(16).padStart(8, '0').toUpperCase()}`;
+        });
         return `(v128.const i32x4 ${hexValues.join(' ')})`;
     } else if (instruction.startsWith('i64x2.')) {
         const hexValues = array.map(val => {
-            const bigIntVal = typeof val === 'bigint' ? val : BigInt(val);
-            return `0x${bigIntVal.toString(16).padStart(16, '0').toUpperCase()}`;
+            let bigIntVal = typeof val === 'bigint' ? val : BigInt(val);
+            // Convert to unsigned 64-bit using BigInt mask
+            const unsigned = bigIntVal & 0xFFFFFFFFFFFFFFFFn;
+            return `0x${unsigned.toString(16).padStart(16, '0').toUpperCase()}`;
         });
         return `(v128.const i64x2 ${hexValues.join(' ')})`;
     } else if (instruction.startsWith('f32x4.')) {
