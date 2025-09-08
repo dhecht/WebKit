@@ -103,6 +103,17 @@ const logicalTests = [
         [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
         0x0000
     ],
+    // i8x16.bitmask with random positive and negative values (expressed in decimal)
+    [
+        "i8x16.bitmask",
+        [-42, 73, -128, 127, -1, 0, -99, 42, -17, 85, -64, 63, -33, 100, -5, 25],
+        0x5555  // negative values: -42, -128, -1, -99, -17, -64, -33, -5 -> bits 0,2,4,6,8,10,12,14 set
+    ],
+    [
+        "i8x16.bitmask",
+        [50, -75, 120, -3, 15, -56, 88, -111, 7, -50, 45, -80, 33, -15, 66, -1],
+        0xAAAA  // negative values: -75, -3, -56, -111, -50, -80, -15, -1 -> bits 1,3,5,7,9,11,13,15 set
+    ],
 
     // i16x8.all_true - return 1 if all 8 16-bit lanes are non-zero, 0 otherwise
     [
@@ -121,6 +132,17 @@ const logicalTests = [
         "i16x8.bitmask",
         [0x8000, 0x0000, 0x8000, 0x0000, 0x8000, 0x0000, 0x8000, 0x0000],
         0x55  // 01010101 in binary
+    ],
+    // i16x8.bitmask with random positive and negative values (expressed in decimal)
+    [
+        "i16x8.bitmask",
+        [-12345, 23456, -32768, 32767, -1, 0, -9999, 15000],
+        0x55  // negative values: -12345, -32768, -1, -9999 -> bits 0,2,4,6 set
+    ],
+    [
+        "i16x8.bitmask",
+        [5000, -8765, 12000, -4321, 30000, -25000, 1500, -500],
+        0xAA  // negative values: -8765, -4321, -25000, -500 -> bits 1,3,5,7 set
     ],
 
     // i32x4.all_true - return 1 if all 4 32-bit lanes are non-zero, 0 otherwise
@@ -141,6 +163,22 @@ const logicalTests = [
         [0x80000000, 0x00000000, 0x80000000, 0x00000000],
         0x5  // 0101 in binary
     ],
+    // i32x4.bitmask with random positive and negative values (expressed in decimal)
+    [
+        "i32x4.bitmask",
+        [-1234567890, 987654321, -2147483648, 2147483647],
+        0x5  // negative values: -1234567890, -2147483648 -> bits 0,2 set
+    ],
+    [
+        "i32x4.bitmask",
+        [500000000, -750000000, 1000000000, -1500000000],
+        0xA  // negative values: -750000000, -1500000000 -> bits 1,3 set
+    ],
+    [
+        "i32x4.bitmask",
+        [-42, -73, -128, -1],
+        0xF  // all negative values -> all bits set
+    ],
 
     // i64x2.all_true - return 1 if all 2 64-bit lanes are non-zero, 0 otherwise
     [
@@ -159,6 +197,32 @@ const logicalTests = [
         "i64x2.bitmask",
         [0x8000000000000000n, 0x0000000000000000n],
         0x1  // 01 in binary
+    ],
+    // i64x2.bitmask with random positive and negative values (expressed in decimal)
+    [
+        "i64x2.bitmask",
+        [-9223372036854775808n, 9223372036854775807n],  // Most negative and most positive 64-bit values
+        0x1  // negative value in lane 0 -> bit 0 set
+    ],
+    [
+        "i64x2.bitmask",
+        [1234567890123456789n, -987654321098765432n],
+        0x2  // negative value in lane 1 -> bit 1 set
+    ],
+    [
+        "i64x2.bitmask",
+        [-42n, -73n],
+        0x3  // both negative values -> both bits set
+    ],
+    [
+        "i64x2.bitmask",
+        [42n, 73n],
+        0x0  // both positive values -> no bits set
+    ],
+    [
+        "i64x2.bitmask",
+        [-1n, 0n],
+        0x1  // -1 is negative, 0 is not -> bit 0 set
     ],
 ];
 
