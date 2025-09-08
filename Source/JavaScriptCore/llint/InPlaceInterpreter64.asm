@@ -5125,9 +5125,54 @@ ipintOp(_simd_i8x16_neg, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_i8x16_popcnt)
-unimplementedInstruction(_simd_i8x16_all_true)
-unimplementedInstruction(_simd_i8x16_bitmask)
+ipintOp(_simd_i8x16_popcnt, macro()
+    # i8x16.popcnt - population count (count set bits) for 16 8-bit integers
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cnt v16.16b, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i8x16_all_true, macro()
+    # i8x16.all_true - return 1 if all 16 8-bit lanes are non-zero, 0 otherwise
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmeq v17.16b, v16.16b, #0"  # Compare each lane with 0
+        emit "umaxv b17, v17.16b"         # Find maximum (any zero lane will make this non-zero)
+        emit "fmov w0, s17"               # Move to general register
+        emit "eor w0, w0, #0xff"          # Invert: 0 if any lane was 0, 0xff if all non-zero
+        emit "and w0, w0, #1"             # Convert 0xff to 1, keep 0 as 0
+    else
+        break # Not implemented
+    end
+    pushInt32(t0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+ipintOp(_simd_i8x16_bitmask, macro()
+    # i8x16.bitmask - extract most significant bit from each 8-bit lane into a 16-bit integer
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "sshr v17.16b, v16.16b, #7"  # Arithmetic right shift by 7 to get sign bit
+        emit "movi v18.2d, #0"            # Clear result register
+        emit "zip1 v19.16b, v17.16b, v18.16b"  # Interleave with zeros for bit positions
+        emit "zip1 v20.8h, v19.8h, v18.8h"    # Continue expanding
+        emit "zip1 v21.4s, v20.4s, v18.4s"    # Continue expanding
+        emit "addv s17, v21.4s"               # Sum all bits (they're positioned correctly)
+        emit "fmov w0, s17"                   # Move to general register
+        emit "and w0, w0, #0xffff"            # Mask to 16 bits
+    else
+        break # Not implemented
+    end
+    pushInt32(t0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 unimplementedInstruction(_simd_i8x16_narrow_i16x8_s)
 unimplementedInstruction(_simd_i8x16_narrow_i16x8_u)
 
@@ -5385,8 +5430,43 @@ ipintOp(_simd_i16x8_neg, macro()
 end)
 
 unimplementedInstruction(_simd_i16x8_q15mulr_sat_s)
-unimplementedInstruction(_simd_i16x8_all_true)
-unimplementedInstruction(_simd_i16x8_bitmask)
+
+ipintOp(_simd_i16x8_all_true, macro()
+    # i16x8.all_true - return 1 if all 8 16-bit lanes are non-zero, 0 otherwise
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmeq v17.8h, v16.8h, #0"   # Compare each lane with 0
+        emit "umaxv h17, v17.8h"         # Find maximum (any zero lane will make this non-zero)
+        emit "fmov w0, s17"              # Move to general register
+        emit "eor w0, w0, #0xffff"       # Invert: 0 if any lane was 0, 0xffff if all non-zero
+        emit "and w0, w0, #1"            # Convert 0xffff to 1, keep 0 as 0
+    else
+        break # Not implemented
+    end
+    pushInt32(t0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_bitmask, macro()
+    # i16x8.bitmask - extract most significant bit from each 16-bit lane into an 8-bit integer
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "sshr v17.8h, v16.8h, #15"  # Arithmetic right shift by 15 to get sign bit
+        emit "movi v18.2d, #0"           # Clear result register
+        emit "zip1 v19.8h, v17.8h, v18.8h"   # Interleave with zeros for bit positions
+        emit "zip1 v20.4s, v19.4s, v18.4s"   # Continue expanding
+        emit "addv s17, v20.4s"              # Sum all bits (they're positioned correctly)
+        emit "fmov w0, s17"                  # Move to general register
+        emit "and w0, w0, #0xff"             # Mask to 8 bits
+    else
+        break # Not implemented
+    end
+    pushInt32(t0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 unimplementedInstruction(_simd_i16x8_narrow_i32x4_s)
 unimplementedInstruction(_simd_i16x8_narrow_i32x4_u)
 unimplementedInstruction(_simd_i16x8_extend_low_i8x16_s)
@@ -5651,8 +5731,42 @@ ipintOp(_simd_i32x4_neg, macro()
 end)
 
 reservedOpcode(0xfda201)
-unimplementedInstruction(_simd_i32x4_all_true)
-unimplementedInstruction(_simd_i32x4_bitmask)
+
+ipintOp(_simd_i32x4_all_true, macro()
+    # i32x4.all_true - return 1 if all 4 32-bit lanes are non-zero, 0 otherwise
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmeq v17.4s, v16.4s, #0"   # Compare each lane with 0
+        emit "umaxv s17, v17.4s"         # Find maximum (any zero lane will make this non-zero)
+        emit "fmov w0, s17"              # Move to general register
+        emit "eor w0, w0, #0xffffffff"   # Invert: 0 if any lane was 0, 0xffffffff if all non-zero
+        emit "and w0, w0, #1"            # Convert 0xffffffff to 1, keep 0 as 0
+    else
+        break # Not implemented
+    end
+    pushInt32(t0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_bitmask, macro()
+    # i32x4.bitmask - extract most significant bit from each 32-bit lane into a 4-bit integer
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "sshr v17.4s, v16.4s, #31"  # Arithmetic right shift by 31 to get sign bit
+        emit "movi v18.2d, #0"           # Clear result register
+        emit "zip1 v19.4s, v17.4s, v18.4s"   # Interleave with zeros for bit positions
+        emit "addv s17, v19.4s"              # Sum all bits (they're positioned correctly)
+        emit "fmov w0, s17"                  # Move to general register
+        emit "and w0, w0, #0xf"              # Mask to 4 bits
+    else
+        break # Not implemented
+    end
+    pushInt32(t0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 reservedOpcode(0xfda501)
 reservedOpcode(0xfda601)
 unimplementedInstruction(_simd_i32x4_extend_low_i16x8_s)
@@ -5862,8 +5976,40 @@ ipintOp(_simd_i64x2_neg, macro()
 end)
 
 reservedOpcode(0xfdc201)
-unimplementedInstruction(_simd_i64x2_all_true)
-unimplementedInstruction(_simd_i64x2_bitmask)
+
+ipintOp(_simd_i64x2_all_true, macro()
+    # i64x2.all_true - return 1 if all 2 64-bit lanes are non-zero, 0 otherwise
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "cmeq v17.2d, v16.2d, #0"   # Compare each lane with 0
+        emit "umaxp d17, v17.2d"         # Find maximum across pair (any zero lane will make this non-zero)
+        emit "fmov x0, d17"              # Move to general register
+        emit "eor x0, x0, #0xffffffffffffffff"  # Invert: 0 if any lane was 0, all 1s if all non-zero
+        emit "and w0, w0, #1"            # Convert to 1 or 0
+    else
+        break # Not implemented
+    end
+    pushInt32(t0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_bitmask, macro()
+    # i64x2.bitmask - extract most significant bit from each 64-bit lane into a 2-bit integer
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "sshr v17.2d, v16.2d, #63"  # Arithmetic right shift by 63 to get sign bit
+        emit "addp d17, v17.2d"          # Add pair - combines the two bits
+        emit "fmov x0, d17"              # Move to general register
+        emit "and w0, w0, #0x3"          # Mask to 2 bits
+    else
+        break # Not implemented
+    end
+    pushInt32(t0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
 reservedOpcode(0xfdc501)
 reservedOpcode(0xfdc601)
 unimplementedInstruction(_simd_i64x2_extend_low_i32x4_s)

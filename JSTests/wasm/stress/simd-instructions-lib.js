@@ -60,9 +60,9 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
 
     const numInputs = instruction =>
         instruction.includes('.bitselect') ? 3 :
-        ['.abs', '.neg', '.sqrt', '.not', '.any_true'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
+        ['.abs', '.neg', '.sqrt', '.not', '.any_true', '.popcnt', '.all_true', '.bitmask'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
 
-    const returnsI32 = instruction => instruction.includes('.any_true');
+    const returnsI32 = instruction => ['.any_true', '.all_true', '.bitmask'].some(pattern => instruction.includes(pattern));
 
     // Generate WebAssembly module
     let wat = `
