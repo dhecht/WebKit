@@ -5271,87 +5271,69 @@ end)
 
 ipintOp(_simd_v128_load16_lane_mem, macro()
     # v128.load16_lane - load 16-bit value from memory and replace lane in existing vector
-    popVec(v0)  # Pop the existing vector
-    # Read lane index from the last byte of the instruction
     loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    addq PC, t0                        # PC + instruction length
-    loadb -1[t0], t1                   # Load byte at PC + length - 1 (lane index)
-    andi ImmLaneIdx8Mask, t1  # Mask to 0-7 for 8 lanes
-    
-    # Handle memory operations manually
+    advancePCByReg(t0)
+
+    popVec(v0)  # Pop the existing vector
     popMemoryIndex(t0, t2)
+
     loadi IPInt::Const32Metadata::value[MC], t2
     addp t2, t0
     ipintCheckMemoryBound(t0, t2, 2)
-    
-    # Load the 16-bit value from memory
-    loadh [memoryBase, t0], t2
-    
-    # Push the vector back to stack and modify the specific lane
+
+    loadb -1[PC], t1 # Load lane index from last byte of instruction
+    andi ImmLaneIdx8Mask, t1  # Mask to 0-7 for 8 lanes
+       
+    loadh [memoryBase, t0], t0
     pushVec(v0)
-    # Replace the 16-bit value at lane index t1 on the stack
-    storeh t2, [sp, t1, 2]
+    storeh t0, [sp, t1, 2]
     
-    loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    advancePCByReg(t0)
     advanceMC(constexpr (sizeof(IPInt::Const32Metadata)))
     nextIPIntInstruction()
 end)
 
 ipintOp(_simd_v128_load32_lane_mem, macro()
     # v128.load32_lane - load 32-bit value from memory and replace lane in existing vector
-    popVec(v0)  # Pop the existing vector
-    # Read lane index from the last byte of the instruction
     loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    addq PC, t0                        # PC + instruction length
-    loadb -1[t0], t1                   # Load byte at PC + length - 1 (lane index)
-    andi ImmLaneIdx4Mask, t1  # Mask to 0-3 for 4 lanes
-    
-    # Handle memory operations manually
+    advancePCByReg(t0)
+
+    popVec(v0)  # Pop the existing vector
     popMemoryIndex(t0, t2)
+
     loadi IPInt::Const32Metadata::value[MC], t2
     addp t2, t0
     ipintCheckMemoryBound(t0, t2, 4)
-    
-    # Load the 32-bit value from memory
-    loadi [memoryBase, t0], t2
-    
-    # Push the vector back to stack and modify the specific lane
+
+    loadb -1[PC], t1 # Load lane index from last byte of instruction
+    andi ImmLaneIdx4Mask, t1  # Mask to 0-3 for 4 lanes
+       
+    loadi [memoryBase, t0], t0
     pushVec(v0)
-    # Replace the 32-bit value at lane index t1 on the stack
-    storei t2, [sp, t1, 4]
+    storei t0, [sp, t1, 4]
     
-    loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    advancePCByReg(t0)
     advanceMC(constexpr (sizeof(IPInt::Const32Metadata)))
     nextIPIntInstruction()
 end)
 
 ipintOp(_simd_v128_load64_lane_mem, macro()
     # v128.load64_lane - load 64-bit value from memory and replace lane in existing vector
-    popVec(v0)  # Pop the existing vector
-    # Read lane index from the last byte of the instruction
     loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    addq PC, t0                        # PC + instruction length
-    loadb -1[t0], t1                   # Load byte at PC + length - 1 (lane index)
-    andi ImmLaneIdx2Mask, t1  # Mask to 0-1 for 2 lanes
-    
-    # Handle memory operations manually
+    advancePCByReg(t0)
+
+    popVec(v0)  # Pop the existing vector
     popMemoryIndex(t0, t2)
+
     loadi IPInt::Const32Metadata::value[MC], t2
     addp t2, t0
     ipintCheckMemoryBound(t0, t2, 8)
-    
-    # Load the 64-bit value from memory
-    loadq [memoryBase, t0], t2
-    
-    # Push the vector back to stack and modify the specific lane
+
+    loadb -1[PC], t1 # Load lane index from last byte of instruction
+    andi ImmLaneIdx2Mask, t1  # Mask to 0-1 for 2 lanes
+       
+    loadq [memoryBase, t0], t0
     pushVec(v0)
-    # Replace the 64-bit value at lane index t1 on the stack
-    storeq t2, [sp, t1, 8]
+    storeq t0, [sp, t1, 8]
     
-    loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    advancePCByReg(t0)
     advanceMC(constexpr (sizeof(IPInt::Const32Metadata)))
     nextIPIntInstruction()
 end)
