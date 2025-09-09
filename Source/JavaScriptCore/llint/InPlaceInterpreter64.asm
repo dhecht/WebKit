@@ -4246,14 +4246,189 @@ ipintOp(_simd_v128_const, macro()
 end)
 
 # 0xFD 0x0D - 0xFD 0x14: splat (+ shuffle/swizzle)
-unimplementedInstruction(_simd_i8x16_shuffle)
-unimplementedInstruction(_simd_i8x16_swizzle)
-unimplementedInstruction(_simd_i8x16_splat)
-unimplementedInstruction(_simd_i16x8_splat)
-unimplementedInstruction(_simd_i32x4_splat)
-unimplementedInstruction(_simd_i64x2_splat)
-unimplementedInstruction(_simd_f32x4_splat)
-unimplementedInstruction(_simd_f64x2_splat)
+ipintOp(_simd_i8x16_shuffle, macro()
+    # i8x16.shuffle - shuffle bytes from two vectors using 16 immediate indices
+    # The 16 immediate bytes follow the instruction in the bytecode
+    popVec(v1)  # Second vector (b)
+    popVec(v0)  # First vector (a)
+    
+    # Allocate space for result vector
+    subp V128ISize, sp
+    
+    # Unroll the shuffle for all 16 lanes
+    # Helper macro to shuffle one lane
+    macro shuffleLane(laneIndex)
+        loadb (2 + laneIndex)[PC], t0  # Load immediate index
+        bilt t0, 16, .shuffle_lane##laneIndex##_first
+        subi 16, t0
+        loadb 16[sp, t0], t1  # From second vector
+        jmp .shuffle_lane##laneIndex##_store
+    .shuffle_lane##laneIndex##_first:
+        loadb 32[sp, t0], t1  # From first vector
+    .shuffle_lane##laneIndex##_store:
+        storeb t1, laneIndex[sp]
+    end
+    
+    shuffleLane(0)
+    shuffleLane(1)
+    shuffleLane(2)
+    shuffleLane(3)
+    shuffleLane(4)
+    shuffleLane(5)
+    shuffleLane(6)
+    shuffleLane(7)
+    shuffleLane(8)
+    shuffleLane(9)
+    shuffleLane(10)
+    shuffleLane(11)
+    shuffleLane(12)
+    shuffleLane(13)
+    shuffleLane(14)
+    shuffleLane(15)
+    
+    advancePC(18)  # 2 bytes opcode + 16 bytes immediate
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i8x16_swizzle, macro()
+    # i8x16.swizzle - swizzle bytes from first vector using indices from second vector
+    popVec(v1)  # Index vector
+    popVec(v0)  # Source vector
+    
+    # Allocate space for result vector
+    subp V128ISize, sp
+    
+    # Unroll the swizzle for all 16 lanes
+    # Helper macro to swizzle one lane
+    macro swizzleLane(laneIndex)
+        loadb (16 + laneIndex)[sp], t0  # Load index from second vector
+        bilt t0, 16, .swizzle_lane##laneIndex##_valid
+        move 0, t1  # Invalid index produces 0
+        jmp .swizzle_lane##laneIndex##_store
+    .swizzle_lane##laneIndex##_valid:
+        loadb 32[sp, t0], t1  # Load from first vector using index
+    .swizzle_lane##laneIndex##_store:
+        storeb t1, laneIndex[sp]
+    end
+    
+    swizzleLane(0)
+    swizzleLane(1)
+    swizzleLane(2)
+    swizzleLane(3)
+    swizzleLane(4)
+    swizzleLane(5)
+    swizzleLane(6)
+    swizzleLane(7)
+    swizzleLane(8)
+    swizzleLane(9)
+    swizzleLane(10)
+    swizzleLane(11)
+    swizzleLane(12)
+    swizzleLane(13)
+    swizzleLane(14)
+    swizzleLane(15)
+    
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i8x16_splat, macro()
+    # i8x16.splat - splat i32 value to all 16 8-bit lanes
+    popInt32(t0, t1)
+    subp V128ISize, sp
+    
+    storeb t0, [sp]
+    storeb t0, 1[sp]
+    storeb t0, 2[sp]
+    storeb t0, 3[sp]
+    storeb t0, 4[sp]
+    storeb t0, 5[sp]
+    storeb t0, 6[sp]
+    storeb t0, 7[sp]
+    storeb t0, 8[sp]
+    storeb t0, 9[sp]
+    storeb t0, 10[sp]
+    storeb t0, 11[sp]
+    storeb t0, 12[sp]
+    storeb t0, 13[sp]
+    storeb t0, 14[sp]
+    storeb t0, 15[sp]
+    
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_splat, macro()
+    # i16x8.splat - splat i32 value to all 8 16-bit lanes
+    popInt32(t0, t1)
+    subp V128ISize, sp
+    
+    storeh t0, [sp]
+    storeh t0, 2[sp]
+    storeh t0, 4[sp]
+    storeh t0, 6[sp]
+    storeh t0, 8[sp]
+    storeh t0, 10[sp]
+    storeh t0, 12[sp]
+    storeh t0, 14[sp]
+    
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_splat, macro()
+    # i32x4.splat - splat i32 value to all 4 32-bit lanes
+    popInt32(t0, t1)
+    subp V128ISize, sp
+    
+    storei t0, [sp]
+    storei t0, 4[sp]
+    storei t0, 8[sp]
+    storei t0, 12[sp]
+    
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_splat, macro()
+    # i64x2.splat - splat i64 value to all 2 64-bit lanes
+    popInt64(t0, t1)
+    subp V128ISize, sp
+    
+    # Store the 64-bit value twice
+    storeq t0, [sp]
+    storeq t0, 8[sp]
+    
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f32x4_splat, macro()
+    # f32x4.splat - splat f32 value to all 4 32-bit float lanes
+    popFloat32(ft0)
+    subp V128ISize, sp
+    
+    storef ft0, [sp]
+    storef ft0, 4[sp]
+    storef ft0, 8[sp]
+    storef ft0, 12[sp]
+    
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_f64x2_splat, macro()
+    # f64x2.splat - splat f64 value to all 2 64-bit float lanes
+    popFloat64(ft0)
+    subp V128ISize, sp
+    
+    # Store the 64-bit float twice
+    stored ft0, [sp]
+    stored ft0, 8[sp]
+    
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x15 - 0xFD 0x22: extract and replace lanes
 ipintOp(_simd_i8x16_extract_lane_s, macro()
