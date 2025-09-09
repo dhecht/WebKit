@@ -5248,29 +5248,23 @@ end)
 
 ipintOp(_simd_v128_load8_lane_mem, macro()
     # v128.load8_lane - load 8-bit value from memory and replace lane in existing vector
-    popVec(v0)  # Pop the existing vector
-    # Read lane index from the last byte of the instruction
     loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    addq PC, t0                        # PC + instruction length
-    loadb -1[t0], t1                   # Load byte at PC + length - 1 (lane index)
-    andi ImmLaneIdx16Mask, t1  # Mask to 0-15 for 16 lanes
-    
-    # Handle memory operations manually
+    advancePCByReg(t0)
+
+    popVec(v0)  # Pop the existing vector
     popMemoryIndex(t0, t2)
+
     loadi IPInt::Const32Metadata::value[MC], t2
     addp t2, t0
     ipintCheckMemoryBound(t0, t2, 1)
-    
-    # Load the 8-bit value from memory
-    loadb [memoryBase, t0], t2
-    
-    # Push the vector back to stack and modify the specific lane
+
+    loadb -1[PC], t1 # Load lane index from last byte of instruction
+    andi ImmLaneIdx16Mask, t1  # Mask to 0-15 for 16 lanes
+       
+    loadb [memoryBase, t0], t0
     pushVec(v0)
-    # Replace the byte at lane index t1 on the stack
-    storeb t2, [sp, t1]
+    storeb t0, [sp, t1]
     
-    loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    advancePCByReg(t0)
     advanceMC(constexpr (sizeof(IPInt::Const32Metadata)))
     nextIPIntInstruction()
 end)
