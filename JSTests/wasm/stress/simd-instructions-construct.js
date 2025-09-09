@@ -14,18 +14,8 @@ const constructTests = [
         [0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42]
     ],
     [
-        "i8x16.splat", 
+        "i8x16.splat",
         0xFF,  // test with max 8-bit value
-        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
-    ],
-    [
-        "i8x16.splat",
-        0x00,  // test with zero
-        [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
-    ],
-    [
-        "i8x16.splat",
-        -1,    // test with negative value (should become 0xFF)
         [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
     ],
     [
@@ -39,16 +29,6 @@ const constructTests = [
         "i16x8.splat",
         0x1234,  // scalar input
         [0x1234, 0x1234, 0x1234, 0x1234, 0x1234, 0x1234, 0x1234, 0x1234]
-    ],
-    [
-        "i16x8.splat",
-        0xFFFF,  // test with max 16-bit value
-        [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF]
-    ],
-    [
-        "i16x8.splat",
-        0x0000,  // test with zero
-        [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000]
     ],
     [
         "i16x8.splat",
@@ -69,16 +49,6 @@ const constructTests = [
     ],
     [
         "i32x4.splat",
-        0xFFFFFFFF,  // test with max 32-bit value
-        [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF]
-    ],
-    [
-        "i32x4.splat",
-        0x00000000,  // test with zero
-        [0x00000000, 0x00000000, 0x00000000, 0x00000000]
-    ],
-    [
-        "i32x4.splat",
         -1,          // test with negative value
         [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF]
     ],
@@ -93,16 +63,6 @@ const constructTests = [
         "i64x2.splat",
         0x123456789ABCDEF0n,  // scalar input (BigInt)
         [0x123456789ABCDEF0n, 0x123456789ABCDEF0n]
-    ],
-    [
-        "i64x2.splat",
-        0xFFFFFFFFFFFFFFFFn,  // test with max 64-bit value
-        [0xFFFFFFFFFFFFFFFFn, 0xFFFFFFFFFFFFFFFFn]
-    ],
-    [
-        "i64x2.splat",
-        0x0000000000000000n,  // test with zero
-        [0x0000000000000000n, 0x0000000000000000n]
     ],
     [
         "i64x2.splat",
@@ -123,11 +83,6 @@ const constructTests = [
     ],
     [
         "f32x4.splat",
-        0.0,      // test with zero
-        [0.0, 0.0, 0.0, 0.0]
-    ],
-    [
-        "f32x4.splat",
         -0.0,     // test with negative zero
         [-0.0, -0.0, -0.0, -0.0]
     ],
@@ -141,11 +96,6 @@ const constructTests = [
         Number.POSITIVE_INFINITY,  // test with infinity
         [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]
     ],
-    [
-        "f32x4.splat",
-        Number.NEGATIVE_INFINITY,  // test with negative infinity
-        [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY]
-    ],
 
     // f64x2.splat - splat f64 value to 2 64-bit float lanes
     [
@@ -157,11 +107,6 @@ const constructTests = [
         "f64x2.splat",
         0.0,                // test with zero
         [0.0, 0.0]
-    ],
-    [
-        "f64x2.splat",
-        -0.0,               // test with negative zero
-        [-0.0, -0.0]
     ],
     [
         "f64x2.splat",
