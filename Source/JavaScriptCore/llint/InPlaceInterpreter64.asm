@@ -5248,42 +5248,106 @@ end)
 
 ipintOp(_simd_v128_load8_lane_mem, macro()
     # v128.load8_lane - load 8-bit value from memory and replace lane in existing vector
-    simdMemoryOp(1, macro()
-        loadb ImmLaneIdxOffset[PC], t1
-        andi ImmLaneIdx16Mask, t1
-        loadb [memoryBase, t0], t0
-        storeb t0, [sp, t1] # Replace the lane in-place on the stack
-    end)
+    popVec(v0)  # Pop the existing vector
+    loadb ImmLaneIdxOffset[PC], t1
+    andi ImmLaneIdx16Mask, t1  # Mask to 0-15 for 16 lanes
+    
+    # Handle memory operations manually
+    popMemoryIndex(t0, t2)
+    loadi IPInt::Const32Metadata::value[MC], t2
+    addp t2, t0
+    ipintCheckMemoryBound(t0, t2, 1)
+    
+    # Load the 8-bit value from memory
+    loadb [memoryBase, t0], t2
+    
+    # Push the vector back to stack and modify the specific lane
+    pushVec(v0)
+    # Replace the byte at lane index t1 on the stack
+    storeb t2, [sp, t1]
+    
+    loadb IPInt::Const32Metadata::instructionLength[MC], t0
+    advancePCByReg(t0)
+    advanceMC(constexpr (sizeof(IPInt::Const32Metadata)))
+    nextIPIntInstruction()
 end)
 
 ipintOp(_simd_v128_load16_lane_mem, macro()
     # v128.load16_lane - load 16-bit value from memory and replace lane in existing vector
-    simdMemoryOp(2, macro()
-        loadb ImmLaneIdxOffset[PC], t1
-        andi ImmLaneIdx8Mask, t1
-        loadh [memoryBase, t0], t0
-        storeh t0, [sp, t1, 2] # Replace the lane in-place on the stack
-    end)
+    popVec(v0)  # Pop the existing vector
+    loadb ImmLaneIdxOffset[PC], t1
+    andi ImmLaneIdx8Mask, t1  # Mask to 0-7 for 8 lanes
+    
+    # Handle memory operations manually
+    popMemoryIndex(t0, t2)
+    loadi IPInt::Const32Metadata::value[MC], t2
+    addp t2, t0
+    ipintCheckMemoryBound(t0, t2, 2)
+    
+    # Load the 16-bit value from memory
+    loadh [memoryBase, t0], t2
+    
+    # Push the vector back to stack and modify the specific lane
+    pushVec(v0)
+    # Replace the 16-bit value at lane index t1 on the stack
+    storeh t2, [sp, t1, 2]
+    
+    loadb IPInt::Const32Metadata::instructionLength[MC], t0
+    advancePCByReg(t0)
+    advanceMC(constexpr (sizeof(IPInt::Const32Metadata)))
+    nextIPIntInstruction()
 end)
 
 ipintOp(_simd_v128_load32_lane_mem, macro()
     # v128.load32_lane - load 32-bit value from memory and replace lane in existing vector
-    simdMemoryOp(4, macro()
-        loadb ImmLaneIdxOffset[PC], t1
-        andi ImmLaneIdx4Mask, t1
-        loadi [memoryBase, t0], t0
-        storei t0, [sp, t1, 4] # Replace the lane in-place on the stack
-    end)
+    popVec(v0)  # Pop the existing vector
+    loadb ImmLaneIdxOffset[PC], t1
+    andi ImmLaneIdx4Mask, t1  # Mask to 0-3 for 4 lanes
+    
+    # Handle memory operations manually
+    popMemoryIndex(t0, t2)
+    loadi IPInt::Const32Metadata::value[MC], t2
+    addp t2, t0
+    ipintCheckMemoryBound(t0, t2, 4)
+    
+    # Load the 32-bit value from memory
+    loadi [memoryBase, t0], t2
+    
+    # Push the vector back to stack and modify the specific lane
+    pushVec(v0)
+    # Replace the 32-bit value at lane index t1 on the stack
+    storei t2, [sp, t1, 4]
+    
+    loadb IPInt::Const32Metadata::instructionLength[MC], t0
+    advancePCByReg(t0)
+    advanceMC(constexpr (sizeof(IPInt::Const32Metadata)))
+    nextIPIntInstruction()
 end)
 
 ipintOp(_simd_v128_load64_lane_mem, macro()
     # v128.load64_lane - load 64-bit value from memory and replace lane in existing vector
-    simdMemoryOp(8, macro()
-        loadb ImmLaneIdxOffset[PC], t1
-        andi ImmLaneIdx2Mask, t1
-        loadq [memoryBase, t0], t0
-        storeq t0, [sp, t1, 8] # Replace the lane in-place on the stack
-    end)
+    popVec(v0)  # Pop the existing vector
+    loadb ImmLaneIdxOffset[PC], t1
+    andi ImmLaneIdx2Mask, t1  # Mask to 0-1 for 2 lanes
+    
+    # Handle memory operations manually
+    popMemoryIndex(t0, t2)
+    loadi IPInt::Const32Metadata::value[MC], t2
+    addp t2, t0
+    ipintCheckMemoryBound(t0, t2, 8)
+    
+    # Load the 64-bit value from memory
+    loadq [memoryBase, t0], t2
+    
+    # Push the vector back to stack and modify the specific lane
+    pushVec(v0)
+    # Replace the 64-bit value at lane index t1 on the stack
+    storeq t2, [sp, t1, 8]
+    
+    loadb IPInt::Const32Metadata::instructionLength[MC], t0
+    advancePCByReg(t0)
+    advanceMC(constexpr (sizeof(IPInt::Const32Metadata)))
+    nextIPIntInstruction()
 end)
 
 unimplementedInstruction(_simd_v128_store8_lane_mem)
