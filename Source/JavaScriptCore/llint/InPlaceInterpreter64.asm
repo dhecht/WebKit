@@ -4285,25 +4285,14 @@ end)
 ipintOp(_simd_i8x16_splat, macro()
     # i8x16.splat - splat i32 value to all 16 8-bit lanes
     popInt32(t0, t1)
-    subp V128ISize, sp
     
-    storeb t0, [sp]
-    storeb t0, 1[sp]
-    storeb t0, 2[sp]
-    storeb t0, 3[sp]
-    storeb t0, 4[sp]
-    storeb t0, 5[sp]
-    storeb t0, 6[sp]
-    storeb t0, 7[sp]
-    storeb t0, 8[sp]
-    storeb t0, 9[sp]
-    storeb t0, 10[sp]
-    storeb t0, 11[sp]
-    storeb t0, 12[sp]
-    storeb t0, 13[sp]
-    storeb t0, 14[sp]
-    storeb t0, 15[sp]
+    if ARM64 or ARM64E
+        emit "dup v16.16b, w0"
+    else
+        break # Not implemented
+    end
     
+    pushVec(v0)
     advancePC(2)
     nextIPIntInstruction()
 end)
@@ -4311,17 +4300,14 @@ end)
 ipintOp(_simd_i16x8_splat, macro()
     # i16x8.splat - splat i32 value to all 8 16-bit lanes
     popInt32(t0, t1)
-    subp V128ISize, sp
     
-    storeh t0, [sp]
-    storeh t0, 2[sp]
-    storeh t0, 4[sp]
-    storeh t0, 6[sp]
-    storeh t0, 8[sp]
-    storeh t0, 10[sp]
-    storeh t0, 12[sp]
-    storeh t0, 14[sp]
+    if ARM64 or ARM64E
+        emit "dup v16.8h, w0"
+    else
+        break # Not implemented
+    end
     
+    pushVec(v0)
     advancePC(2)
     nextIPIntInstruction()
 end)
@@ -4329,13 +4315,14 @@ end)
 ipintOp(_simd_i32x4_splat, macro()
     # i32x4.splat - splat i32 value to all 4 32-bit lanes
     popInt32(t0, t1)
-    subp V128ISize, sp
     
-    storei t0, [sp]
-    storei t0, 4[sp]
-    storei t0, 8[sp]
-    storei t0, 12[sp]
+    if ARM64 or ARM64E
+        emit "dup v16.4s, w0"
+    else
+        break # Not implemented
+    end
     
+    pushVec(v0)
     advancePC(2)
     nextIPIntInstruction()
 end)
@@ -4343,12 +4330,14 @@ end)
 ipintOp(_simd_i64x2_splat, macro()
     # i64x2.splat - splat i64 value to all 2 64-bit lanes
     popInt64(t0, t1)
-    subp V128ISize, sp
     
-    # Store the 64-bit value twice
-    storeq t0, [sp]
-    storeq t0, 8[sp]
+    if ARM64 or ARM64E
+        emit "dup v16.2d, x0"
+    else
+        break # Not implemented
+    end
     
+    pushVec(v0)
     advancePC(2)
     nextIPIntInstruction()
 end)
@@ -4356,13 +4345,14 @@ end)
 ipintOp(_simd_f32x4_splat, macro()
     # f32x4.splat - splat f32 value to all 4 32-bit float lanes
     popFloat32(ft0)
-    subp V128ISize, sp
     
-    storef ft0, [sp]
-    storef ft0, 4[sp]
-    storef ft0, 8[sp]
-    storef ft0, 12[sp]
+    if ARM64 or ARM64E
+        emit "dup v16.4s, v0.s[0]"
+    else
+        break # Not implemented
+    end
     
+    pushVec(v0)
     advancePC(2)
     nextIPIntInstruction()
 end)
@@ -4370,12 +4360,14 @@ end)
 ipintOp(_simd_f64x2_splat, macro()
     # f64x2.splat - splat f64 value to all 2 64-bit float lanes
     popFloat64(ft0)
-    subp V128ISize, sp
     
-    # Store the 64-bit float twice
-    stored ft0, [sp]
-    stored ft0, 8[sp]
+    if ARM64 or ARM64E
+        emit "dup v16.2d, v0.d[0]"
+    else
+        break # Not implemented
+    end
     
+    pushVec(v0)
     advancePC(2)
     nextIPIntInstruction()
 end)
