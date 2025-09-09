@@ -387,8 +387,8 @@ async function test_load_lane() {
     for (let i = 0; i < wasmTestLoopCount; ++i) {
         // Test v128.load8_lane - load 8-bit value and replace specific lane (offset=16)
         clearMemory()
-        u8[42 + 16] = 0xAB  // Value to load at address 42+16=58 (base + offset)
-        test_v128_load8_lane(42, 896)  // Load from address 42+16, store to address 896, replace lane 5
+        u8[42 + 16] = 0xAB 
+        test_v128_load8_lane(42, 896)
 
         // Verify the result: lane 5 should be 0xAB, others should be from the constant vector
         const expectedBytes = [0x11, 0x22, 0x33, 0x44, 0x55, 0xAB, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x10]
@@ -398,8 +398,8 @@ async function test_load_lane() {
 
         // Test v128.load16_lane - load 16-bit value and replace specific lane (offset=1024)
         clearMemory()
-        u16[(42 + 1024) / 2] = 0xABCD  // Value to load at address 42+1024=1066 (533 * 2)
-        test_v128_load16_lane(42, 960)  // Load from address 42+1024, store to address 960, replace lane 3
+        u16[(42 + 1024) / 2] = 0xABCD
+        test_v128_load16_lane(42, 960)
 
         // Verify the result: lane 3 should be 0xABCD, others should be from the constant vector
         const expectedWords = [0x1000, 0x1111, 0x2222, 0xABCD, 0x4444, 0x5555, 0x6666, 0x7777]
@@ -409,8 +409,8 @@ async function test_load_lane() {
 
         // Test v128.load32_lane - load 32-bit value and replace specific lane (offset=32768)
         clearMemory()
-        u32[(44 + 32768) / 4] = 0xABCDEF12  // Value to load at address 44+32768=32812 (8203 * 4)
-        test_v128_load32_lane(44, 1024)  // Load from address 44+32768, store to address 1024, replace lane 2
+        u32[(44 + 32768) / 4] = 0xABCDEF12
+        test_v128_load32_lane(44, 1024)
 
         // Verify the result: lane 2 should be 0xABCDEF12, others should be from the constant vector
         const expectedDwords = [0x10000000, 0x11111111, 0xABCDEF12, 0x33333333]
@@ -420,12 +420,12 @@ async function test_load_lane() {
 
         // Test v128.load64_lane - load 64-bit value and replace specific lane (offset=8)
         clearMemory()
-        u64[(48 + 8) / 8] = 0xABCDEF1234567890n  // Value to load at address 48+8=56 (7 * 8)
-        test_v128_load64_lane(48, 1088)  // Load from address 48+8, store to address 1088, replace lane 1
+        u64[(48 + 8) / 8] = 0xABCDEF1234567890n
+        test_v128_load64_lane(48, 1088)
 
         // Verify the result: lane 1 should be 0xABCDEF1234567890n, lane 0 should be from the constant vector
-        assert.eq(u64[136], 0x1000000000000000n)  // Lane 0 unchanged
-        assert.eq(u64[137], 0xABCDEF1234567890n)  // Lane 1 replaced
+        assert.eq(u64[136], 0x1000000000000000n)
+        assert.eq(u64[137], 0xABCDEF1234567890n)
     }
     if (verbose)
         print("Load lane tests passed!")
