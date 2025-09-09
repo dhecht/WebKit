@@ -174,6 +174,102 @@ const constructTests = [
         [0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D, 0x1E, 0x0F], // data vector
         [0x00, 0x00, 0x01, 0x01, 0x02, 0x02, 0x03, 0x03, 0x04, 0x04, 0x05, 0x05, 0x06, 0x06, 0x07, 0x07], // index vector (duplicates)
         [0xF0, 0xF0, 0xE1, 0xE1, 0xD2, 0xD2, 0xC3, 0xC3, 0xB4, 0xB4, 0xA5, 0xA5, 0x96, 0x96, 0x87, 0x87]  // expected (duplicated values)
+    ],
+
+    // i8x16.replace_lane - replace a single 8-bit lane in a vector
+    [
+        "i8x16.replace_lane",
+        [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F], // input vector
+        0xFF, // replacement value
+        7,    // lane index (valid)
+        [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0xFF, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]  // expected (lane 7 replaced)
+    ],
+    [
+        "i8x16.replace_lane",
+        [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F], // input vector
+        0x80, // replacement value
+        16,   // lane index (out of bounds - should be masked to 0)
+        [0x80, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]  // expected (lane 0 replaced due to masking)
+    ],
+
+    // i16x8.replace_lane - replace a single 16-bit lane in a vector
+    [
+        "i16x8.replace_lane",
+        [0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007], // input vector
+        0xFFFF, // replacement value
+        3,      // lane index (valid)
+        [0x0000, 0x0001, 0x0002, 0xFFFF, 0x0004, 0x0005, 0x0006, 0x0007]  // expected (lane 3 replaced)
+    ],
+    [
+        "i16x8.replace_lane",
+        [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x8000], // input vector
+        0x9999, // replacement value
+        15,     // lane index (out of bounds - should be masked to 7)
+        [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x9999]  // expected (lane 7 replaced due to masking)
+    ],
+
+    // i32x4.replace_lane - replace a single 32-bit lane in a vector
+    [
+        "i32x4.replace_lane",
+        [0x00000000, 0x11111111, 0x22222222, 0x33333333], // input vector
+        0xFFFFFFFF, // replacement value
+        1,          // lane index (valid)
+        [0x00000000, 0xFFFFFFFF, 0x22222222, 0x33333333]  // expected (lane 1 replaced)
+    ],
+    [
+        "i32x4.replace_lane",
+        [0x12345678, 0x9ABCDEF0, 0x13579BDF, 0x2468ACE0], // input vector
+        0x87654321, // replacement value
+        7,          // lane index (out of bounds - should be masked to 3)
+        [0x12345678, 0x9ABCDEF0, 0x13579BDF, 0x87654321]  // expected (lane 3 replaced due to masking)
+    ],
+
+    // i64x2.replace_lane - replace a single 64-bit lane in a vector
+    [
+        "i64x2.replace_lane",
+        [0x0000000000000000n, 0x1111111111111111n], // input vector
+        0xFFFFFFFFFFFFFFFFn, // replacement value
+        0,                   // lane index (valid)
+        [0xFFFFFFFFFFFFFFFFn, 0x1111111111111111n]  // expected (lane 0 replaced)
+    ],
+    [
+        "i64x2.replace_lane",
+        [0x123456789ABCDEF0n, 0xFEDCBA9876543210n], // input vector
+        0x0F0E0D0C0B0A0908n, // replacement value
+        3,                   // lane index (out of bounds - should be masked to 1)
+        [0x123456789ABCDEF0n, 0x0F0E0D0C0B0A0908n]  // expected (lane 1 replaced due to masking)
+    ],
+
+    // f32x4.replace_lane - replace a single 32-bit float lane in a vector
+    [
+        "f32x4.replace_lane",
+        [0.0, 1.0, 2.0, 3.0], // input vector
+        3.14159, // replacement value
+        2,       // lane index (valid)
+        [0.0, 1.0, 3.14159, 3.0]  // expected (lane 2 replaced)
+    ],
+    [
+        "f32x4.replace_lane",
+        [1.5, 2.5, 3.5, 4.5], // input vector
+        -42.75, // replacement value
+        8,      // lane index (out of bounds - should be masked to 0)
+        [-42.75, 2.5, 3.5, 4.5]  // expected (lane 0 replaced due to masking)
+    ],
+
+    // f64x2.replace_lane - replace a single 64-bit float lane in a vector
+    [
+        "f64x2.replace_lane",
+        [0.0, 1.0], // input vector
+        2.718281828459045, // replacement value (e)
+        1,                 // lane index (valid)
+        [0.0, 2.718281828459045]  // expected (lane 1 replaced)
+    ],
+    [
+        "f64x2.replace_lane",
+        [3.141592653589793, -123.456789], // input vector
+        Number.NEGATIVE_INFINITY, // replacement value
+        4,                        // lane index (out of bounds - should be masked to 0)
+        [Number.NEGATIVE_INFINITY, -123.456789]  // expected (lane 0 replaced due to masking)
     ]
 ];
 
