@@ -4251,76 +4251,33 @@ end)
 ipintOp(_simd_i8x16_shuffle, macro()
     # i8x16.shuffle - shuffle bytes from two vectors using 16 immediate indices
     # The 16 immediate bytes follow the instruction in the bytecode
-    popVec(v1)  # Second vector (b)
-    popVec(v0)  # First vector (a)
+    popVec(v1)
+    popVec(v0)
     
-    # Allocate space for result vector
-    subp V128ISize, sp
+    if ARM64 or ARM64E
+        loadv ImmLaneIdxOffset[PC], v2  # Load 16 immediate bytes as a vector
+        emit "tbl v16.16b, {v16.16b, v17.16b}, v18.16b"
+    else
+        break # Not implemented
+    end
     
-    # Loop through all 16 lanes
-    move 0, t2  # Lane counter
-.shuffle_loop:
-    # Load immediate index for current lane
-    loadb (ImmLaneIdxOffset)[PC, t2], t0
-    andi ImmLaneIdx32Mask, t0  # Mask to valid range 0-31 for shuffle
-    
-    # Check if index selects from first (0-15) or second (16-31) vector
-    bilt t0, 16, .shuffle_first_vector
-    
-    # Select from second vector (indices 16-31)
-    subi 16, t0
-    loadb 16[sp, t0], t1  # From second vector (v1)
-    jmp .shuffle_store
-    
-.shuffle_first_vector:
-    # Select from first vector (indices 0-15)
-    loadb 32[sp, t0], t1  # From first vector (v0)
-    
-.shuffle_store:
-    # Store result byte at current lane position
-    storeb t1, [sp, t2]
-    
-    # Increment lane counter and check if done
-    addi 1, t2
-    bilt t2, 16, .shuffle_loop
-    
+    pushVec(v0)
     advancePC(18)  # 2 bytes opcode + 16 bytes immediate
     nextIPIntInstruction()
 end)
 
 ipintOp(_simd_i8x16_swizzle, macro()
     # i8x16.swizzle - swizzle bytes from first vector using indices from second vector
-    popVec(v1)  # Index vector
-    popVec(v0)  # Source vector
+    popVec(v1)
+    popVec(v0)
     
-    # Allocate space for result vector
-    subp V128ISize, sp
+    if ARM64 or ARM64E
+        emit "tbl v16.16b, {v16.16b}, v17.16b"
+    else
+        break # Not implemented
+    end
     
-    # Loop through all 16 lanes
-    move 0, t2  # Lane counter
-.swizzle_loop:
-    # Load index from second vector at current lane position
-    loadb (16)[sp, t2], t0  # Load index from second vector (v1)
-    
-    # Check if index is valid (0-15) or invalid (>=16)
-    bilt t0, 16, .swizzle_valid_index
-    
-    # Invalid index produces 0
-    move 0, t1
-    jmp .swizzle_store
-    
-.swizzle_valid_index:
-    # Load from first vector using the index
-    loadb 32[sp, t0], t1  # Load from first vector (v0) using index
-    
-.swizzle_store:
-    # Store result byte at current lane position
-    storeb t1, [sp, t2]
-    
-    # Increment lane counter and check if done
-    addi 1, t2
-    bilt t2, 16, .swizzle_loop
-    
+    pushVec(v0)
     advancePC(2)
     nextIPIntInstruction()
 end)
