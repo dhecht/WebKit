@@ -4056,6 +4056,7 @@ end)
     #######################
 
 const ImmLaneIdxOffset = 2 # Offset in bytecode
+const ImmLaneIdx32Mask = 0x1f
 const ImmLaneIdx16Mask = 0xf
 const ImmLaneIdx8Mask = 0x7
 const ImmLaneIdx4Mask = 0x3
@@ -4246,6 +4247,20 @@ ipintOp(_simd_v128_const, macro()
 end)
 
 # 0xFD 0x0D - 0xFD 0x14: splat (+ shuffle/swizzle)
+
+macro shuffleLane(laneIndex)
+    loadb (ImmLaneIdxOffset + laneIndex)[PC], t0  # Load immediate index
+    andi ImmLaneIdx32Mask, t0  # Mask to valid range 0-31 for shuffle
+    bilt t0, 16, .select_first
+    subi 16, t0
+    loadb 16[sp, t0], t1  # From second vector
+    jmp .store
+.select_first:
+    loadb 32[sp, t0], t1  # From first vector
+.store:
+    storeb t1, laneIndex[sp]
+end
+
 ipintOp(_simd_i8x16_shuffle, macro()
     # i8x16.shuffle - shuffle bytes from two vectors using 16 immediate indices
     # The 16 immediate bytes follow the instruction in the bytecode
@@ -4254,20 +4269,6 @@ ipintOp(_simd_i8x16_shuffle, macro()
     
     # Allocate space for result vector
     subp V128ISize, sp
-    
-    # Unroll the shuffle for all 16 lanes
-    # Helper macro to shuffle one lane
-    macro shuffleLane(laneIndex)
-        loadb (2 + laneIndex)[PC], t0  # Load immediate index
-        bilt t0, 16, .shuffle_lane##laneIndex##_first
-        subi 16, t0
-        loadb 16[sp, t0], t1  # From second vector
-        jmp .shuffle_lane##laneIndex##_store
-    .shuffle_lane##laneIndex##_first:
-        loadb 32[sp, t0], t1  # From first vector
-    .shuffle_lane##laneIndex##_store:
-        storeb t1, laneIndex[sp]
-    end
     
     shuffleLane(0)
     shuffleLane(1)
@@ -4290,6 +4291,17 @@ ipintOp(_simd_i8x16_shuffle, macro()
     nextIPIntInstruction()
 end)
 
+macro swizzleLane(laneIndex)
+    loadb (16 + laneIndex)[sp], t0  # Load index from second vector
+    bilt t0, 16, .lane_valid
+    move 0, t1  # Invalid index produces 0
+    jmp .store
+.lane_valid:
+    loadb 32[sp, t0], t1  # Load from first vector using index
+.store:
+    storeb t1, laneIndex[sp]
+end
+
 ipintOp(_simd_i8x16_swizzle, macro()
     # i8x16.swizzle - swizzle bytes from first vector using indices from second vector
     popVec(v1)  # Index vector
@@ -4297,19 +4309,6 @@ ipintOp(_simd_i8x16_swizzle, macro()
     
     # Allocate space for result vector
     subp V128ISize, sp
-    
-    # Unroll the swizzle for all 16 lanes
-    # Helper macro to swizzle one lane
-    macro swizzleLane(laneIndex)
-        loadb (16 + laneIndex)[sp], t0  # Load index from second vector
-        bilt t0, 16, .swizzle_lane##laneIndex##_valid
-        move 0, t1  # Invalid index produces 0
-        jmp .swizzle_lane##laneIndex##_store
-    .swizzle_lane##laneIndex##_valid:
-        loadb 32[sp, t0], t1  # Load from first vector using index
-    .swizzle_lane##laneIndex##_store:
-        storeb t1, laneIndex[sp]
-    end
     
     swizzleLane(0)
     swizzleLane(1)
