@@ -78,6 +78,30 @@ let wat = `
         (v128.store (local.get $dst)
             (v128.load64_splat (local.get $src)))
     )
+
+    (func (export "test_v128_load8_lane") (param $src i32) (param $dst i32)
+        (v128.store (local.get $dst)
+            (v128.load8_lane 5 (local.get $src)
+                (v128.const i8x16 0x00 0x11 0x22 0x33 0x44 0x55 0x66 0x77 0x88 0x99 0xAA 0xBB 0xCC 0xDD 0xEE 0xFF)))
+    )
+
+    (func (export "test_v128_load16_lane") (param $src i32) (param $dst i32)
+        (v128.store (local.get $dst)
+            (v128.load16_lane 3 (local.get $src)
+                (v128.const i16x8 0x1000 0x1111 0x2222 0x3333 0x4444 0x5555 0x6666 0x7777)))
+    )
+
+    (func (export "test_v128_load32_lane") (param $src i32) (param $dst i32)
+        (v128.store (local.get $dst)
+            (v128.load32_lane 2 (local.get $src)
+                (v128.const i32x4 0x10000000 0x11111111 0x22222222 0x33333333)))
+    )
+
+    (func (export "test_v128_load64_lane") (param $src i32) (param $dst i32)
+        (v128.store (local.get $dst)
+            (v128.load64_lane 1 (local.get $src)
+                (v128.const i64x2 0x1000000000000000 0x1111111111111111)))
+    )
 )
 `
 
@@ -340,6 +364,73 @@ async function test_load_splat() {
         print("Load splat tests passed!")
 }
 
+async function test_load_lane() {
+    const instance = await instantiate(wat, {}, { simd: true })
+    const memory = instance.exports.memory
+    const buffer = memory.buffer
+    const u8 = new Uint8Array(buffer)
+    const u16 = new Uint16Array(buffer)
+    const u32 = new Uint32Array(buffer)
+    const u64 = new BigUint64Array(buffer)
+
+    const {
+        test_v128_load8_lane,
+        test_v128_load16_lane,
+        test_v128_load32_lane,
+        test_v128_load64_lane
+    } = instance.exports
+
+    function clearMemory() {
+        u8.fill(0)
+    }
+
+    for (let i = 0; i < wasmTestLoopCount; ++i) {
+        // Test v128.load8_lane - load 8-bit value and replace specific lane
+        clearMemory()
+        u8[0] = 0xAB  // Value to load
+        test_v128_load8_lane(0, 896)  // Load from address 0, store to address 896, replace lane 5
+
+        // Verify the result: lane 5 should be 0xAB, others should be from the constant vector
+        const expectedBytes = [0x00, 0x11, 0x22, 0x33, 0x44, 0xAB, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]
+        for (let j = 0; j < 16; j++) {
+            assert.eq(u8[896 + j], expectedBytes[j])
+        }
+
+        // Test v128.load16_lane - load 16-bit value and replace specific lane
+        clearMemory()
+        u16[0] = 0xABCD  // Value to load
+        test_v128_load16_lane(0, 960)  // Load from address 0, store to address 960, replace lane 3
+
+        // Verify the result: lane 3 should be 0xABCD, others should be from the constant vector
+        const expectedWords = [0x1000, 0x1111, 0x2222, 0xABCD, 0x4444, 0x5555, 0x6666, 0x7777]
+        for (let j = 0; j < 8; j++) {
+            assert.eq(u16[480 + j], expectedWords[j])
+        }
+
+        // Test v128.load32_lane - load 32-bit value and replace specific lane
+        clearMemory()
+        u32[0] = 0xABCDEF12  // Value to load
+        test_v128_load32_lane(0, 1024)  // Load from address 0, store to address 1024, replace lane 2
+
+        // Verify the result: lane 2 should be 0xABCDEF12, others should be from the constant vector
+        const expectedDwords = [0x10000000, 0x11111111, 0xABCDEF12, 0x33333333]
+        for (let j = 0; j < 4; j++) {
+            assert.eq(u32[256 + j], expectedDwords[j])
+        }
+
+        // Test v128.load64_lane - load 64-bit value and replace specific lane
+        clearMemory()
+        u64[0] = 0xABCDEF1234567890n  // Value to load
+        test_v128_load64_lane(0, 1088)  // Load from address 0, store to address 1088, replace lane 1
+
+        // Verify the result: lane 1 should be 0xABCDEF1234567890n, lane 0 should be from the constant vector
+        assert.eq(u64[136], 0x1000000000000000n)  // Lane 0 unchanged
+        assert.eq(u64[137], 0xABCDEF1234567890n)  // Lane 1 replaced
+    }
+    if (verbose)
+        print("Load lane tests passed!")
+}
+
 async function test_bounds_checking() {
     const instance = await instantiate(wat, {}, { simd: true })
     const memory = instance.exports.memory
@@ -354,7 +445,11 @@ async function test_bounds_checking() {
         test_v128_load8_splat,
         test_v128_load16_splat,
         test_v128_load32_splat,
-        test_v128_load64_splat
+        test_v128_load64_splat,
+        test_v128_load8_lane,
+        test_v128_load16_lane,
+        test_v128_load32_lane,
+        test_v128_load64_lane
     } = instance.exports
 
     for (let i = 0; i < wasmTestLoopCount; ++i) {
@@ -414,6 +509,35 @@ async function test_bounds_checking() {
             if (e.message.includes("should have thrown")) throw e
         }
 
+        // Test load lane bounds checking
+        try {
+            test_v128_load8_lane(memorySize, 0)  // Should fail: trying to read at exactly memorySize
+            throw new Error("v128.load8_lane should have thrown on out-of-bounds access")
+        } catch (e) {
+            if (e.message.includes("should have thrown")) throw e
+        }
+
+        try {
+            test_v128_load16_lane(memorySize - 1, 0)  // Should fail: needs 2 bytes but only 1 available
+            throw new Error("v128.load16_lane should have thrown on out-of-bounds access")
+        } catch (e) {
+            if (e.message.includes("should have thrown")) throw e
+        }
+
+        try {
+            test_v128_load32_lane(memorySize - 3, 0)  // Should fail: needs 4 bytes but only 3 available
+            throw new Error("v128.load32_lane should have thrown on out-of-bounds access")
+        } catch (e) {
+            if (e.message.includes("should have thrown")) throw e
+        }
+
+        try {
+            test_v128_load64_lane(memorySize - 7, 0)  // Should fail: needs 8 bytes but only 7 available
+            throw new Error("v128.load64_lane should have thrown on out-of-bounds access")
+        } catch (e) {
+            if (e.message.includes("should have thrown")) throw e
+        }
+
         // Test valid boundary cases (should succeed)
         test_v128_load16x4_s(memorySize - 8, 0)   // Exactly at boundary: reads 8 bytes
         test_v128_load16x4_u(memorySize - 8, 16)  // Exactly at boundary: reads 8 bytes
@@ -423,6 +547,12 @@ async function test_bounds_checking() {
         test_v128_load16_splat(memorySize - 2, 80) // Exactly at boundary: reads 2 bytes
         test_v128_load32_splat(memorySize - 4, 96) // Exactly at boundary: reads 4 bytes
         test_v128_load64_splat(memorySize - 8, 112) // Exactly at boundary: reads 8 bytes
+        
+        // Test valid boundary cases for load lane instructions (should succeed)
+        test_v128_load8_lane(memorySize - 1, 128)  // Exactly at boundary: reads 1 byte
+        test_v128_load16_lane(memorySize - 2, 144) // Exactly at boundary: reads 2 bytes
+        test_v128_load32_lane(memorySize - 4, 160) // Exactly at boundary: reads 4 bytes
+        test_v128_load64_lane(memorySize - 8, 176) // Exactly at boundary: reads 8 bytes
     }
     if (verbose)
         print("Bounds checking tests passed!")
@@ -430,5 +560,6 @@ async function test_bounds_checking() {
 
 await assert.asyncTest(test_store())
 await assert.asyncTest(test_load_extend())
+await assert.asyncTest(test_load_lane())
 await assert.asyncTest(test_load_splat())
 await assert.asyncTest(test_bounds_checking())
