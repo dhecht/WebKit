@@ -5245,10 +5245,47 @@ ipintOp(_simd_v128_any_true, macro()
 end)
 
 # 0xFD 0x54 - 0xFD 0x5D: v128 load/store lane
-unimplementedInstruction(_simd_v128_load8_lane_mem)
-unimplementedInstruction(_simd_v128_load16_lane_mem)
-unimplementedInstruction(_simd_v128_load32_lane_mem)
-unimplementedInstruction(_simd_v128_load64_lane_mem)
+
+ipintOp(_simd_v128_load8_lane_mem, macro()
+    # v128.load8_lane - load 8-bit value from memory and replace lane in existing vector
+    simdMemoryOp(1, macro()
+        loadb ImmLaneIdxOffset[PC], t1
+        andi ImmLaneIdx16Mask, t1
+        loadb [memoryBase, t0], t0
+        storeb t0, [sp, t1] # Replace the lane in-place on the stack
+    end)
+end)
+
+ipintOp(_simd_v128_load16_lane_mem, macro()
+    # v128.load16_lane - load 16-bit value from memory and replace lane in existing vector
+    simdMemoryOp(2, macro()
+        loadb ImmLaneIdxOffset[PC], t1
+        andi ImmLaneIdx8Mask, t1
+        loadh [memoryBase, t0], t0
+        storeh t0, [sp, t1, 2] # Replace the lane in-place on the stack
+    end)
+end)
+
+ipintOp(_simd_v128_load32_lane_mem, macro()
+    # v128.load32_lane - load 32-bit value from memory and replace lane in existing vector
+    simdMemoryOp(4, macro()
+        loadb ImmLaneIdxOffset[PC], t1
+        andi ImmLaneIdx4Mask, t1
+        loadi [memoryBase, t0], t0
+        storei t0, [sp, t1, 4] # Replace the lane in-place on the stack
+    end)
+end)
+
+ipintOp(_simd_v128_load64_lane_mem, macro()
+    # v128.load64_lane - load 64-bit value from memory and replace lane in existing vector
+    simdMemoryOp(8, macro()
+        loadb ImmLaneIdxOffset[PC], t1
+        andi ImmLaneIdx2Mask, t1
+        loadq [memoryBase, t0], t0
+        storeq t0, [sp, t1, 8] # Replace the lane in-place on the stack
+    end)
+end)
+
 unimplementedInstruction(_simd_v128_store8_lane_mem)
 unimplementedInstruction(_simd_v128_store16_lane_mem)
 unimplementedInstruction(_simd_v128_store32_lane_mem)
