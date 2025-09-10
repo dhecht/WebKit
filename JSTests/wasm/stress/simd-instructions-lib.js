@@ -47,6 +47,11 @@ function getInputVectorType(instruction) {
     if (instruction === 'i64x2.extmul_low_i32x4_s' || instruction === 'i64x2.extmul_high_i32x4_s' ||
         instruction === 'i64x2.extmul_low_i32x4_u' || instruction === 'i64x2.extmul_high_i32x4_u') return 'i32x4';
 
+    if (instruction === 'i16x8.extadd_pairwise_i8x16_s' || instruction === 'i16x8.extadd_pairwise_i8x16_u') return 'i8x16';
+    if (instruction === 'i32x4.extadd_pairwise_i16x8_s' || instruction === 'i32x4.extadd_pairwise_i16x8_u') return 'i16x8';
+
+    if (instruction === 'i32x4.dot_i16x8_s') return 'i16x8';
+
     // Default: extract from instruction name
     if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) return 'i8x16';
     if (instruction.startsWith('i16x8.')) return 'i16x8';
@@ -157,7 +162,8 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
          '.convert_i32x4_s', '.convert_i32x4_u', '.ceil', '.floor', '.trunc', '.nearest',
          '.extend_low_i8x16_s', '.extend_high_i8x16_s', '.extend_low_i8x16_u', '.extend_high_i8x16_u',
          '.extend_low_i16x8_s', '.extend_high_i16x8_s', '.extend_low_i16x8_u', '.extend_high_i16x8_u',
-         '.extend_low_i32x4_s', '.extend_high_i32x4_s', '.extend_low_i32x4_u', '.extend_high_i32x4_u'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
+         '.extend_low_i32x4_s', '.extend_high_i32x4_s', '.extend_low_i32x4_u', '.extend_high_i32x4_u',
+         '.extadd_pairwise_i8x16_s', '.extadd_pairwise_i8x16_u', '.extadd_pairwise_i16x8_s', '.extadd_pairwise_i16x8_u'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
 
     const returnsI32 = instruction => ['.any_true', '.all_true', '.bitmask'].some(pattern => instruction.includes(pattern));
 

@@ -5923,13 +5923,74 @@ ipintOp(_simd_f64x2_trunc, macro()
 end)
 
 # 0xFD 0x7B: i8x16 avgr_u
-unimplementedInstruction(_simd_i8x16_avgr_u)
+
+ipintOp(_simd_i8x16_avgr_u, macro()
+    # i8x16.avgr_u - average of 16 8-bit unsigned integers with rounding
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "urhadd v16.16b, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x7C - 0xFD 0x7F: extadd_pairwise
-unimplementedInstruction(_simd_i16x8_extadd_pairwise_i8x16_s)
-unimplementedInstruction(_simd_i16x8_extadd_pairwise_i8x16_u)
-unimplementedInstruction(_simd_i32x4_extadd_pairwise_i16x8_s)
-unimplementedInstruction(_simd_i32x4_extadd_pairwise_i16x8_u)
+
+ipintOp(_simd_i16x8_extadd_pairwise_i8x16_s, macro()
+    # i16x8.extadd_pairwise_i8x16_s - pairwise addition of signed 8-bit integers to 16-bit
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "saddlp v16.8h, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_extadd_pairwise_i8x16_u, macro()
+    # i16x8.extadd_pairwise_i8x16_u - pairwise addition of unsigned 8-bit integers to 16-bit
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "uaddlp v16.8h, v16.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_extadd_pairwise_i16x8_s, macro()
+    # i32x4.extadd_pairwise_i16x8_s - pairwise addition of signed 16-bit integers to 32-bit
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "saddlp v16.4s, v16.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_extadd_pairwise_i16x8_u, macro()
+    # i32x4.extadd_pairwise_i16x8_u - pairwise addition of unsigned 16-bit integers to 32-bit
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "uaddlp v16.4s, v16.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0x80 0x01 - 0xFD 0x93 0x01: i16x8 operations
 
@@ -5959,7 +6020,20 @@ ipintOp(_simd_i16x8_neg, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_i16x8_q15mulr_sat_s)
+ipintOp(_simd_i16x8_q15mulr_sat_s, macro()
+    # i16x8.q15mulr_sat_s - Q15 multiply with rounding and saturation
+    # Q15 format: multiply two 16-bit values, shift right by 15, round and saturate
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "sqrdmulh v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 ipintOp(_simd_i16x8_all_true, macro()
     # i16x8.all_true - return 1 if all 8 16-bit lanes are non-zero, 0 otherwise
@@ -6324,7 +6398,19 @@ ipintOp(_simd_i16x8_max_u, macro()
 end)
 
 reservedOpcode(0xfd9a01)
-unimplementedInstruction(_simd_i16x8_avgr_u)
+ipintOp(_simd_i16x8_avgr_u, macro()
+    # i16x8.avgr_u - average of 8 16-bit unsigned integers with rounding
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "urhadd v16.8h, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 ipintOp(_simd_i16x8_extmul_low_i8x16_s, macro()
     # i16x8.extmul_low_i8x16_s - multiply lower 8 i8 elements and extend to i16
@@ -6679,7 +6765,23 @@ ipintOp(_simd_i32x4_max_u, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_i32x4_dot_i16x8_s)
+ipintOp(_simd_i32x4_dot_i16x8_s, macro()
+    # i32x4.dot_i16x8_s - dot product of signed 16-bit integers to 32-bit
+    # Multiplies pairs of adjacent 16-bit elements and adds the results
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        # Use signed multiply-add long pairwise: smull + smlal2
+        emit "smull v18.4s, v16.4h, v17.4h"      # multiply low 4 pairs
+        emit "smlal2 v18.4s, v16.8h, v17.8h"     # multiply-add high 4 pairs
+        emit "mov v16.16b, v18.16b"              # move result to v16
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 reservedOpcode(0xfdbb01)
 
 ipintOp(_simd_i32x4_extmul_low_i16x8_s, macro()
