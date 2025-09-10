@@ -18,41 +18,17 @@ function floatToWasmText(val) {
 }
 
 /**
- * Get input vector type for an instructions
+ * Get input vector type for an instruction by parsing the instruction name
  * @param {string} instruction - SIMD instruction name
  * @returns {string} - Input vector type (e.g., 'f64x2', 'f32x4', 'i32x4')
  */
 function getInputVectorType(instruction) {
-    if (instruction === 'f32x4.demote_f64x2_zero') return 'f64x2';
-    if (instruction === 'f64x2.promote_low_f32x4') return 'f32x4';
-    if (instruction === 'i32x4.trunc_sat_f64x2_s_zero' || instruction === 'i32x4.trunc_sat_f64x2_u_zero') return 'f64x2';
-    if (instruction === 'i32x4.trunc_sat_f32x4_s' || instruction === 'i32x4.trunc_sat_f32x4_u') return 'f32x4';
-    if (instruction === 'f32x4.convert_i32x4_s' || instruction === 'f32x4.convert_i32x4_u') return 'i32x4';
-    if (instruction === 'f64x2.convert_low_i32x4_s' || instruction === 'f64x2.convert_low_i32x4_u') return 'i32x4';
+    // Look for vector type pattern in the instruction name (after the operation)
+    const vectorTypeMatch = instruction.match(/\.(?:\w+_)*([if]\d+x\d+)(?:_[su])?(?:_zero)?$/);
+    if (vectorTypeMatch)
+        return vectorTypeMatch[1];
     
-    if (instruction === 'i16x8.extend_low_i8x16_s' || instruction === 'i16x8.extend_high_i8x16_s' ||
-        instruction === 'i16x8.extend_low_i8x16_u' || instruction === 'i16x8.extend_high_i8x16_u') return 'i8x16';
-    if (instruction === 'i32x4.extend_low_i16x8_s' || instruction === 'i32x4.extend_high_i16x8_s' ||
-        instruction === 'i32x4.extend_low_i16x8_u' || instruction === 'i32x4.extend_high_i16x8_u') return 'i16x8';
-    if (instruction === 'i64x2.extend_low_i32x4_s' || instruction === 'i64x2.extend_high_i32x4_s' ||
-        instruction === 'i64x2.extend_low_i32x4_u' || instruction === 'i64x2.extend_high_i32x4_u') return 'i32x4';
-    
-    if (instruction === 'i8x16.narrow_i16x8_s' || instruction === 'i8x16.narrow_i16x8_u') return 'i16x8';
-    if (instruction === 'i16x8.narrow_i32x4_s' || instruction === 'i16x8.narrow_i32x4_u') return 'i32x4';
-    
-    if (instruction === 'i16x8.extmul_low_i8x16_s' || instruction === 'i16x8.extmul_high_i8x16_s' ||
-        instruction === 'i16x8.extmul_low_i8x16_u' || instruction === 'i16x8.extmul_high_i8x16_u') return 'i8x16';
-    if (instruction === 'i32x4.extmul_low_i16x8_s' || instruction === 'i32x4.extmul_high_i16x8_s' ||
-        instruction === 'i32x4.extmul_low_i16x8_u' || instruction === 'i32x4.extmul_high_i16x8_u') return 'i16x8';
-    if (instruction === 'i64x2.extmul_low_i32x4_s' || instruction === 'i64x2.extmul_high_i32x4_s' ||
-        instruction === 'i64x2.extmul_low_i32x4_u' || instruction === 'i64x2.extmul_high_i32x4_u') return 'i32x4';
-
-    if (instruction === 'i16x8.extadd_pairwise_i8x16_s' || instruction === 'i16x8.extadd_pairwise_i8x16_u') return 'i8x16';
-    if (instruction === 'i32x4.extadd_pairwise_i16x8_s' || instruction === 'i32x4.extadd_pairwise_i16x8_u') return 'i16x8';
-
-    if (instruction === 'i32x4.dot_i16x8_s') return 'i16x8';
-
-    // Default: extract from instruction name
+    // Default: input type is same as output type (extract from instruction prefix)
     if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) return 'i8x16';
     if (instruction.startsWith('i16x8.')) return 'i16x8';
     if (instruction.startsWith('i32x4.')) return 'i32x4';
