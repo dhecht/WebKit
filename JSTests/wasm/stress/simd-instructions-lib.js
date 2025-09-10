@@ -30,6 +30,13 @@ function getInputVectorType(instruction) {
     if (instruction === 'i32x4.trunc_sat_f32x4_s' || instruction === 'i32x4.trunc_sat_f32x4_u') return 'f32x4';
     if (instruction === 'f32x4.convert_i32x4_s' || instruction === 'f32x4.convert_i32x4_u') return 'i32x4';
     if (instruction === 'f64x2.convert_low_i32x4_s' || instruction === 'f64x2.convert_low_i32x4_u') return 'i32x4';
+    
+    if (instruction === 'i16x8.extend_low_i8x16_s' || instruction === 'i16x8.extend_high_i8x16_s' ||
+        instruction === 'i16x8.extend_low_i8x16_u' || instruction === 'i16x8.extend_high_i8x16_u') return 'i8x16';
+    if (instruction === 'i32x4.extend_low_i16x8_s' || instruction === 'i32x4.extend_high_i16x8_s' ||
+        instruction === 'i32x4.extend_low_i16x8_u' || instruction === 'i32x4.extend_high_i16x8_u') return 'i16x8';
+    if (instruction === 'i64x2.extend_low_i32x4_s' || instruction === 'i64x2.extend_high_i32x4_s' ||
+        instruction === 'i64x2.extend_low_i32x4_u' || instruction === 'i64x2.extend_high_i32x4_u') return 'i32x4';
 
     // Default: extract from instruction name
     if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) return 'i8x16';
@@ -138,7 +145,10 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
         ['.abs', '.neg', '.sqrt', '.not', '.any_true', '.popcnt', '.all_true', '.bitmask', '.splat',
          '.demote_f64x2_zero', '.promote_low_f32x4', '.trunc_sat_f64x2_s_zero', '.trunc_sat_f64x2_u_zero',
          '.convert_low_i32x4_s', '.convert_low_i32x4_u', '.trunc_sat_f32x4_s', '.trunc_sat_f32x4_u',
-         '.convert_i32x4_s', '.convert_i32x4_u', '.ceil', '.floor', '.trunc', '.nearest'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
+         '.convert_i32x4_s', '.convert_i32x4_u', '.ceil', '.floor', '.trunc', '.nearest',
+         '.extend_low_i8x16_s', '.extend_high_i8x16_s', '.extend_low_i8x16_u', '.extend_high_i8x16_u',
+         '.extend_low_i16x8_s', '.extend_high_i16x8_s', '.extend_low_i16x8_u', '.extend_high_i16x8_u',
+         '.extend_low_i32x4_s', '.extend_high_i32x4_s', '.extend_low_i32x4_u', '.extend_high_i32x4_u'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
 
     const returnsI32 = instruction => ['.any_true', '.all_true', '.bitmask'].some(pattern => instruction.includes(pattern));
 
