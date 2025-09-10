@@ -7153,7 +7153,6 @@ ipintOp(_simd_i32x4_trunc_sat_f64x2_s_zero, macro()
     # i32x4.trunc_sat_f64x2_s_zero - truncate 2 f64 values to signed i32, zero upper 2 lanes
     popVec(v0)
     if ARM64 or ARM64E
-        # Convert f64 to i32 with saturation, narrow to lower 64 bits
         emit "fcvtzs v16.2d, v16.2d"
         emit "xtn v16.2s, v16.2d"
         # Zero the upper 64 bits (lanes 2,3)
@@ -7170,7 +7169,6 @@ ipintOp(_simd_i32x4_trunc_sat_f64x2_u_zero, macro()
     # i32x4.trunc_sat_f64x2_u_zero - truncate 2 f64 values to unsigned i32, zero upper 2 lanes
     popVec(v0)
     if ARM64 or ARM64E
-        # Convert f64 to i32 with saturation, narrow to lower 64 bits
         emit "fcvtzu v16.2d, v16.2d"
         emit "xtn v16.2s, v16.2d"
         # Zero the upper 64 bits (lanes 2,3)

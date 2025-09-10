@@ -420,23 +420,23 @@ const floatTests = [
     [
         "i32x4.trunc_sat_f32x4_s",
         [1.5, -2.7, 2147483647.0, -2147483648.0],
-        [1, -2, 2147483647, -2147483648]
+        [0x00000001, 0xFFFFFFFE, 0x7FFFFFFF, 0x80000000] // 1, -2, 2147483647, -2147483648
     ],
     [
         "i32x4.trunc_sat_f32x4_s",
         [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NaN, 3000000000.0],
-        [2147483647, -2147483648, 0, 2147483647]
+        [0x7FFFFFFF, 0x80000000, 0x00000000, 0x7FFFFFFF] // 2147483647, -2147483648, 0, 2147483647
     ],
 
     [
         "i32x4.trunc_sat_f32x4_u",
         [1.5, 2.7, 4294967295.0, -1.0],
-        [1, 2, 4294967295, 0]
+        [0x00000001, 0x00000002, 0xFFFFFFFF, 0x00000000] // 1, 2, 4294967295, 0
     ],
     [
         "i32x4.trunc_sat_f32x4_u",
         [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NaN, 5000000000.0],
-        [4294967295, 0, 0, 4294967295]
+        [0xFFFFFFFF, 0x00000000, 0x00000000, 0xFFFFFFFF] // 4294967295, 0, 0, 4294967295
     ],
 
     [
@@ -464,12 +464,12 @@ const floatTests = [
     [
         "i32x4.trunc_sat_f64x2_s_zero",
         [1.5, -2.7],
-        [1, -2, 0, 0]
+        [0x00000001, 0xFFFFFFFE, 0x00000000, 0x00000000] // 1, -2, 0, 0
     ],
     [
         "i32x4.trunc_sat_f64x2_s_zero",
         [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY],
-        [2147483647, -2147483648, 0, 0]
+        [0x7FFFFFFF, 0x80000000, 0x00000000, 0x00000000] // 2147483647, -2147483648, 0, 0
     ],
 
     [
