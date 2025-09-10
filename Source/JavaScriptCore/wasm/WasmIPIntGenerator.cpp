@@ -735,7 +735,10 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addSIMDLoadExtend(SIMDLaneOpera
     return addSIMDLoad(pointer, offset, result);
 }
 
-PartialResult WARN_UNUSED_RETURN IPIntGenerator::addSIMDLoadPad(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&) IPINT_UNIMPLEMENTED
+PartialResult WARN_UNUSED_RETURN IPIntGenerator::addSIMDLoadPad(SIMDLaneOperation, ExpressionType pointer, uint32_t offset, ExpressionType& result)
+{
+    return addSIMDLoad(pointer, offset, result);
+}
 
 IPIntGenerator::ExpressionType IPIntGenerator::addConstant(v128_t)
 {
