@@ -133,7 +133,10 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
 
     const numInputs = instruction =>
         ['.bitselect', '.shuffle', '.replace_lane'].some(pattern => instruction.includes(pattern)) ? 3 :
-        ['.abs', '.neg', '.sqrt', '.not', '.any_true', '.popcnt', '.all_true', '.bitmask', '.splat'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
+        ['.abs', '.neg', '.sqrt', '.not', '.any_true', '.popcnt', '.all_true', '.bitmask', '.splat',
+         '.demote_f64x2_zero', '.promote_low_f32x4', '.trunc_sat_f64x2_s_zero', '.trunc_sat_f64x2_u_zero',
+         '.convert_low_i32x4_s', '.convert_low_i32x4_u', '.trunc_sat_f32x4_s', '.trunc_sat_f32x4_u',
+         '.convert_i32x4_s', '.convert_i32x4_u', '.ceil', '.floor', '.trunc', '.nearest'].some(pattern => instruction.includes(pattern)) ? 1 : 2;
 
     const returnsI32 = instruction => ['.any_true', '.all_true', '.bitmask'].some(pattern => instruction.includes(pattern));
 
