@@ -27,6 +27,8 @@ function getInputVectorType(instruction) {
     if (instruction === 'f32x4.demote_f64x2_zero') return 'f64x2';
     if (instruction === 'f64x2.promote_low_f32x4') return 'f32x4';
     if (instruction === 'i32x4.trunc_sat_f64x2_s_zero' || instruction === 'i32x4.trunc_sat_f64x2_u_zero') return 'f64x2';
+    if (instruction === 'i32x4.trunc_sat_f32x4_s' || instruction === 'i32x4.trunc_sat_f32x4_u') return 'f32x4';
+    if (instruction === 'f32x4.convert_i32x4_s' || instruction === 'f32x4.convert_i32x4_u') return 'i32x4';
     if (instruction === 'f64x2.convert_low_i32x4_s' || instruction === 'f64x2.convert_low_i32x4_u') return 'i32x4';
     
     // Default: extract from instruction name
