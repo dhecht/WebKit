@@ -5611,9 +5611,9 @@ ipintOp(_simd_i8x16_narrow_i16x8_u, macro()
     popVec(v1)  # Second operand
     popVec(v0)  # First operand
     if ARM64 or ARM64E
-        # Unsigned saturating extract narrow: combine v0.8h and v1.8h into v16.16b
-        emit "uqxtn v16.8b, v16.8h"    # Narrow first vector (v0) to lower 8 bytes
-        emit "uqxtn2 v16.16b, v17.8h"  # Narrow second vector (v1) to upper 8 bytes
+        # Signed saturate extract unsigned narrow: combine v0.8h and v1.8h into v16.16b
+        emit "sqxtun v16.8b, v16.8h"    # Narrow first vector (v0) to lower 8 bytes
+        emit "sqxtun2 v16.16b, v17.8h"  # Narrow second vector (v1) to upper 8 bytes
     else
         break # Not implemented
     end
@@ -6028,9 +6028,9 @@ ipintOp(_simd_i16x8_narrow_i32x4_u, macro()
     popVec(v1)  # Second operand
     popVec(v0)  # First operand
     if ARM64 or ARM64E
-        # Unsigned saturating extract narrow: combine v0.4s and v1.4s into v16.8h
-        emit "uqxtn v16.4h, v16.4s"    # Narrow first vector (v0) to lower 4 halfwords
-        emit "uqxtn2 v16.8h, v17.4s"   # Narrow second vector (v1) to upper 4 halfwords
+        # Signed saturate extract unsigned narrow: combine v0.4s and v1.4s into v16.8h
+        emit "sqxtun v16.4h, v16.4s"    # Narrow first vector (v0) to lower 4 halfwords
+        emit "sqxtun2 v16.8h, v17.4s"   # Narrow second vector (v1) to upper 4 halfwords
     else
         break # Not implemented
     end
