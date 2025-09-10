@@ -6325,10 +6325,62 @@ end)
 
 reservedOpcode(0xfd9a01)
 unimplementedInstruction(_simd_i16x8_avgr_u)
-unimplementedInstruction(_simd_i16x8_extmul_low_i8x16_s)
-unimplementedInstruction(_simd_i16x8_extmul_high_i8x16_s)
-unimplementedInstruction(_simd_i16x8_extmul_low_i8x16_u)
-unimplementedInstruction(_simd_i16x8_extmul_high_i8x16_u)
+
+ipintOp(_simd_i16x8_extmul_low_i8x16_s, macro()
+    # i16x8.extmul_low_i8x16_s - multiply lower 8 i8 elements and extend to i16
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smull v16.8h, v16.8b, v17.8b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_extmul_high_i8x16_s, macro()
+    # i16x8.extmul_high_i8x16_s - multiply upper 8 i8 elements and extend to i16
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smull2 v16.8h, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_extmul_low_i8x16_u, macro()
+    # i16x8.extmul_low_i8x16_u - multiply lower 8 u8 elements and extend to i16
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umull v16.8h, v16.8b, v17.8b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i16x8_extmul_high_i8x16_u, macro()
+    # i16x8.extmul_high_i8x16_u - multiply upper 8 u8 elements and extend to i16
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umull2 v16.8h, v16.16b, v17.16b"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0xA0 0x01 - 0xFD 0xBF 0x01: i32x4 operations
 
@@ -6629,10 +6681,62 @@ end)
 
 unimplementedInstruction(_simd_i32x4_dot_i16x8_s)
 reservedOpcode(0xfdbb01)
-unimplementedInstruction(_simd_i32x4_extmul_low_i16x8_s)
-unimplementedInstruction(_simd_i32x4_extmul_high_i16x8_s)
-unimplementedInstruction(_simd_i32x4_extmul_low_i16x8_u)
-unimplementedInstruction(_simd_i32x4_extmul_high_i16x8_u)
+
+ipintOp(_simd_i32x4_extmul_low_i16x8_s, macro()
+    # i32x4.extmul_low_i16x8_s - multiply lower 4 i16 elements and extend to i32
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smull v16.4s, v16.4h, v17.4h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_extmul_high_i16x8_s, macro()
+    # i32x4.extmul_high_i16x8_s - multiply upper 4 i16 elements and extend to i32
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smull2 v16.4s, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_extmul_low_i16x8_u, macro()
+    # i32x4.extmul_low_i16x8_u - multiply lower 4 u16 elements and extend to i32
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umull v16.4s, v16.4h, v17.4h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i32x4_extmul_high_i16x8_u, macro()
+    # i32x4.extmul_high_i16x8_u - multiply upper 4 u16 elements and extend to i32
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umull2 v16.4s, v16.8h, v17.8h"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0xC0 0x01 - 0xFD 0xDF 0x01: i64x2 operations
 
@@ -6970,10 +7074,61 @@ ipintOp(_simd_i64x2_ge_s, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_i64x2_extmul_low_i32x4_s)
-unimplementedInstruction(_simd_i64x2_extmul_high_i32x4_s)
-unimplementedInstruction(_simd_i64x2_extmul_low_i32x4_u)
-unimplementedInstruction(_simd_i64x2_extmul_high_i32x4_u)
+ipintOp(_simd_i64x2_extmul_low_i32x4_s, macro()
+    # i64x2.extmul_low_i32x4_s - multiply lower 2 i32 elements and extend to i64
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smull v16.2d, v16.2s, v17.2s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_extmul_high_i32x4_s, macro()
+    # i64x2.extmul_high_i32x4_s - multiply upper 2 i32 elements and extend to i64
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "smull2 v16.2d, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_extmul_low_i32x4_u, macro()
+    # i64x2.extmul_low_i32x4_u - multiply lower 2 u32 elements and extend to i64
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umull v16.2d, v16.2s, v17.2s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
+
+ipintOp(_simd_i64x2_extmul_high_i32x4_u, macro()
+    # i64x2.extmul_high_i32x4_u - multiply upper 2 u32 elements and extend to i64
+    popVec(v1)
+    popVec(v0)
+    if ARM64 or ARM64E
+        emit "umull2 v16.2d, v16.4s, v17.4s"
+    else
+        break # Not implemented
+    end
+    pushVec(v0)
+    advancePC(2)
+    nextIPIntInstruction()
+end)
 
 # 0xFD 0xE0 0x01 - 0xFD 0xEB 0x01: f32x4 operations
 

@@ -39,6 +39,13 @@ function getInputVectorType(instruction) {
     
     if (instruction === 'i8x16.narrow_i16x8_s' || instruction === 'i8x16.narrow_i16x8_u') return 'i16x8';
     if (instruction === 'i16x8.narrow_i32x4_s' || instruction === 'i16x8.narrow_i32x4_u') return 'i32x4';
+    
+    if (instruction === 'i16x8.extmul_low_i8x16_s' || instruction === 'i16x8.extmul_high_i8x16_s' ||
+        instruction === 'i16x8.extmul_low_i8x16_u' || instruction === 'i16x8.extmul_high_i8x16_u') return 'i8x16';
+    if (instruction === 'i32x4.extmul_low_i16x8_s' || instruction === 'i32x4.extmul_high_i16x8_s' ||
+        instruction === 'i32x4.extmul_low_i16x8_u' || instruction === 'i32x4.extmul_high_i16x8_u') return 'i16x8';
+    if (instruction === 'i64x2.extmul_low_i32x4_s' || instruction === 'i64x2.extmul_high_i32x4_s' ||
+        instruction === 'i64x2.extmul_low_i32x4_u' || instruction === 'i64x2.extmul_high_i32x4_u') return 'i32x4';
 
     // Default: extract from instruction name
     if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) return 'i8x16';
