@@ -29,12 +29,11 @@ function getInputVectorType(instruction) {
         return vectorTypeMatch[1];
     
     // Default: input type is same as output type (extract from instruction prefix)
-    if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) return 'i8x16';
-    if (instruction.startsWith('i16x8.')) return 'i16x8';
-    if (instruction.startsWith('i32x4.')) return 'i32x4';
-    if (instruction.startsWith('i64x2.')) return 'i64x2';
-    if (instruction.startsWith('f32x4.')) return 'f32x4';
-    if (instruction.startsWith('f64x2.')) return 'f64x2';
+    const prefixMatch = instruction.match(/^(v128|[if]\d+x\d+)\./);
+    if (prefixMatch) {
+        // v128 instructions operate on i8x16 by default
+        return prefixMatch[1] === 'v128' ? 'i8x16' : prefixMatch[1];
+    }
 
     return 'unknown';
 }
