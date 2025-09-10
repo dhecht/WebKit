@@ -5248,20 +5248,23 @@ end)
 
 ipintOp(_simd_v128_load8_lane_mem, macro()
     # v128.load8_lane - load 8-bit value from memory and replace lane in existing vector
-    loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    advancePCByReg(t0)
 
-    popVec(v0)  # Pop the existing vector
+    popVec(v0)
     popMemoryIndex(t0, t2)
 
     loadi IPInt::Const32Metadata::value[MC], t2
     addp t2, t0
     ipintCheckMemoryBound(t0, t2, 1)
-
-    loadb -1[PC], t1 # Load lane index from last byte of instruction
-    andi ImmLaneIdx16Mask, t1  # Mask to 0-15 for 16 lanes
-       
     loadb [memoryBase, t0], t0
+
+    # The lane index comes after the variable length memory offset, so find it by
+    # advancing the PC and loading the byte before the next instruction.
+    loadb IPInt::Const32Metadata::instructionLength[MC], t1
+    advancePCByReg(t1)
+    loadb -1[PC], t1
+    andi ImmLaneIdx16Mask, t1
+
+    # Push the result and then replace one lane of the result with the loaded value
     pushVec(v0)
     storeb t0, [sp, t1]
     
@@ -5271,20 +5274,23 @@ end)
 
 ipintOp(_simd_v128_load16_lane_mem, macro()
     # v128.load16_lane - load 16-bit value from memory and replace lane in existing vector
-    loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    advancePCByReg(t0)
 
-    popVec(v0)  # Pop the existing vector
+    popVec(v0)
     popMemoryIndex(t0, t2)
 
     loadi IPInt::Const32Metadata::value[MC], t2
     addp t2, t0
     ipintCheckMemoryBound(t0, t2, 2)
-
-    loadb -1[PC], t1 # Load lane index from last byte of instruction
-    andi ImmLaneIdx8Mask, t1  # Mask to 0-7 for 8 lanes
-       
     loadh [memoryBase, t0], t0
+
+    # The lane index comes after the variable length memory offset, so find it by
+    # advancing the PC and loading the byte before the next instruction.
+    loadb IPInt::Const32Metadata::instructionLength[MC], t1
+    advancePCByReg(t1)
+    loadb -1[PC], t1
+    andi ImmLaneIdx8Mask, t1
+
+    # Push the result and then replace one lane of the result with the loaded value
     pushVec(v0)
     storeh t0, [sp, t1, 2]
     
@@ -5294,20 +5300,23 @@ end)
 
 ipintOp(_simd_v128_load32_lane_mem, macro()
     # v128.load32_lane - load 32-bit value from memory and replace lane in existing vector
-    loadb IPInt::Const32Metadata::instructionLength[MC], t0
-    advancePCByReg(t0)
 
-    popVec(v0)  # Pop the existing vector
+    popVec(v0)
     popMemoryIndex(t0, t2)
 
     loadi IPInt::Const32Metadata::value[MC], t2
     addp t2, t0
     ipintCheckMemoryBound(t0, t2, 4)
-
-    loadb -1[PC], t1 # Load lane index from last byte of instruction
-    andi ImmLaneIdx4Mask, t1  # Mask to 0-3 for 4 lanes
-       
     loadi [memoryBase, t0], t0
+
+    # The lane index comes after the variable length memory offset, so find it by
+    # advancing the PC and loading the byte before the next instruction.
+    loadb IPInt::Const32Metadata::instructionLength[MC], t1
+    advancePCByReg(t1)
+    loadb -1[PC], t1
+    andi ImmLaneIdx4Mask, t1
+
+    # Push the result and then replace one lane of the result with the loaded value
     pushVec(v0)
     storei t0, [sp, t1, 4]
     
@@ -5333,6 +5342,7 @@ ipintOp(_simd_v128_load64_lane_mem, macro()
     loadb -1[PC], t1
     andi ImmLaneIdx2Mask, t1
 
+    # Push the result and then replace one lane of the result with the loaded value
     pushVec(v0)
     storeq t0, [sp, t1, 8]
     
