@@ -5346,7 +5346,7 @@ ipintOp(_simd_v128_store8_lane_mem, macro()
     loadb -1[PC], t1 # Load lane index from last byte of instruction
     andi ImmLaneIdx16Mask, t1  # Mask to 0-15 for 16 lanes
 
-    loadb V128ISize[sp, t1], t1  # Load value from lane in vector on stack
+    loadb [sp, t1], t1  # Load value from lane in vector on stack
     addp V128ISize, sp  # Pop the vector
 
     popMemoryIndex(t0, t2)
@@ -5369,7 +5369,7 @@ ipintOp(_simd_v128_store16_lane_mem, macro()
     loadb -1[PC], t1 # Load lane index from last byte of instruction
     andi ImmLaneIdx8Mask, t1  # Mask to 0-7 for 8 lanes
 
-    loadh V128ISize[sp, t1, 2], t1  # Load value from lane in vector on stack
+    loadh [sp, t1, 2], t1  # Load value from lane in vector on stack
     addp V128ISize, sp  # Pop the vector
 
     popMemoryIndex(t0, t2)
@@ -5392,7 +5392,7 @@ ipintOp(_simd_v128_store32_lane_mem, macro()
     loadb -1[PC], t1 # Load lane index from last byte of instruction
     andi ImmLaneIdx4Mask, t1  # Mask to 0-3 for 4 lanes
 
-    loadi V128ISize[sp, t1, 4], t1  # Load value from lane in vector on stack
+    loadi [sp, t1, 4], t1  # Load value from lane in vector on stack
     addp V128ISize, sp  # Pop the vector
 
     popMemoryIndex(t0, t2)
@@ -5415,7 +5415,7 @@ ipintOp(_simd_v128_store64_lane_mem, macro()
     loadb -1[PC], t1 # Load lane index from last byte of instruction
     andi ImmLaneIdx2Mask, t1  # Mask to 0-1 for 2 lanes
 
-    loadq V128ISize[sp, t1, 8], t1  # Load value from lane in vector on stack
+    loadq [sp, t1, 8], t1  # Load value from lane in vector on stack
     addp V128ISize, sp  # Pop the vector
 
     popMemoryIndex(t0, t2)
