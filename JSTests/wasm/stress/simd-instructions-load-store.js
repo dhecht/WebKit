@@ -122,6 +122,16 @@ let wat = `
         (v128.store64_lane offset=8 1 (local.get $addr)
             (v128.const i64x2 0x1000000000000000 0xABCDEF1234567890))
     )
+
+    (func (export "test_v128_load32_zero") (param $src i32) (param $dst i32)
+        (v128.store (local.get $dst)
+            (v128.load32_zero offset=2048 (local.get $src)))
+    )
+
+    (func (export "test_v128_load64_zero") (param $src i32) (param $dst i32)
+        (v128.store (local.get $dst)
+            (v128.load64_zero offset=4096 (local.get $src)))
+    )
 )
 `
 
@@ -529,6 +539,65 @@ async function test_store_lane() {
         print("Store lane tests passed!")
 }
 
+async function test_load_zero() {
+    const instance = await instantiate(wat, {}, { simd: true })
+    const memory = instance.exports.memory
+    const buffer = memory.buffer
+    const u8 = new Uint8Array(buffer)
+    const u32 = new Uint32Array(buffer)
+    const u64 = new BigUint64Array(buffer)
+
+    const {
+        test_v128_load32_zero,
+        test_v128_load64_zero
+    } = instance.exports
+
+    function clearMemory() {
+        u8.fill(0)
+    }
+
+    for (let i = 0; i < wasmTestLoopCount; ++i) {
+        // Test v128.load32_zero - load 32-bit value into lane 0, zero-pad remaining lanes (offset=2048)
+        clearMemory()
+        u32[(42 + 2048) / 4] = 0xABCDEF12
+        test_v128_load32_zero(42, 1152)
+
+        // Verify the result: lane 0 should be 0xABCDEF12, remaining lanes should be zero
+        assert.eq(u32[288], 0xABCDEF12)  // 1152 / 4 = 288, lane 0
+        assert.eq(u32[289], 0)           // lane 1
+        assert.eq(u32[290], 0)           // lane 2
+        assert.eq(u32[291], 0)           // lane 3
+
+        // Test v128.load64_zero - load 64-bit value into lane 0, zero-pad remaining lanes (offset=4096)
+        clearMemory()
+        u64[(48 + 4096) / 8] = 0xABCDEF1234567890n
+        test_v128_load64_zero(48, 1216)
+
+        // Verify the result: lane 0 should be 0xABCDEF1234567890n, lane 1 should be zero
+        assert.eq(u64[152], 0xABCDEF1234567890n)  // 1216 / 8 = 152, lane 0
+        assert.eq(u64[153], 0n)                   // lane 1
+
+        // Test edge cases - load from different memory locations
+        clearMemory()
+        u32[(0 + 2048) / 4] = 0x12345678
+        u64[(0 + 4096) / 8] = 0x123456789ABCDEF0n
+        
+        test_v128_load32_zero(0, 1280)
+        test_v128_load64_zero(0, 1344)
+
+        // Verify results
+        assert.eq(u32[320], 0x12345678)           // 1280 / 4 = 320, lane 0
+        assert.eq(u32[321], 0)                    // lane 1
+        assert.eq(u32[322], 0)                    // lane 2
+        assert.eq(u32[323], 0)                    // lane 3
+        
+        assert.eq(u64[168], 0x123456789ABCDEF0n)  // 1344 / 8 = 168, lane 0
+        assert.eq(u64[169], 0n)                   // lane 1
+    }
+    if (verbose)
+        print("Load zero tests passed!")
+}
+
 async function test_bounds_checking() {
     const instance = await instantiate(wat, {}, { simd: true })
     const memory = instance.exports.memory
@@ -551,7 +620,9 @@ async function test_bounds_checking() {
         test_v128_store8_lane,
         test_v128_store16_lane,
         test_v128_store32_lane,
-        test_v128_store64_lane
+        test_v128_store64_lane,
+        test_v128_load32_zero,
+        test_v128_load64_zero
     } = instance.exports
 
     for (let i = 0; i < wasmTestLoopCount; ++i) {
@@ -669,6 +740,21 @@ async function test_bounds_checking() {
             if (e.message.includes("should have thrown")) throw e
         }
 
+        // Test load and zero-pad bounds checking
+        try {
+            test_v128_load32_zero(memorySize - 2051, 0)  // offset=2048, so tries to read 4 bytes at memorySize-3
+            throw new Error("v128.load32_zero should have thrown on out-of-bounds access")
+        } catch (e) {
+            if (e.message.includes("should have thrown")) throw e
+        }
+
+        try {
+            test_v128_load64_zero(memorySize - 4103, 0)  // offset=4096, so tries to read 8 bytes at memorySize-7
+            throw new Error("v128.load64_zero should have thrown on out-of-bounds access")
+        } catch (e) {
+            if (e.message.includes("should have thrown")) throw e
+        }
+
         // Test valid boundary cases (should succeed)
         test_v128_load16x4_s(memorySize - 8, 0)   // Exactly at boundary: reads 8 bytes
         test_v128_load16x4_u(memorySize - 8, 16)  // Exactly at boundary: reads 8 bytes
@@ -686,6 +772,10 @@ async function test_bounds_checking() {
         test_v128_load32_lane(memorySize - 32772, 160) // offset=32768, so reads at memorySize-4
         test_v128_load64_lane(memorySize - 16, 176) // offset=8, so reads at memorySize-8
 
+        // Test valid boundary cases for load and zero-pad instructions (should succeed)
+        test_v128_load32_zero(memorySize - 2052, 192) // offset=2048, so reads at memorySize-4
+        test_v128_load64_zero(memorySize - 4104, 208) // offset=4096, so reads at memorySize-8
+
         // Test valid boundary cases for store lane instructions (should succeed)
         // Note: These functions have offsets, so we need to account for them
         test_v128_store8_lane(memorySize - 17)   // offset=16, so writes at memorySize-1
@@ -702,4 +792,5 @@ await assert.asyncTest(test_load_extend())
 await assert.asyncTest(test_load_lane())
 await assert.asyncTest(test_store_lane())
 await assert.asyncTest(test_load_splat())
+await assert.asyncTest(test_load_zero())
 await assert.asyncTest(test_bounds_checking())

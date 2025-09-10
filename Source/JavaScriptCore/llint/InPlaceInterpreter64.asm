@@ -5430,8 +5430,35 @@ ipintOp(_simd_v128_store64_lane_mem, macro()
     nextIPIntInstruction()
 end)
 
-unimplementedInstruction(_simd_v128_load32_zero_mem)
-unimplementedInstruction(_simd_v128_load64_zero_mem)
+ipintOp(_simd_v128_load32_zero_mem, macro()
+    # v128.load32_zero - load 32-bit value from memory and zero-pad to 128 bits
+    simdMemoryOp(4, macro()
+        loadi [memoryBase, t0], t1
+        if ARM64 or ARM64E
+            # Clear the vector register first, then insert the 32-bit value at lane 0
+            emit "movi v16.4s, #0"
+            emit "fmov s16, w1"
+        else
+            break # Not implemented
+        end
+        pushVec(v0)
+    end)
+end)
+
+ipintOp(_simd_v128_load64_zero_mem, macro()
+    # v128.load64_zero - load 64-bit value from memory and zero-pad to 128 bits
+    simdMemoryOp(8, macro()
+        loadq [memoryBase, t0], t1
+        if ARM64 or ARM64E
+            # Clear the vector register first, then insert the 64-bit value at lane 0
+            emit "movi v16.2d, #0"
+            emit "fmov d16, x1"
+        else
+            break # Not implemented
+        end
+        pushVec(v0)
+    end)
+end)
 
 # 0xFD 0x5E - 0xFD 0x5F: f32x4/f64x2 conversion
 unimplementedInstruction(_simd_f32x4_demote_f64x2_zero)
