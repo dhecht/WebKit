@@ -23,7 +23,6 @@ function floatToWasmText(val) {
  * @returns {string} - Input vector type (e.g., 'f64x2', 'f32x4', 'i32x4')
  */
 function getInputVectorType(instruction) {
-    // Special handling for conversion instructions with different input/output types
     if (instruction === 'f32x4.demote_f64x2_zero') return 'f64x2';
     if (instruction === 'f64x2.promote_low_f32x4') return 'f32x4';
     if (instruction === 'i32x4.trunc_sat_f64x2_s_zero' || instruction === 'i32x4.trunc_sat_f64x2_u_zero') return 'f64x2';
@@ -37,6 +36,9 @@ function getInputVectorType(instruction) {
         instruction === 'i32x4.extend_low_i16x8_u' || instruction === 'i32x4.extend_high_i16x8_u') return 'i16x8';
     if (instruction === 'i64x2.extend_low_i32x4_s' || instruction === 'i64x2.extend_high_i32x4_s' ||
         instruction === 'i64x2.extend_low_i32x4_u' || instruction === 'i64x2.extend_high_i32x4_u') return 'i32x4';
+    
+    if (instruction === 'i8x16.narrow_i16x8_s' || instruction === 'i8x16.narrow_i16x8_u') return 'i16x8';
+    if (instruction === 'i16x8.narrow_i32x4_s' || instruction === 'i16x8.narrow_i32x4_u') return 'i32x4';
 
     // Default: extract from instruction name
     if (instruction.startsWith('i8x16.') || instruction.startsWith('v128.')) return 'i8x16';
