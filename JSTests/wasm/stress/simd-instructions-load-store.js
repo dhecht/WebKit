@@ -559,7 +559,7 @@ async function test_load_zero() {
         u8.fill(scribble_byte)
     }
 
-    for (let i = 0; i < 1; ++i) {
+    for (let i = 0; i < wasmTestLoopCount; ++i) {
         // Test v128.load32_zero - load 32-bit value into lane 0, zero-pad remaining lanes (offset=2048)
         scribbleMemory()
         const srcAddr = 1024 + 2048;
@@ -797,10 +797,10 @@ async function test_bounds_checking() {
         print("Bounds checking tests passed!")
 }
 
-//await assert.asyncTest(test_store())
-//await assert.asyncTest(test_load_extend())
-//await assert.asyncTest(test_load_lane())
-//await assert.asyncTest(test_store_lane())
-//await assert.asyncTest(test_load_splat())
+await assert.asyncTest(test_store())
+await assert.asyncTest(test_load_extend())
+await assert.asyncTest(test_load_lane())
+await assert.asyncTest(test_store_lane())
+await assert.asyncTest(test_load_splat())
 await assert.asyncTest(test_load_zero())
 await assert.asyncTest(test_bounds_checking())
