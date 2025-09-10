@@ -6773,9 +6773,9 @@ ipintOp(_simd_i32x4_dot_i16x8_s, macro()
     if ARM64 or ARM64E
         # Use signed multiply long to multiply adjacent pairs, then pairwise add
         emit "smull v18.4s, v16.4h, v17.4h"      # multiply low 4 pairs to v18
-        emit "smull2 v19.4s, v16.8h, v17.8h"     # multiply high 4 pairs to v19
+        emit "smull2 v16.4s, v16.8h, v17.8h"     # multiply high 4 pairs to v19
         # Now pairwise add adjacent elements within each vector to get dot products
-        emit "addp v16.4s, v18.4s, v19.4s"       # pairwise add to get final dot product result
+        emit "addp v16.4s, v18.4s, v16.4s"       # pairwise add to get final dot product result
     else
         break # Not implemented
     end
