@@ -4289,25 +4289,25 @@ ipintOp(_simd_i8x16_shuffle, macro()
         emit "tbl v16.16b, {v16.16b, v17.16b}, v18.16b"
     else
         # Create constant 16 in each byte using register operations only
-        emit "pcmpeqb %xmm3, %xmm3"          # All 1s (0xFF in each byte)
-        emit "psrlw $4, %xmm3"               # Shift right 4 bits: 0x0F0F pattern
-        emit "paddb %xmm3, %xmm3"            # Add to self: 0x0F + 0x0F = 0x1E
-        emit "psrlw $1, %xmm3"               # Shift right 1 bit per word
-        emit "pcmpeqb %xmm5, %xmm5"          # Create mask register with all 1s
-        emit "psllw $7, %xmm5"               # Shift left to create 0x8080 pattern
-        emit "pandn %xmm3, %xmm5"            # AND NOT to clear high bits, leaving ~0x10
-        emit "pxor %xmm5, %xmm3"             # XOR to get exactly 0x10 in each byte
-        
+        emit "vpcmpeqb %xmm3, %xmm3, %xmm3"          # All 1s (0xFF in each byte)
+        emit "vpsrlw $4, %xmm3, %xmm3"               # Shift right 4 bits: 0x0F0F pattern
+        emit "vpaddb %xmm3, %xmm3, %xmm3"            # Add to self: 0x0F + 0x0F = 0x1E
+        emit "vpsrlw $1, %xmm3, %xmm3"               # Shift right 1 bit per word
+        emit "vpcmpeqb %xmm5, %xmm5, %xmm5"          # Create mask register with all 1s
+        emit "vpsllw $7, %xmm5, %xmm5"               # Shift left to create 0x8080 pattern
+        emit "vpandn %xmm3, %xmm5, %xmm5"            # AND NOT to clear high bits, leaving ~0x10
+        emit "vpxor %xmm5, %xmm3, %xmm3"             # XOR to get exactly 0x10 in each byte
+
         # Copy shuffle mask and adjust for second vector
-        emit "movdqa %xmm2, %xmm4"           # Copy shuffle mask
-        emit "psubb %xmm3, %xmm4"            # Subtract 16 from each index
-        
+        emit "vmovdqa %xmm2, %xmm4"           # Copy shuffle mask
+        emit "vpsubb %xmm3, %xmm4, %xmm4"            # Subtract 16 from each index
+
         # Shuffle both vectors
-        emit "pshufb %xmm2, %xmm0"           # Shuffle v0 (indices 16-31 will zero out)
-        emit "pshufb %xmm4, %xmm1"           # Shuffle v1 (indices 0-15 will zero out after adjustment)
-        
+        emit "vpshufb %xmm2, %xmm0, %xmm0"           # Shuffle v0 (indices 16-31 will zero out)
+        emit "vpshufb %xmm4, %xmm1, %xmm1"           # Shuffle v1 (indices 0-15 will zero out after adjustment)
+
         # Combine results
-        emit "por %xmm1, %xmm0"              # OR the results together
+        emit "vpor %xmm1, %xmm0, %xmm0"              # OR the results together
     end
     
     pushVec(v0)
@@ -4323,7 +4323,7 @@ ipintOp(_simd_i8x16_swizzle, macro()
     if ARM64 or ARM64E
         emit "tbl v16.16b, {v16.16b}, v17.16b"
     elsif X86_64
-        emit "pshufb %xmm1, %xmm0"
+        emit "vpshufb %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -5842,9 +5842,9 @@ ipintOp(_simd_i8x16_all_true, macro()
         emit "cset w0, eq"                # Set to 1 if equal (all lanes non-zero), 0 otherwise
     elsif X86_64
         # Compare each byte with zero to create mask of zero lanes
-        emit "pxor %xmm1, %xmm1"          # Create zero vector
-        emit "pcmpeqb %xmm1, %xmm0"       # Compare each byte with 0 (0xFF if zero, 0x00 if non-zero)
-        emit "pmovmskb %xmm0, %eax"        # Extract sign bits to create 16-bit mask
+        emit "vpxor %xmm1, %xmm1, %xmm1"          # Create zero vector
+        emit "vpcmpeqb %xmm1, %xmm0, %xmm0"       # Compare each byte with 0 (0xFF if zero, 0x00 if non-zero)
+        emit "vpmovmskb %xmm0, %eax"        # Extract sign bits to create 16-bit mask
         emit "test %eax, %eax"             # Test if any bit is set (any lane was zero)
         emit "sete %al"                    # Set AL to 1 if no bits set (all lanes non-zero), 0 otherwise
         emit "movzbl %al, %eax"            # Zero-extend to full 32-bit register
