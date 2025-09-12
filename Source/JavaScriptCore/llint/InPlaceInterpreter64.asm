@@ -4616,7 +4616,7 @@ ipintOp(_simd_i8x16_ne, macro()
     elsif X86_64
         # Compare for equality, then invert the result
         emit "vpcmpeqb %xmm1, %xmm0, %xmm0"
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqb %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result
     else
@@ -4712,7 +4712,7 @@ ipintOp(_simd_i8x16_le_s, macro()
     elsif X86_64
         # xmm0 <= xmm1 iff !(xmm0 > xmm1)
         emit "vpcmpgtb %xmm1, %xmm0, %xmm0"  # xmm0 > xmm1
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqb %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result: !(xmm0 > xmm1)
     else
@@ -4751,7 +4751,7 @@ ipintOp(_simd_i8x16_ge_s, macro()
     elsif X86_64
         # xmm0 >= xmm1 iff !(xmm0 < xmm1) iff !(xmm1 > xmm0)
         emit "vpcmpgtb %xmm0, %xmm1, %xmm0"  # xmm1 > xmm0
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqb %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result: !(xmm1 > xmm0)
     else
@@ -4808,7 +4808,7 @@ ipintOp(_simd_i16x8_ne, macro()
     elsif X86_64
         # Compare for equality, then invert the result
         emit "vpcmpeqw %xmm1, %xmm0, %xmm0"
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqw %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result        
     else
@@ -4904,7 +4904,7 @@ ipintOp(_simd_i16x8_le_s, macro()
     elsif X86_64
         # xmm0 <= xmm1 iff !(xmm0 > xmm1)
         emit "vpcmpgtw %xmm1, %xmm0, %xmm0"  # xmm0 > xmm1
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqw %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result: !(xmm0 > xmm1)
     else
@@ -4943,7 +4943,7 @@ ipintOp(_simd_i16x8_ge_s, macro()
     elsif X86_64
         # xmm0 >= xmm1 iff !(xmm0 < xmm1) iff !(xmm1 > xmm0)
         emit "vpcmpgtw %xmm0, %xmm1, %xmm0"  # xmm1 > xmm0
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqw %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result: !(xmm1 > xmm0)
     else
@@ -4999,7 +4999,7 @@ ipintOp(_simd_i32x4_ne, macro()
     elsif X86_64
         # Compare for equality, then invert the result
         emit "vpcmpeqd %xmm1, %xmm0, %xmm0"
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqd %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result
     else
@@ -5095,7 +5095,7 @@ ipintOp(_simd_i32x4_le_s, macro()
     elsif X86_64
         # xmm0 <= xmm1 iff !(xmm0 > xmm1)
         emit "vpcmpgtd %xmm1, %xmm0, %xmm0"  # xmm0 > xmm1
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqd %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result: !(xmm0 > xmm1)
     else
@@ -5134,7 +5134,7 @@ ipintOp(_simd_i32x4_ge_s, macro()
     elsif X86_64
         # xmm0 >= xmm1 iff !(xmm0 < xmm1) iff !(xmm1 > xmm0)
         emit "vpcmpgtd %xmm0, %xmm1, %xmm0"  # xmm1 > xmm0
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqd %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result: !(xmm1 > xmm0)
     else
@@ -5364,11 +5364,16 @@ ipintOp(_simd_f64x2_ge, macro()
 end)
 
 # 0xFD 0x4D - 0xFD 0x53: v128 operations
+
 ipintOp(_simd_v128_not, macro()
     # v128.not - bitwise NOT of 128-bit vector
     popVec(v0)
     if ARM64 or ARM64E
         emit "mvn v16.16b, v16.16b"
+    elsif X86_64
+        # Create all-ones mask and XOR with input to invert all bits
+        emit "vpcmpeqb %xmm1, %xmm1, %xmm1"  # Set all bits to 1
+        emit "vpxor %xmm1, %xmm0, %xmm0"     # Invert all bits
     else
         break # Not implemented
     end
@@ -5383,6 +5388,8 @@ ipintOp(_simd_v128_and, macro()
     popVec(v0)
     if ARM64 or ARM64E
         emit "and v16.16b, v16.16b, v17.16b"
+    elsif X86_64
+        emit "vpand %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -5397,6 +5404,8 @@ ipintOp(_simd_v128_andnot, macro()
     popVec(v0)
     if ARM64 or ARM64E
         emit "bic v16.16b, v16.16b, v17.16b"
+    elsif X86_64
+        emit "vpandn %xmm0, %xmm1, %xmm0"
     else
         break # Not implemented
     end
@@ -5411,6 +5420,8 @@ ipintOp(_simd_v128_or, macro()
     popVec(v0)
     if ARM64 or ARM64E
         emit "orr v16.16b, v16.16b, v17.16b"
+    elsif X86_64
+        emit "vpor %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -5425,6 +5436,8 @@ ipintOp(_simd_v128_xor, macro()
     popVec(v0)
     if ARM64 or ARM64E
         emit "eor v16.16b, v16.16b, v17.16b"
+    elsif X86_64
+        emit "vpxor %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -5446,6 +5459,10 @@ ipintOp(_simd_v128_bitselect, macro()
         emit "mov v18.16b, v18.16b"  # v2 -> v18 (selector)
         emit "bsl v18.16b, v16.16b, v17.16b"  # (c & a) | (~c & b)
         emit "mov v16.16b, v18.16b"  # result -> v0
+    elsif X86_64
+        emit "vpand %xmm2, %xmm0, %xmm3"     # xmm3 = a & c
+        emit "vpandn %xmm1, %xmm2, %xmm2"    # xmm2 = b & ~c (vpandn does ~src1 & src2)
+        emit "vpor %xmm2, %xmm3, %xmm0"      # xmm0 = (a & c) | (b & ~c)
     else
         break # Not implemented
     end
@@ -5465,6 +5482,10 @@ ipintOp(_simd_v128_any_true, macro()
         # Convert non-zero to 1
         emit "cmp w0, #0"
         emit "cset w0, ne"
+    elsif X86_64
+        emit "vptest %xmm0, %xmm0"
+        emit "setne %al"                  # Set AL to 1 if ZF=0 (any bit set), 0 if ZF=1 (all zero)
+        emit "movzbl %al, %eax"           # Zero-extend AL to EAX
     else
         break # Not implemented
     end
@@ -7345,7 +7366,7 @@ ipintOp(_simd_i64x2_ne, macro()
     elsif X86_64
         # Compare for equality, then invert the result
         emit "vpcmpeqq %xmm1, %xmm0, %xmm0"
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqq %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result
     else
@@ -7400,7 +7421,7 @@ ipintOp(_simd_i64x2_le_s, macro()
     elsif X86_64
         # xmm0 <= xmm1 iff !(xmm0 > xmm1)
         emit "vpcmpgtq %xmm1, %xmm0, %xmm0"  # xmm0 > xmm1
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqq %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result: !(xmm0 > xmm1)
     else
@@ -7420,7 +7441,7 @@ ipintOp(_simd_i64x2_ge_s, macro()
     elsif X86_64
         # xmm0 >= xmm1 iff !(xmm0 < xmm1) iff !(xmm1 > xmm0)
         emit "vpcmpgtq %xmm0, %xmm1, %xmm0"  # xmm1 > xmm0
-        emit "vpxor %xmm2, %xmm2, %xmm2"
+        #emit "vpxor %xmm2, %xmm2, %xmm2"
         emit "vpcmpeqq %xmm2, %xmm2, %xmm2"  # Set all bits to 1
         emit "vpxor %xmm2, %xmm0, %xmm0"     # Invert result: !(xmm1 > xmm0)
     else
