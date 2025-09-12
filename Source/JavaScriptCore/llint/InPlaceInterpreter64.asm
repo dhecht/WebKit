@@ -4288,28 +4288,25 @@ ipintOp(_simd_i8x16_shuffle, macro()
     if ARM64 or ARM64E
         emit "tbl v16.16b, {v16.16b, v17.16b}, v18.16b"
     else
-        # Create masks for selecting from first vs second vector
-        # Indices 0-15 select from v0, indices 16-31 select from v1
+        # Simple approach: create 32-byte lookup table and use vpshufb twice
+        # Concatenate v0 and v1 in memory, then use single vpshufb
+        
+        # For indices 0-15: use v0 directly, for indices 16-31: use v1 with adjusted indices
         emit "movdqa %xmm2, %xmm3"           # Copy shuffle mask
-        emit "movdqa %xmm2, %xmm4"           # Another copy of shuffle mask
+        emit "movdqa %xmm2, %xmm4"           # Another copy
         
-        # Create selection mask: 0xFF for indices >= 16, 0x00 for < 16
-        emit "pcmpgtb $0x0F, %xmm3"          # Compare with 15: 0xFF if > 15, 0x00 if <= 15
+        # Shuffle from v0 (indices 0-15 become valid, 16-31 become 0x80 which zeros the lane)
+        emit "pshufb %xmm2, %xmm0"           # Shuffle v0, indices >= 16 will zero out
         
-        # Adjust indices for second vector (subtract 16 from indices >= 16)
-        emit "psubb $0x10, %xmm4"            # Subtract 16 from all indices
+        # Adjust indices for v1: subtract 16, so 16-31 become 0-15
+        emit "psubb $0x10101010, %xmm4"      # Subtract 16 from each byte using 32-bit immediate
+        emit "psubb $0x10101010, %xmm4"      # Second subtraction to handle all bytes
         
-        # Shuffle from first vector (v0) - save result in %xmm5
-        emit "movdqa %xmm0, %xmm5"           # Save v0 to %xmm5
-        emit "pshufb %xmm2, %xmm5"           # Shuffle v0 using original mask
+        # Shuffle from v1 with adjusted indices
+        emit "pshufb %xmm4, %xmm1"           # Shuffle v1, indices 0-15 will zero out (become negative)
         
-        # Shuffle from second vector (v1)
-        emit "pshufb %xmm4, %xmm1"           # Shuffle v1 using adjusted mask
-        
-        # Blend results: pblendvb uses %xmm0 as implicit mask
-        emit "movdqa %xmm3, %xmm0"           # Move selection mask to %xmm0
-        emit "pblendvb %xmm1, %xmm5"         # Blend: select from %xmm1 where mask bits are set, else from %xmm5
-        emit "movdqa %xmm5, %xmm0"           # Move final result to %xmm0
+        # OR the results together
+        emit "por %xmm1, %xmm0"              # Combine results
     end
     
     pushVec(v0)
