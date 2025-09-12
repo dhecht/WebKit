@@ -5972,6 +5972,7 @@ ipintOp(_simd_f32x4_nearest, macro()
 end)
 
 # 0xFD 0x6B - 0xFD 0x73: i8x16 binary operations
+
 ipintOp(_simd_i8x16_shl, macro()
     # i8x16.shl - left shift 16 8-bit integers
     popInt32(t0, t1)  # shift count
@@ -5983,6 +5984,20 @@ ipintOp(_simd_i8x16_shl, macro()
         emit "dup v17.16b, w0"
         # Perform left shift
         emit "ushl v16.16b, v16.16b, v17.16b"
+    elsif X86_64
+        # Mask shift count to 0-7 range for 8-bit elements
+        andi 7, t0
+        # Move shift count to XMM register
+        emit "movd %eax, %xmm1"
+        # For i8x16 shifts, we need to use 16-bit shifts and mask the results
+        # First, unpack bytes to words for shifting
+        emit "vmovdqa %xmm0, %xmm2"          # Copy original
+        emit "vpunpcklbw %xmm0, %xmm0, %xmm0" # Unpack low bytes to words
+        emit "vpunpckhbw %xmm2, %xmm2, %xmm2" # Unpack high bytes to words
+        emit "vpsllw %xmm1, %xmm0, %xmm0"    # Shift low words
+        emit "vpsllw %xmm1, %xmm2, %xmm2"    # Shift high words
+        # Pack back to bytes with saturation
+        emit "vpackuswb %xmm2, %xmm0, %xmm0" # Pack words back to bytes
     else
         break # Not implemented
     end
@@ -6004,6 +6019,19 @@ ipintOp(_simd_i8x16_shr_s, macro()
         emit "dup v17.16b, w0"
         # Perform arithmetic right shift
         emit "sshl v16.16b, v16.16b, v17.16b"
+    elsif X86_64
+        # Mask shift count to 0-7 range for 8-bit elements
+        andi 7, t0
+        # Move shift count to XMM register
+        emit "movd %eax, %xmm1"
+        # For i8x16 arithmetic right shifts, unpack to words, shift, then pack
+        emit "vmovdqa %xmm0, %xmm2"          # Copy original
+        emit "vpunpcklbw %xmm0, %xmm0, %xmm0" # Unpack low bytes to words (sign-extended)
+        emit "vpunpckhbw %xmm2, %xmm2, %xmm2" # Unpack high bytes to words (sign-extended)
+        emit "vpsraw %xmm1, %xmm0, %xmm0"    # Arithmetic shift low words
+        emit "vpsraw %xmm1, %xmm2, %xmm2"    # Arithmetic shift high words
+        # Pack back to bytes with signed saturation
+        emit "vpacksswb %xmm2, %xmm0, %xmm0" # Pack words back to signed bytes
     else
         break # Not implemented
     end
@@ -6025,6 +6053,19 @@ ipintOp(_simd_i8x16_shr_u, macro()
         emit "dup v17.16b, w0"
         # Perform logical right shift
         emit "ushl v16.16b, v16.16b, v17.16b"
+    elsif X86_64
+        # Mask shift count to 0-7 range for 8-bit elements
+        andi 7, t0
+        # Move shift count to XMM register
+        emit "movd %eax, %xmm1"
+        # For i8x16 logical right shifts, unpack to words, shift, then pack
+        emit "vmovdqa %xmm0, %xmm2"          # Copy original
+        emit "vpunpcklbw %xmm0, %xmm0, %xmm0" # Unpack low bytes to words (zero-extended)
+        emit "vpunpckhbw %xmm2, %xmm2, %xmm2" # Unpack high bytes to words (zero-extended)
+        emit "vpsrlw %xmm1, %xmm0, %xmm0"    # Logical shift low words
+        emit "vpsrlw %xmm1, %xmm2, %xmm2"    # Logical shift high words
+        # Pack back to bytes with unsigned saturation
+        emit "vpackuswb %xmm2, %xmm0, %xmm0" # Pack words back to unsigned bytes
     else
         break # Not implemented
     end
@@ -6471,6 +6512,13 @@ ipintOp(_simd_i16x8_shl, macro()
         emit "dup v17.8h, w0"
         # Perform left shift
         emit "ushl v16.8h, v16.8h, v17.8h"
+    elsif X86_64
+        # Mask shift count to 0-15 range for 16-bit elements
+        andi 15, t0
+        # Move shift count to XMM register
+        emit "movd %eax, %xmm1"
+        # Perform left shift on 16-bit words
+        emit "vpsllw %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -6492,6 +6540,13 @@ ipintOp(_simd_i16x8_shr_s, macro()
         emit "dup v17.8h, w0"
         # Perform arithmetic right shift
         emit "sshl v16.8h, v16.8h, v17.8h"
+    elsif X86_64
+        # Mask shift count to 0-15 range for 16-bit elements
+        andi 15, t0
+        # Move shift count to XMM register
+        emit "movd %eax, %xmm1"
+        # Perform arithmetic right shift on 16-bit words
+        emit "vpsraw %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -6513,6 +6568,13 @@ ipintOp(_simd_i16x8_shr_u, macro()
         emit "dup v17.8h, w0"
         # Perform logical right shift
         emit "ushl v16.8h, v16.8h, v17.8h"
+    elsif X86_64
+        # Mask shift count to 0-15 range for 16-bit elements
+        andi 15, t0
+        # Move shift count to XMM register
+        emit "movd %eax, %xmm1"
+        # Perform logical right shift on 16-bit words
+        emit "vpsrlw %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -6905,6 +6967,13 @@ ipintOp(_simd_i32x4_shl, macro()
         emit "dup v17.4s, w0"
         # Perform left shift
         emit "ushl v16.4s, v16.4s, v17.4s"
+    elsif X86_64
+        # Mask shift count to 0-31 range for 32-bit elements
+        andi 31, t0
+        # Move shift count to XMM register
+        emit "vmovd %eax, %xmm1"
+        # Perform left shift on 32-bit doublewords (AVX instruction)
+        emit "vpslld %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -6926,6 +6995,13 @@ ipintOp(_simd_i32x4_shr_s, macro()
         emit "dup v17.4s, w0"
         # Perform arithmetic right shift
         emit "sshl v16.4s, v16.4s, v17.4s"
+    elsif X86_64
+        # Mask shift count to 0-31 range for 32-bit elements
+        andi 31, t0
+        # Move shift count to XMM register
+        emit "vmovd %eax, %xmm1"
+        # Perform arithmetic right shift on 32-bit doublewords (AVX instruction)
+        emit "vpsrad %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -6947,6 +7023,13 @@ ipintOp(_simd_i32x4_shr_u, macro()
         emit "dup v17.4s, w0"
         # Perform logical right shift
         emit "ushl v16.4s, v16.4s, v17.4s"
+    elsif X86_64
+        # Mask shift count to 0-31 range for 32-bit elements
+        andi 31, t0
+        # Move shift count to XMM register
+        emit "vmovd %eax, %xmm1"
+        # Perform logical right shift on 32-bit doublewords (AVX instruction)
+        emit "vpsrld %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -7279,6 +7362,10 @@ ipintOp(_simd_i64x2_shl, macro()
         emit "dup v17.2d, x0"
         # Perform left shift
         emit "ushl v16.2d, v16.2d, v17.2d"
+    elsif X86_64
+        andi 63, t0
+        emit "movd %eax, %xmm1"
+        emit "vpsllq %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -7300,6 +7387,29 @@ ipintOp(_simd_i64x2_shr_s, macro()
         emit "dup v17.2d, x0"
         # Perform arithmetic right shift
         emit "sshl v16.2d, v16.2d, v17.2d"
+    elsif X86_64
+        andi 63, t0
+        # Check if shift count is 0 (no-op case)
+        btiz t0, .simd_i64x2_shr_s_done
+        # Move shift count to xmm register
+        emit "movd %eax, %xmm1"
+        # Extract sign bits: shift left by (64 - shift_count), then arithmetic right shift by 63
+        emit "movq $63, %rsi"
+        emit "subq %rax, %rsi"
+        emit "movd %esi, %xmm2"
+        emit "vpsllq %xmm2, %xmm0, %xmm2"  # Shift left to get sign in MSB
+        emit "movq $63, %rsi"
+        emit "movd %esi, %xmm3"
+        emit "vpsrlq %xmm3, %xmm2, %xmm2"  # Logical right shift by 63 to get sign mask
+        # Perform logical right shift on original value
+        emit "vpsrlq %xmm1, %xmm0, %xmm0"
+        # Create sign extension mask
+        emit "movq $64, %rsi"
+        emit "subq %rax, %rsi"
+        emit "movd %esi, %xmm3"
+        emit "vpsllq %xmm3, %xmm2, %xmm2"  # Shift sign bits to correct position
+        emit "vpsubq %xmm2, %xmm0, %xmm0"  # Subtract to set sign bits
+    .simd_i64x2_shr_s_done:
     else
         break # Not implemented
     end
@@ -7321,6 +7431,10 @@ ipintOp(_simd_i64x2_shr_u, macro()
         emit "dup v17.2d, x0"
         # Perform logical right shift
         emit "ushl v16.2d, v16.2d, v17.2d"
+    elsif X86_64
+        andi 63, t0
+        emit "movd %eax, %xmm1"
+        emit "vpsrlq %xmm1, %xmm0, %xmm0"
     else
         break # Not implemented
     end
