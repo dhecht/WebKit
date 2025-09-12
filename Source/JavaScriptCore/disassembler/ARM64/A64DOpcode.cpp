@@ -1912,16 +1912,23 @@ const char* A64DOpcodeVector3RegSame::opName()
     // Get the 5-bit opcode from bits 15-11
     unsigned op = opcode();
     unsigned u = uBit();
+    unsigned size = vectorSize();
     
     // Handle based on U bit and opcode
     if (u == 0) {
         // U=0: Signed/general operations
         switch (op) {
-        case 0b00000: return "shadd";
         case 0b00001: return "sqadd";
         case 0b00010: return "srhadd";
-        case 0b00011: return "and";
-        case 0b00100: return "sqsub";
+        case 0b00011:
+            // Size-dependent: 00=AND, 01=BIC, 10=ORR, 11=ORN
+            if (size == 0b00) return "and";
+            if (size == 0b01) return "bic";
+            if (size == 0b10) return "orr";
+            if (size == 0b11) return "orn";
+            return nullptr;
+        case 0b00100: return "shsub";
+        case 0b00101: return "sqsub";
         case 0b00110: return "cmgt";
         case 0b00111: return "cmge";
         case 0b01000: return "sshl";
@@ -1940,14 +1947,37 @@ const char* A64DOpcodeVector3RegSame::opName()
         case 0b10101: return "sminp";
         case 0b10110: return "sqdmulh";
         case 0b10111: return "addp";
-        case 0b11000: return "fmaxnm";
-        case 0b11001: return "fmla";
-        case 0b11010: return "fadd";
-        case 0b11011: return "fmulx";
-        case 0b11100: return "fcmeq";
-        case 0b11101: return "fmlal";
-        case 0b11110: return "fmax";
-        case 0b11111: return "frecps";
+        case 0b11000:
+            if (size & 0b01) return "fmaxnm";
+            if (size & 0b10) return "fminnm";
+            return nullptr;
+        case 0b11001:
+            if (size & 0b01) return "fmla";
+            if (size & 0b10) return "fmls";
+            return nullptr;
+        case 0b11010:
+            if (size & 0b01) return "fadd";
+            if (size & 0b10) return "fsub";
+            return nullptr;
+        case 0b11011:
+            if (size & 0b01) return "fmulx";
+            if (size & 0b10) return "famax";
+            return nullptr;
+        case 0b11100:
+            if (size & 0b01) return "fcmeq";
+            return nullptr;
+        case 0b11101:
+            if (size == 0b00) return "fmlal";
+            if (size == 0b10) return "fmlsl";
+            return nullptr;
+        case 0b11110:
+            if (size & 0b01) return "fmax";
+            if (size & 0b10) return "fmin";
+            return nullptr;
+        case 0b11111:
+            if (size & 0b01) return "frecps";
+            if (size & 0b10) return "frsqrts";
+            return nullptr;
         default: return nullptr;
         }
     } else {
@@ -1956,8 +1986,14 @@ const char* A64DOpcodeVector3RegSame::opName()
         case 0b00000: return "uhadd";
         case 0b00001: return "uqadd";
         case 0b00010: return "urhadd";
-        case 0b00011: return "uhsub";
-        case 0b00100: return "uqsub";
+        case 0b00011:
+            if (size == 0b00) return "eor";
+            if (size == 0b01) return "bsl";
+            if (size == 0b10) return "bit";
+            if (size == 0b11) return "bif";
+            return nullptr;
+        case 0b00100: return "uhsub";
+        case 0b00101: return "uqsub";
         case 0b00110: return "cmhi";
         case 0b00111: return "cmhs";
         case 0b01000: return "ushl";
@@ -1975,13 +2011,39 @@ const char* A64DOpcodeVector3RegSame::opName()
         case 0b10100: return "umaxp";
         case 0b10101: return "uminp";
         case 0b10110: return "sqrdmulh";
-        case 0b11000: return "fminnm";
-        case 0b11001: return "fmls";
-        case 0b11010: return "fsub";
-        case 0b11100: return "fcmge";
-        case 0b11101: return "facge";
-        case 0b11110: return "fmin";
-        case 0b11111: return "frsqrts";
+        case 0b10111: return nullptr;
+        case 0b11000:
+            if (size & 0b01) return "fmaxnmp";
+            if (size & 0b10) return "fminnmp";
+            return nullptr;
+        case 0b11001:
+            if (size == 0b00) return "fmlal2";
+            if (size == 0b10) return "fmlsl2";
+            return nullptr;
+        case 0b11010:
+            if (size & 0b01) return "faddp";
+            if (size & 0b10) return "fabd";
+            return nullptr;
+        case 0b11011:
+            if (size & 0b01) return "fmul";
+            if (size & 0b10) return "famin";
+            return nullptr;
+        case 0b11100:
+            if (size & 0b01) return "fcmge";
+            if (size & 0b10) return "fcmgt";
+            return nullptr;
+        case 0b11101:
+            if (size & 0b01) return "facge";
+            if (size & 0b10) return "facgt";
+            return nullptr;
+        case 0b11110:
+            if (size & 0b01) return "fmaxp";
+            if (size & 0b10) return "fminp";
+            return nullptr;
+        case 0b11111:
+            if (size & 0b01) return "fdiv";
+            if (size & 0b10) return "fscale";
+            return nullptr;
         default: return nullptr;
         }
     }
