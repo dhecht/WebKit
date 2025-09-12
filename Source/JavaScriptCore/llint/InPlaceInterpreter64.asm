@@ -5784,6 +5784,30 @@ ipintOp(_simd_i8x16_popcnt, macro()
     popVec(v0)
     if ARM64 or ARM64E
         emit "cnt v16.16b, v16.16b"
+    elsif X86_64
+        # Use lookup table approach for 4-bit nibbles
+        # Create lookup table: popcnt for values 0-15
+        emit "movdqa $0x04030302, %xmm1"     # Load first 4 bytes of lookup table
+        emit "movdqa $0x03020201, %xmm2"     # Load next 4 bytes
+        emit "punpckldq %xmm2, %xmm1"        # Combine to get 0x0302010103020201
+        emit "movdqa %xmm1, %xmm2"           # Duplicate
+        emit "punpcklqdq %xmm2, %xmm1"       # Full 16-byte lookup: 0x03020101030201010302010103020101
+        
+        # Process low nibbles
+        emit "movdqa %xmm0, %xmm2"           # Copy input
+        emit "pand $0x0F0F0F0F, %xmm2"       # Mask low nibbles
+        emit "pshufb %xmm2, %xmm1"           # Lookup popcnt for low nibbles
+        
+        # Process high nibbles  
+        emit "movdqa %xmm0, %xmm3"           # Copy input
+        emit "psrlw $4, %xmm3"               # Shift right 4 bits
+        emit "pand $0x0F0F0F0F, %xmm3"       # Mask high nibbles
+        emit "movdqa %xmm1, %xmm4"           # Copy lookup table
+        emit "pshufb %xmm3, %xmm4"           # Lookup popcnt for high nibbles
+        
+        # Add low and high nibble popcounts
+        emit "paddb %xmm4, %xmm1"            # Add high nibble counts to low nibble counts
+        emit "movdqa %xmm1, %xmm0"           # Move result to output register
     else
         break # Not implemented
     end
@@ -5801,6 +5825,14 @@ ipintOp(_simd_i8x16_all_true, macro()
         emit "fmov w0, s17"               # Move to general register
         emit "cmp w0, #0"                 # Compare with 0
         emit "cset w0, eq"                # Set to 1 if equal (all lanes non-zero), 0 otherwise
+    elsif X86_64
+        # Compare each byte with zero to create mask of zero lanes
+        emit "pxor %xmm1, %xmm1"          # Create zero vector
+        emit "pcmpeqb %xmm1, %xmm0"       # Compare each byte with 0 (0xFF if zero, 0x00 if non-zero)
+        emit "pmovmskb %xmm0, %eax"        # Extract sign bits to create 16-bit mask
+        emit "test %eax, %eax"             # Test if any bit is set (any lane was zero)
+        emit "sete %al"                    # Set AL to 1 if no bits set (all lanes non-zero), 0 otherwise
+        emit "movzbl %al, %eax"            # Zero-extend to full 32-bit register
     else
         break # Not implemented
     end
