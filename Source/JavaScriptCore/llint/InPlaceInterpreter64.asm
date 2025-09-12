@@ -4090,11 +4090,14 @@ end)
 ipintOp(_simd_v128_load_8x8s_mem, macro()
     # v128.load8x8_s - load 8 8-bit values, sign-extend each to i16
     simdMemoryOp(8, macro()
-        loadd [memoryBase, t0], ft0
         if ARM64 or ARM64E
+            loadd [memoryBase, t0], ft0
             # offlineasm ft0 = ARM v0
             # offlineasm v0 = ARM v16
             emit "sxtl v16.8h, v0.8b"
+        elsif X86_64
+            # memoryBase is r14, t0 is eax
+            emit "pmovsxbw (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4105,11 +4108,14 @@ end)
 ipintOp(_simd_v128_load_8x8u_mem, macro()
     # v128.load8x8_u - load 8 8-bit values, zero-extend each to i16
     simdMemoryOp(8, macro()
-        loadd [memoryBase, t0], ft0
         if ARM64 or ARM64E
+            loadd [memoryBase, t0], ft0
             # offlineasm ft0 = ARM v0
             # offlineasm v0 = ARM v16
             emit "uxtl v16.8h, v0.8b"
+        elsif X86_64
+            # memoryBase is r14, t0 is eax
+            emit "pmovzxbw (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4120,11 +4126,14 @@ end)
 ipintOp(_simd_v128_load_16x4s_mem, macro()
     # v128.load16x4_s - load 4 16-bit values, sign-extend each to i32
     simdMemoryOp(8, macro()
-        loadd [memoryBase, t0], ft0
         if ARM64 or ARM64E
+            loadd [memoryBase, t0], ft0
             # offlineasm ft0 = ARM v0
             # offlineasm v0 = ARM v16
             emit "sxtl v16.4s, v0.4h"
+        elsif X86_64
+            # memoryBase is r14, t0 is eax
+            emit "pmovsxwd (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4135,11 +4144,14 @@ end)
 ipintOp(_simd_v128_load_16x4u_mem, macro()
     # v128.load16x4_u - load 4 16-bit values, zero-extend each to i32
     simdMemoryOp(8, macro()
-        loadd [memoryBase, t0], ft0
         if ARM64 or ARM64E
+            loadd [memoryBase, t0], ft0
             # offlineasm ft0 = ARM v0
             # offlineasm v0 = ARM v16
             emit "uxtl v16.4s, v0.4h"
+        elsif X86_64
+            # memoryBase is r14, t0 is eax
+            emit "pmovzxwd (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4150,11 +4162,14 @@ end)
 ipintOp(_simd_v128_load_32x2s_mem, macro()
     # v128.load32x2_s - load 2 32-bit values, sign-extend each to i64
     simdMemoryOp(8, macro()
-        loadd [memoryBase, t0], ft0
         if ARM64 or ARM64E
+            loadd [memoryBase, t0], ft0
             # offlineasm ft0 = ARM v0
             # offlineasm v0 = ARM v16
             emit "sxtl v16.2d, v0.2s"
+        elsif X86_64
+            # memoryBase is r14, t0 is eax
+            emit "pmovsxdq (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4165,11 +4180,14 @@ end)
 ipintOp(_simd_v128_load_32x2u_mem, macro()
     # v128.load32x2_u - load 2 32-bit values, zero-extend each to i64
     simdMemoryOp(8, macro()
-        loadd [memoryBase, t0], ft0
         if ARM64 or ARM64E
+            loadd [memoryBase, t0], ft0
             # offlineasm ft0 = ARM v0
             # offlineasm v0 = ARM v16
             emit "uxtl v16.2d, v0.2s"
+        elsif X86_64
+            # memoryBase is r14, t0 is eax
+            emit "pmovzxdq (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4183,6 +4201,10 @@ ipintOp(_simd_v128_load8_splat_mem, macro()
         loadb [memoryBase, t0], t1
         if ARM64 or ARM64E
             emit "dup v16.16b, w1"
+        elsif X86_64
+            # t1 is esi on X86_64, move byte to xmm0 and broadcast to all 16 bytes
+            emit "movq %rsi, %xmm0"
+            emit "vpbroadcastb %xmm0, %xmm0"
         else
             break # Not implemented
         end
@@ -4193,9 +4215,13 @@ end)
 ipintOp(_simd_v128_load16_splat_mem, macro()
     # v128.load16_splat - load 1 16-bit value and splat to all 8 lanes
     simdMemoryOp(2, macro()
-        loadh [memoryBase, t0], t1
         if ARM64 or ARM64E
+            loadh [memoryBase, t0], t1
             emit "dup v16.8h, w1"
+        elsif X86_64
+            # Load and broadcast 16-bit value directly from memory to all 8 words
+            # memoryBase is r14, t0 is eax
+            emit "vpbroadcastw (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4206,9 +4232,13 @@ end)
 ipintOp(_simd_v128_load32_splat_mem, macro()
     # v128.load32_splat - load 1 32-bit value and splat to all 4 lanes
     simdMemoryOp(4, macro()
-        loadi [memoryBase, t0], t1
         if ARM64 or ARM64E
+            loadi [memoryBase, t0], t1
             emit "dup v16.4s, w1"
+        elsif X86_64
+            # Load and broadcast 32-bit value directly from memory to all 4 dwords
+            # memoryBase is r14, t0 is eax
+            emit "vpbroadcastd (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4219,9 +4249,13 @@ end)
 ipintOp(_simd_v128_load64_splat_mem, macro()
     # v128.load64_splat - load 1 64-bit value and splat to all 2 lanes
     simdMemoryOp(8, macro()
-        loadq [memoryBase, t0], t1
         if ARM64 or ARM64E
+            loadq [memoryBase, t0], t1
             emit "dup v16.2d, x1"
+        elsif X86_64
+            # Load and broadcast 64-bit value directly from memory to both qwords
+            # memoryBase is r14, t0 is eax
+            emit "vpbroadcastq (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4287,6 +4321,10 @@ ipintOp(_simd_i8x16_splat, macro()
     
     if ARM64 or ARM64E
         emit "dup v16.16b, w0"
+    elsif X86_64
+        # t0 is eax on X86_64, move to xmm0 and broadcast to all 16 bytes
+        emit "movd %eax, %xmm0"
+        emit "vpbroadcastb %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -4302,6 +4340,10 @@ ipintOp(_simd_i16x8_splat, macro()
     
     if ARM64 or ARM64E
         emit "dup v16.8h, w0"
+    elsif X86_64
+        # t0 is eax on X86_64, move to xmm0 and broadcast to all 8 words
+        emit "movd %eax, %xmm0"
+        emit "vpbroadcastw %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -4317,6 +4359,10 @@ ipintOp(_simd_i32x4_splat, macro()
     
     if ARM64 or ARM64E
         emit "dup v16.4s, w0"
+    elsif X86_64
+        # t0 is eax on X86_64, move to xmm0 and broadcast to all 4 dwords
+        emit "movd %eax, %xmm0"
+        emit "vpbroadcastd %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -4332,6 +4378,10 @@ ipintOp(_simd_i64x2_splat, macro()
     
     if ARM64 or ARM64E
         emit "dup v16.2d, x0"
+    elsif X86_64
+        # t0 is rax on X86_64, move to xmm0 and broadcast to both qwords
+        emit "movq %rax, %xmm0"
+        emit "vpbroadcastq %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -4347,6 +4397,9 @@ ipintOp(_simd_f32x4_splat, macro()
     
     if ARM64 or ARM64E
         emit "dup v16.4s, v0.s[0]"
+    elsif X86_64
+        # ft0 is xmm0 on X86_64, broadcast to all 4 float lanes
+        emit "vbroadcastss %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -4362,6 +4415,9 @@ ipintOp(_simd_f64x2_splat, macro()
     
     if ARM64 or ARM64E
         emit "dup v16.2d, v0.d[0]"
+    elsif X86_64
+        # ft0 is xmm0 on X86_64, broadcast to both double lanes
+        emit "vbroadcastsd %xmm0, %xmm0"
     else
         break # Not implemented
     end
