@@ -4295,14 +4295,17 @@ ipintOp(_simd_i8x16_shuffle, macro()
         emit "movdqa %xmm2, %xmm4"           # Another copy of shuffle mask
         emit "psubb %xmm3, %xmm4"            # Adjust indices for second vector (subtract 16 from indices >= 16)
         
-        # Shuffle from first vector (v0)
-        emit "pshufb %xmm2, %xmm0"           # Shuffle v0 using original mask
+        # Shuffle from first vector (v0) - save result in %xmm5
+        emit "movdqa %xmm0, %xmm5"           # Save v0 to %xmm5
+        emit "pshufb %xmm2, %xmm5"           # Shuffle v0 using original mask
         
         # Shuffle from second vector (v1)
         emit "pshufb %xmm4, %xmm1"           # Shuffle v1 using adjusted mask
         
-        # Blend results based on which vector each byte came from
-        emit "pblendvb %xmm3, %xmm1, %xmm0" # Blend: use v1 where mask is 0xFF, v0 where 0x00
+        # Blend results: pblendvb uses %xmm0 as implicit mask
+        emit "movdqa %xmm3, %xmm0"           # Move selection mask to %xmm0
+        emit "pblendvb %xmm1, %xmm5"         # Blend: select from %xmm1 where mask bits are set, else from %xmm5
+        emit "movdqa %xmm5, %xmm0"           # Move final result to %xmm0
     end
     
     pushVec(v0)
@@ -4317,8 +4320,10 @@ ipintOp(_simd_i8x16_swizzle, macro()
     
     if ARM64 or ARM64E
         emit "tbl v16.16b, {v16.16b}, v17.16b"
-    else
+    elsif X86_64
         emit "pshufb %xmm1, %xmm0"
+    else
+        break # Not implemented
     end
     
     pushVec(v0)
