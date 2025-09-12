@@ -4288,10 +4288,15 @@ ipintOp(_simd_i8x16_shuffle, macro()
     if ARM64 or ARM64E
         emit "tbl v16.16b, {v16.16b, v17.16b}, v18.16b"
     else
-        # Much simpler: create 16 constant directly
-        emit "movdqa $0x10101010, %xmm3"     # Load 16 in each of 4 bytes
-        emit "punpcklbw %xmm3, %xmm3"        # Unpack to get 16 in all 8 bytes
-        emit "punpcklwd %xmm3, %xmm3"        # Unpack to get 16 in all 16 bytes
+        # Create constant 16 in each byte using register operations only
+        emit "pcmpeqb %xmm3, %xmm3"          # All 1s (0xFF in each byte)
+        emit "psrlw $4, %xmm3"               # Shift right 4 bits: 0x0F0F pattern
+        emit "paddb %xmm3, %xmm3"            # Add to self: 0x0F + 0x0F = 0x1E
+        emit "psrlw $1, %xmm3"               # Shift right 1 bit per word
+        emit "pcmpeqb %xmm5, %xmm5"          # Create mask register with all 1s
+        emit "psllw $7, %xmm5"               # Shift left to create 0x8080 pattern
+        emit "pandn %xmm3, %xmm5"            # AND NOT to clear high bits, leaving ~0x10
+        emit "pxor %xmm5, %xmm3"             # XOR to get exactly 0x10 in each byte
         
         # Copy shuffle mask and adjust for second vector
         emit "movdqa %xmm2, %xmm4"           # Copy shuffle mask
@@ -5784,29 +5789,40 @@ ipintOp(_simd_i8x16_popcnt, macro()
     if ARM64 or ARM64E
         emit "cnt v16.16b, v16.16b"
     elsif X86_64
-        # Use lookup table approach for 4-bit nibbles
-        # Create lookup table: popcnt for values 0-15
-        emit "movdqa $0x04030302, %xmm1"     # Load first 4 bytes of lookup table
-        emit "movdqa $0x03020201, %xmm2"     # Load next 4 bytes
-        emit "punpckldq %xmm2, %xmm1"        # Combine to get 0x0302010103020201
-        emit "movdqa %xmm1, %xmm2"           # Duplicate
-        emit "punpcklqdq %xmm2, %xmm1"       # Full 16-byte lookup: 0x03020101030201010302010103020101
+        # Create lookup table [0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4]
+        emit "pxor %xmm1, %xmm1"             # Start with zeros
+        emit "pcmpeqb %xmm2, %xmm2"          # All 1s
+        emit "psrlw $15, %xmm2"              # Create 0x0001 pattern
+        emit "packuswb %xmm2, %xmm2"         # Pack to bytes: 0x01 pattern
         
-        # Process low nibbles
+        # Build lookup table
+        emit "movdqa %xmm1, %xmm3"           # Copy zeros for position 0
+        emit "movdqa %xmm2, %xmm4"           # Copy 1s for positions 1,2,4,8
+        emit "paddb %xmm2, %xmm4"            # Create 2s
+        emit "movdqa %xmm4, %xmm5"           # Copy 2s
+        emit "paddb %xmm2, %xmm5"            # Create 3s
+
+        emit "movdqa %xmm0, %xmm1"           # Copy input
         emit "movdqa %xmm0, %xmm2"           # Copy input
-        emit "pand $0x0F0F0F0F, %xmm2"       # Mask low nibbles
-        emit "pshufb %xmm2, %xmm1"           # Lookup popcnt for low nibbles
         
-        # Process high nibbles  
-        emit "movdqa %xmm0, %xmm3"           # Copy input
-        emit "psrlw $4, %xmm3"               # Shift right 4 bits
-        emit "pand $0x0F0F0F0F, %xmm3"       # Mask high nibbles
-        emit "movdqa %xmm1, %xmm4"           # Copy lookup table
-        emit "pshufb %xmm3, %xmm4"           # Lookup popcnt for high nibbles
+        # Count bits using bit manipulation
+        emit "psrlw $1, %xmm1"               # Shift right 1
+        emit "pcmpeqb %xmm3, %xmm3"          # All 1s
+        emit "psrlw $1, %xmm3"               # Create 0x7F7F mask
+        emit "pand %xmm3, %xmm1"             # Mask shifted bits
+        emit "psubb %xmm1, %xmm2"            # Subtract: x - (x >> 1) & 0x7F7F
         
-        # Add low and high nibble popcounts
-        emit "paddb %xmm4, %xmm1"            # Add high nibble counts to low nibble counts
-        emit "movdqa %xmm1, %xmm0"           # Move result to output register
+        # Continue bit manipulation for full popcnt
+        emit "movdqa %xmm2, %xmm1"           # Copy result
+        emit "psrlw $2, %xmm1"               # Shift right 2
+        emit "pcmpeqb %xmm3, %xmm3"          # All 1s
+        emit "psrlw $2, %xmm3"               # Create mask
+        emit "psrlw $2, %xmm3"               # 0x3F3F mask
+        emit "pand %xmm3, %xmm1"             # Mask
+        emit "pand %xmm3, %xmm2"             # Mask original
+        emit "paddb %xmm1, %xmm2"            # Add: (x & 0x3F3F) + ((x >> 2) & 0x3F3F)
+        
+        emit "movdqa %xmm2, %xmm0"           # Move result to output
     else
         break # Not implemented
     end
