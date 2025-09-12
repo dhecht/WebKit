@@ -1010,38 +1010,58 @@ public:
     unsigned rm() { return rd(); }
 };
 
-class A64DOpcodeVectorDataProcessingLogical1Source : public A64DOpcode {
+// Base class for vector operations
+class A64DOpcodeVector : public A64DOpcode {
 public:
-    static constexpr uint32_t mask    = 0b101'11111'11'1'000000000000000000000;
-    static constexpr uint32_t pattern = 0b000'01110'00'0'000000000000000000000;
-
-    DEFINE_STATIC_FORMAT(A64DOpcodeVectorDataProcessingLogical1Source, thisObj);
-
-    const char* format();
-    const char* opName();
+    // Vector-specific field accessors
+    unsigned q() { return (m_opcode >> 30) & 0x1; }
+    unsigned vectorSize() { return (m_opcode >> 22) & 0x3; }
+    unsigned uBit() { return (m_opcode >> 29) & 0x1; }
     
-    unsigned rd() { return (m_opcode >> 0) & 0b11111; }
-    unsigned rt() { return (m_opcode >> 5) & 0b11111; }
-    unsigned op10_15() { return (m_opcode >> 10) & 0b11111; }
-    unsigned imm5() { return (m_opcode >> 16) & 0b11111; }
-    unsigned q() { return (m_opcode >> 30) & 0b1; }
+    // Helper to append vector register with lane type
+    void appendVectorRegisterWithLanes(unsigned registerNumber, unsigned q, unsigned size)
+    {
+        bufferPrintf("v%u", registerNumber);
+        appendVectorLaneType(q, size);
+    }
+    
+    // Corrected version of appendSIMDLaneType that uses proper size encoding
+    void appendVectorLaneType(unsigned q, unsigned size)
+    {
+        switch (size) {
+        case 0:
+            bufferPrintf(q ? ".16b" : ".8b");
+            break;
+        case 1:
+            bufferPrintf(q ? ".8h" : ".4h");
+            break;
+        case 2:
+            bufferPrintf(q ? ".4s" : ".2s");
+            break;
+        case 3:
+            bufferPrintf(q ? ".2d" : ".1d");
+            break;
+        default:
+            bufferPrintf(".UNKNOWN");
+            break;
+        }
+    }
 };
 
-class A64DOpcodeVectorDataProcessingLogical2Source : public A64DOpcode {
+class A64DOpcodeVector3RegSame : public A64DOpcodeVector {
 public:
-    static constexpr uint32_t mask    = 0b101'11111'11'1'000000000000000000000;
-    static constexpr uint32_t pattern = 0b000'01110'10'1'000000000000000000000;
+    // Advanced SIMD three same (VECTOR): 0 1 U 0 1 1 1 0 size 1 Rm opcode 1 Rn Rd
+    // Fixed bits: 31=0, 30=1, 28-24=01110, 21=1, 10=1
+    static constexpr uint32_t mask    = 0b1'0'0'11111'00'1'00000'00000'1'00000'00000U;
+    static constexpr uint32_t pattern = 0b0'0'0'01110'00'1'00000'00000'1'00000'00000U;
 
-    DEFINE_STATIC_FORMAT(A64DOpcodeVectorDataProcessingLogical2Source, thisObj);
+    DEFINE_STATIC_FORMAT(A64DOpcodeVector3RegSame, thisObj);
 
     const char* format();
     const char* opName();
     
-    unsigned rd() { return (m_opcode >> 0) & 0b11111; }
-    unsigned rn() { return (m_opcode >> 5) & 0b11111; }
-    unsigned op10_15() { return (m_opcode >> 10) & 0b11111; }
-    unsigned rm() { return (m_opcode >> 16) & 0b11111; }
-    unsigned q() { return (m_opcode >> 30) & 0b1; }
+    // Field accessors specific to 3-register same format
+    unsigned opcode() { return (m_opcode >> 11) & 0x1f; }
 };
 
 

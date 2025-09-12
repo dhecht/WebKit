@@ -90,8 +90,7 @@ static const OpcodeGroupInitializer opcodeGroupList[] = {
     OPCODE_GROUP_ENTRY(0x0b, A64DOpcodeAddSubtractShiftedRegister),
     OPCODE_GROUP_ENTRY(0x0c, A64DOpcodeLoadStoreRegisterPair),
     OPCODE_GROUP_ENTRY(0x0d, A64DOpcodeLoadStoreRegisterPair),
-    OPCODE_GROUP_ENTRY(0x0e, A64DOpcodeVectorDataProcessingLogical1Source),
-    OPCODE_GROUP_ENTRY(0x0e, A64DOpcodeVectorDataProcessingLogical2Source),
+    OPCODE_GROUP_ENTRY(0x0e, A64DOpcodeVector3RegSame),
     OPCODE_GROUP_ENTRY(0x11, A64DOpcodeAddSubtractImmediate),
     OPCODE_GROUP_ENTRY(0x12, A64DOpcodeMoveWide),
     OPCODE_GROUP_ENTRY(0x12, A64DOpcodeLogicalImmediate),
@@ -1886,85 +1885,105 @@ const char* A64DOpcodeUnconditionalBranchRegister::format()
     return m_formatBuffer;
 }
 
-const char* A64DOpcodeVectorDataProcessingLogical1Source::format()
+const char* A64DOpcodeVector3RegSame::format()
 {
-    appendInstructionName(opName());
-    appendSIMDLaneIndexAndType((q() << 6) | imm5());
+    const char* instructionName = opName();
+    if (!instructionName)
+        return A64DOpcode::format();
+        
+    appendInstructionName(instructionName);
+    
+    // Append destination register with lane type
+    appendVectorRegisterWithLanes(rd(), q(), vectorSize());
     appendSeparator();
-    appendCharacter('v');
-    appendCharacter('/');
-    appendRegisterName(rd());
+    
+    // Append first source register with lane type
+    appendVectorRegisterWithLanes(rn(), q(), vectorSize());
     appendSeparator();
-    appendCharacter('v');
-    appendCharacter('/');
-    appendRegisterName(rt());
-    appendSeparator();
+    
+    // Append second source register with lane type
+    appendVectorRegisterWithLanes(rm(), q(), vectorSize());
+    
     return m_formatBuffer;
 }
 
-const char* A64DOpcodeVectorDataProcessingLogical1Source::opName()
+const char* A64DOpcodeVector3RegSame::opName()
 {
-    switch (op10_15()) {
-    case 0b00111:
-        return "ins";
-    case 0b01111:
-        return "umov";
-    case 0b00110:
-        return "uzp1";
-    case 0b01010:
-        return "trn1";
-    case 0b01110:
-        return "zip1";
-    case 0b10110:
-        return "uzip2";
-    case 0b11010:
-        return "trn2";
-    case 0b11110:
-        return "zip2";
-    case 0b00011:
-        return "dup";
-    case 0b01011:
-        return "smov";
-    case 0b01000:
-        return "tbl";
-    default:
-        dataLogLn("Dissassembler saw unknown simd 1 source instruction opcode ", op10_15());
-        return "SIMDUK";
-    }
-}
-
-const char* A64DOpcodeVectorDataProcessingLogical2Source::format()
-{
-    appendInstructionName(opName());
-    appendSIMDLaneType(q(), size());
-    appendSeparator();
-    appendCharacter('v');
-    appendCharacter('/');
-    appendRegisterName(rd());
-    appendSeparator();
-    appendCharacter('v');
-    appendCharacter('/');
-    appendRegisterName(rn());
-    appendSeparator();
-    appendCharacter('v');
-    appendCharacter('/');
-    appendRegisterName(rm());
-    appendSeparator();
-    return m_formatBuffer;
-}
-
-const char* A64DOpcodeVectorDataProcessingLogical2Source::opName()
-{
-    switch (op10_15()) {
-    case 0b00111:
-        return "orr";
-    case 0b11001:
-        return "smax";
-    case 0b10010:
-        return "bsl";
-    default:
-        dataLogLn("Dissassembler saw unknown simd 2 source instruction opcode ", op10_15());
-        return "SIMDUK";
+    // Get the 5-bit opcode from bits 15-11
+    unsigned op = opcode();
+    unsigned u = uBit();
+    
+    // Handle based on U bit and opcode
+    if (u == 0) {
+        // U=0: Signed/general operations
+        switch (op) {
+        case 0b00000: return "shadd";
+        case 0b00001: return "sqadd";
+        case 0b00010: return "srhadd";
+        case 0b00011: return "and";
+        case 0b00100: return "sqsub";
+        case 0b00110: return "cmgt";
+        case 0b00111: return "cmge";
+        case 0b01000: return "sshl";
+        case 0b01001: return "sqshl";
+        case 0b01010: return "srshl";
+        case 0b01011: return "sqrshl";
+        case 0b01100: return "smax";
+        case 0b01101: return "smin";
+        case 0b01110: return "sabd";
+        case 0b01111: return "saba";
+        case 0b10000: return "add";
+        case 0b10001: return "cmtst";
+        case 0b10010: return "mla";
+        case 0b10011: return "mul";
+        case 0b10100: return "smaxp";
+        case 0b10101: return "sminp";
+        case 0b10110: return "sqdmulh";
+        case 0b10111: return "addp";
+        case 0b11000: return "fmaxnm";
+        case 0b11001: return "fmla";
+        case 0b11010: return "fadd";
+        case 0b11011: return "fmulx";
+        case 0b11100: return "fcmeq";
+        case 0b11101: return "fmlal";
+        case 0b11110: return "fmax";
+        case 0b11111: return "frecps";
+        default: return nullptr;
+        }
+    } else {
+        // U=1: Unsigned operations
+        switch (op) {
+        case 0b00000: return "uhadd";
+        case 0b00001: return "uqadd";
+        case 0b00010: return "urhadd";
+        case 0b00011: return "uhsub";
+        case 0b00100: return "uqsub";
+        case 0b00110: return "cmhi";
+        case 0b00111: return "cmhs";
+        case 0b01000: return "ushl";
+        case 0b01001: return "uqshl";
+        case 0b01010: return "urshl";
+        case 0b01011: return "uqrshl";
+        case 0b01100: return "umax";
+        case 0b01101: return "umin";
+        case 0b01110: return "uabd";
+        case 0b01111: return "uaba";
+        case 0b10000: return "sub";
+        case 0b10001: return "cmeq";
+        case 0b10010: return "mls";
+        case 0b10011: return "pmul";
+        case 0b10100: return "umaxp";
+        case 0b10101: return "uminp";
+        case 0b10110: return "sqrdmulh";
+        case 0b11000: return "fminnm";
+        case 0b11001: return "fmls";
+        case 0b11010: return "fsub";
+        case 0b11100: return "fcmge";
+        case 0b11101: return "facge";
+        case 0b11110: return "fmin";
+        case 0b11111: return "frsqrts";
+        default: return nullptr;
+        }
     }
 }
 
