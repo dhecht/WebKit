@@ -4291,9 +4291,13 @@ ipintOp(_simd_i8x16_shuffle, macro()
         # Create masks for selecting from first vs second vector
         # Indices 0-15 select from v0, indices 16-31 select from v1
         emit "movdqa %xmm2, %xmm3"           # Copy shuffle mask
-        emit "pcmpgtb %xmm2, %xmm3"          # Create mask: 0xFF for indices >= 16, 0x00 for < 16
         emit "movdqa %xmm2, %xmm4"           # Another copy of shuffle mask
-        emit "psubb %xmm3, %xmm4"            # Adjust indices for second vector (subtract 16 from indices >= 16)
+        
+        # Create selection mask: 0xFF for indices >= 16, 0x00 for < 16
+        emit "pcmpgtb $0x0F, %xmm3"          # Compare with 15: 0xFF if > 15, 0x00 if <= 15
+        
+        # Adjust indices for second vector (subtract 16 from indices >= 16)
+        emit "psubb $0x10, %xmm4"            # Subtract 16 from all indices
         
         # Shuffle from first vector (v0) - save result in %xmm5
         emit "movdqa %xmm0, %xmm5"           # Save v0 to %xmm5
