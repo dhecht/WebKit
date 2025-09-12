@@ -4288,25 +4288,22 @@ ipintOp(_simd_i8x16_shuffle, macro()
     if ARM64 or ARM64E
         emit "tbl v16.16b, {v16.16b, v17.16b}, v18.16b"
     else
-        # Simple approach: create 32-byte lookup table and use vpshufb twice
-        # Concatenate v0 and v1 in memory, then use single vpshufb
+        # Create constant 16 in each byte for subtraction
+        emit "pcmpeqb %xmm3, %xmm3"          # All 1s
+        emit "psrlw $4, %xmm3"               # Shift to create 0x0F0F pattern
+        emit "paddb %xmm3, %xmm3"            # Add to self: 0x0F + 0x0F = 0x1E, but we want 0x10
+        emit "psrlb $1, %xmm3"               # Shift right 1 to get 0x10 in each byte
         
-        # For indices 0-15: use v0 directly, for indices 16-31: use v1 with adjusted indices
-        emit "movdqa %xmm2, %xmm3"           # Copy shuffle mask
-        emit "movdqa %xmm2, %xmm4"           # Another copy
+        # Copy shuffle mask and adjust for second vector
+        emit "movdqa %xmm2, %xmm4"           # Copy shuffle mask
+        emit "psubb %xmm3, %xmm4"            # Subtract 16 from each index
         
-        # Shuffle from v0 (indices 0-15 become valid, 16-31 become 0x80 which zeros the lane)
-        emit "pshufb %xmm2, %xmm0"           # Shuffle v0, indices >= 16 will zero out
+        # Shuffle both vectors
+        emit "pshufb %xmm2, %xmm0"           # Shuffle v0 (indices 16-31 will zero out)
+        emit "pshufb %xmm4, %xmm1"           # Shuffle v1 (indices 0-15 will zero out after adjustment)
         
-        # Adjust indices for v1: subtract 16, so 16-31 become 0-15
-        emit "psubb $0x10101010, %xmm4"      # Subtract 16 from each byte using 32-bit immediate
-        emit "psubb $0x10101010, %xmm4"      # Second subtraction to handle all bytes
-        
-        # Shuffle from v1 with adjusted indices
-        emit "pshufb %xmm4, %xmm1"           # Shuffle v1, indices 0-15 will zero out (become negative)
-        
-        # OR the results together
-        emit "por %xmm1, %xmm0"              # Combine results
+        # Combine results
+        emit "por %xmm1, %xmm0"              # OR the results together
     end
     
     pushVec(v0)
