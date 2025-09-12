@@ -4283,13 +4283,26 @@ end)
 ipintOp(_simd_i8x16_shuffle, macro()
     # i8x16.shuffle - shuffle bytes from two vectors using 16 immediate indices
     popVec(v1)
-    popVec(v0)
-    
+    popVec(v0)    
+    loadv ImmLaneIdxOffset[PC], v2
     if ARM64 or ARM64E
-        loadv ImmLaneIdxOffset[PC], v2  # Load 16 immediate bytes as a vector
         emit "tbl v16.16b, {v16.16b, v17.16b}, v18.16b"
     else
-        break # Not implemented
+        # Create masks for selecting from first vs second vector
+        # Indices 0-15 select from v0, indices 16-31 select from v1
+        emit "movdqa %xmm2, %xmm3"           # Copy shuffle mask
+        emit "pcmpgtb %xmm2, %xmm3"          # Create mask: 0xFF for indices >= 16, 0x00 for < 16
+        emit "movdqa %xmm2, %xmm4"           # Another copy of shuffle mask
+        emit "psubb %xmm3, %xmm4"            # Adjust indices for second vector (subtract 16 from indices >= 16)
+        
+        # Shuffle from first vector (v0)
+        emit "pshufb %xmm2, %xmm0"           # Shuffle v0 using original mask
+        
+        # Shuffle from second vector (v1)
+        emit "pshufb %xmm4, %xmm1"           # Shuffle v1 using adjusted mask
+        
+        # Blend results based on which vector each byte came from
+        emit "pblendvb %xmm3, %xmm1, %xmm0" # Blend: use v1 where mask is 0xFF, v0 where 0x00
     end
     
     pushVec(v0)
@@ -4305,7 +4318,7 @@ ipintOp(_simd_i8x16_swizzle, macro()
     if ARM64 or ARM64E
         emit "tbl v16.16b, {v16.16b}, v17.16b"
     else
-        break # Not implemented
+        emit "pshufb %xmm1, %xmm0"
     end
     
     pushVec(v0)
