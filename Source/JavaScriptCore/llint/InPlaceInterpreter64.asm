@@ -5790,39 +5790,39 @@ ipintOp(_simd_i8x16_popcnt, macro()
         emit "cnt v16.16b, v16.16b"
     elsif X86_64
         # Create lookup table [0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4]
-        emit "pxor %xmm1, %xmm1"             # Start with zeros
-        emit "pcmpeqb %xmm2, %xmm2"          # All 1s
-        emit "psrlw $15, %xmm2"              # Create 0x0001 pattern
-        emit "packuswb %xmm2, %xmm2"         # Pack to bytes: 0x01 pattern
+        emit "vpxor %xmm1, %xmm1, %xmm1"             # Start with zeros
+        emit "vpcmpeqb %xmm2, %xmm2, %xmm2"          # All 1s
+        emit "vpsrlw $15, %xmm2, %xmm2"              # Create 0x0001 pattern
+        emit "vpackuswb %xmm2, %xmm2, %xmm2"         # Pack to bytes: 0x01 pattern
         
         # Build lookup table
-        emit "movdqa %xmm1, %xmm3"           # Copy zeros for position 0
-        emit "movdqa %xmm2, %xmm4"           # Copy 1s for positions 1,2,4,8
-        emit "paddb %xmm2, %xmm4"            # Create 2s
-        emit "movdqa %xmm4, %xmm5"           # Copy 2s
-        emit "paddb %xmm2, %xmm5"            # Create 3s
+        emit "vmovdqa %xmm1, %xmm3"           # Copy zeros for position 0
+        emit "vmovdqa %xmm2, %xmm4"           # Copy 1s for positions 1,2,4,8
+        emit "vpaddb %xmm2, %xmm4, %xmm4"            # Create 2s
+        emit "vmovdqa %xmm4, %xmm5"           # Copy 2s
+        emit "vpaddb %xmm2, %xmm5, %xmm5"            # Create 3s
 
-        emit "movdqa %xmm0, %xmm1"           # Copy input
-        emit "movdqa %xmm0, %xmm2"           # Copy input
+        emit "vmovdqa %xmm0, %xmm1"           # Copy input
+        emit "vmovdqa %xmm0, %xmm2"           # Copy input
         
         # Count bits using bit manipulation
-        emit "psrlw $1, %xmm1"               # Shift right 1
-        emit "pcmpeqb %xmm3, %xmm3"          # All 1s
-        emit "psrlw $1, %xmm3"               # Create 0x7F7F mask
-        emit "pand %xmm3, %xmm1"             # Mask shifted bits
-        emit "psubb %xmm1, %xmm2"            # Subtract: x - (x >> 1) & 0x7F7F
+        emit "vpsrlw $1, %xmm1, %xmm1"               # Shift right 1
+        emit "vpcmpeqb %xmm3, %xmm3, %xmm3"          # All 1s
+        emit "vpsrlw $1, %xmm3, %xmm3"               # Create 0x7F7F mask
+        emit "vpand %xmm3, %xmm1, %xmm1"             # Mask shifted bits
+        emit "vpsubb %xmm1, %xmm2, %xmm2"            # Subtract: x - (x >> 1) & 0x7F7F
         
         # Continue bit manipulation for full popcnt
-        emit "movdqa %xmm2, %xmm1"           # Copy result
-        emit "psrlw $2, %xmm1"               # Shift right 2
-        emit "pcmpeqb %xmm3, %xmm3"          # All 1s
-        emit "psrlw $2, %xmm3"               # Create mask
-        emit "psrlw $2, %xmm3"               # 0x3F3F mask
-        emit "pand %xmm3, %xmm1"             # Mask
-        emit "pand %xmm3, %xmm2"             # Mask original
-        emit "paddb %xmm1, %xmm2"            # Add: (x & 0x3F3F) + ((x >> 2) & 0x3F3F)
+        emit "vmovdqa %xmm2, %xmm1"           # Copy result
+        emit "vpsrlw $2, %xmm1, %xmm1"               # Shift right 2
+        emit "vpcmpeqb %xmm3, %xmm3, %xmm3"          # All 1s
+        emit "vpsrlw $2, %xmm3, %xmm3"               # Create mask
+        emit "vpsrlw $2, %xmm3, %xmm3"               # 0x3F3F mask
+        emit "vpand %xmm3, %xmm1, %xmm1"             # Mask
+        emit "vpand %xmm3, %xmm2, %xmm2"             # Mask original
+        emit "vpaddb %xmm1, %xmm2, %xmm2"            # Add: (x & 0x3F3F) + ((x >> 2) & 0x3F3F)
         
-        emit "movdqa %xmm2, %xmm0"           # Move result to output
+        emit "vmovdqa %xmm2, %xmm0"           # Move result to output
     else
         break # Not implemented
     end
