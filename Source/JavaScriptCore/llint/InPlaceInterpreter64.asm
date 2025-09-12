@@ -4288,11 +4288,10 @@ ipintOp(_simd_i8x16_shuffle, macro()
     if ARM64 or ARM64E
         emit "tbl v16.16b, {v16.16b, v17.16b}, v18.16b"
     else
-        # Create constant 16 in each byte for subtraction
-        emit "pcmpeqb %xmm3, %xmm3"          # All 1s
-        emit "psrlw $4, %xmm3"               # Shift to create 0x0F0F pattern
-        emit "paddb %xmm3, %xmm3"            # Add to self: 0x0F + 0x0F = 0x1E, but we want 0x10
-        emit "psrlb $1, %xmm3"               # Shift right 1 to get 0x10 in each byte
+        # Much simpler: create 16 constant directly
+        emit "movdqa $0x10101010, %xmm3"     # Load 16 in each of 4 bytes
+        emit "punpcklbw %xmm3, %xmm3"        # Unpack to get 16 in all 8 bytes
+        emit "punpcklwd %xmm3, %xmm3"        # Unpack to get 16 in all 16 bytes
         
         # Copy shuffle mask and adjust for second vector
         emit "movdqa %xmm2, %xmm4"           # Copy shuffle mask
