@@ -5856,11 +5856,10 @@ ipintOp(_simd_i8x16_bitmask, macro()
     
     move 0, t0          # Initialize result
     move 0, t1          # Byte counter
-    move sp, t2         # Pointer to vector data
     
 .bitmask_i8x16_loop:
     # Load byte and check sign bit
-    loadb [t2, t1], t3
+    loadb [sp, t1], t3
     andq 0x80, t3       # Extract sign bit
     btiz t3, .bitmask_i8x16_next
     
@@ -6415,11 +6414,10 @@ ipintOp(_simd_i16x8_bitmask, macro()
     
     move 0, t0          # Initialize result
     move 0, t1          # Lane counter
-    move sp, t2         # Pointer to vector data
     
 .bitmask_i16x8_loop:
     # Load 16-bit value and check sign bit
-    loadh [t2, t1, 2], t3  # Load 16-bit value at offset t1*2
+    loadh [sp, t1, 2], t3  # Load 16-bit value at offset t1*2
     andq 0x8000, t3     # Extract sign bit (bit 15)
     btiz t3, .bitmask_i16x8_next
     
@@ -6903,7 +6901,7 @@ ipintOp(_simd_i32x4_bitmask, macro()
     
 .bitmask_i32x4_loop:
     # Load 32-bit value and check sign bit
-    loadi [t2, t1, 4], t3  # Load 32-bit value at offset t1*4
+    loadi [sp, t1, 4], t3  # Load 32-bit value at offset t1*4
     andq 0x80000000, t3 # Extract sign bit (bit 31)
     btiz t3, .bitmask_i32x4_next
     
