@@ -7404,43 +7404,17 @@ end)
 ipintOp(_simd_i64x2_shr_s, macro()
     # i64x2.shr_s - arithmetic right shift 2 64-bit signed integers
     popInt32(t0, t1)  # shift count
-    popVec(v0)        # vector
-    if ARM64 or ARM64E
-        # Mask shift count to 0-63 range for 64-bit elements
-        andi 63, t0
-        # Negate for right shift
-        negq t0
-        # Duplicate shift count to all lanes of vector register
-        emit "dup v17.2d, x0"
-        # Perform arithmetic right shift
-        emit "sshl v16.2d, v16.2d, v17.2d"
-    elsif X86_64
-        andi 63, t0
-        # Check if shift count is 0 (no-op case)
-        btiz t0, .simd_i64x2_shr_s_done
-        # Move shift count to xmm register
-        emit "movd %eax, %xmm1"
-        # Extract sign bits: shift left by (64 - shift_count), then arithmetic right shift by 63
-        emit "movq $63, %rsi"
-        emit "subq %rax, %rsi"
-        emit "movd %esi, %xmm2"
-        emit "vpsllq %xmm2, %xmm0, %xmm2"  # Shift left to get sign in MSB
-        emit "movq $63, %rsi"
-        emit "movd %esi, %xmm3"
-        emit "vpsrlq %xmm3, %xmm2, %xmm2"  # Logical right shift by 63 to get sign mask
-        # Perform logical right shift on original value
-        emit "vpsrlq %xmm1, %xmm0, %xmm0"
-        # Create sign extension mask
-        emit "movq $64, %rsi"
-        emit "subq %rax, %rsi"
-        emit "movd %esi, %xmm3"
-        emit "vpsllq %xmm3, %xmm2, %xmm2"  # Shift sign bits to correct position
-        emit "vpsubq %xmm2, %xmm0, %xmm0"  # Subtract to set sign bits
-    .simd_i64x2_shr_s_done:
-    else
-        break # Not implemented
-    end
-    pushVec(v0)
+    # Mask shift count to 0-63 range for 64-bit elements
+    andi 63, t0
+    
+    loadq 8[sp], t1
+    rshiftq t0, t1
+    storeq t1, 8[sp]
+
+    loadq [sp], t1
+    rshiftq t0, t1
+    storeq t1, [sp]
+
     advancePC(2)
     nextIPIntInstruction()
 end)
