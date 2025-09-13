@@ -5985,24 +5985,32 @@ ipintOp(_simd_i8x16_shl, macro()
         # Perform left shift
         emit "ushl v16.16b, v16.16b, v17.16b"
     elsif X86_64
-        # Mask shift count to 0-7 range for 8-bit elements
         andi 7, t0
-        # Move shift count to XMM register
         emit "movd %eax, %xmm1"
-        # For i8x16 shifts, we need to use 16-bit shifts and mask the results
-        # First, unpack bytes to words for shifting
-        emit "vmovdqa %xmm0, %xmm2"          # Copy original
-        emit "vpunpcklbw %xmm0, %xmm0, %xmm0" # Unpack low bytes to words (zero-extended)
-        emit "vpunpckhbw %xmm2, %xmm2, %xmm2" # Unpack high bytes to words (zero-extended)
-        emit "vpsllw %xmm1, %xmm0, %xmm0"    # Shift low words
-        emit "vpsllw %xmm1, %xmm2, %xmm2"    # Shift high words
-        # Create mask to keep only low 8 bits of each word
-        emit "vpcmpeqw %xmm3, %xmm3, %xmm3"  # All 1s
-        emit "vpsrlw $8, %xmm3, %xmm3"       # 0x00FF pattern
-        emit "vpand %xmm3, %xmm0, %xmm0"     # Mask low words
-        emit "vpand %xmm3, %xmm2, %xmm2"     # Mask high words
-        # Pack back to bytes without saturation
-        emit "vpackuswb %xmm2, %xmm0, %xmm0" # Pack words back to bytes
+        
+        # Clear tmp2 register for zero extension
+        emit "vxorps %xmm3, %xmm3, %xmm3"
+        
+        # Unpack and zero-extend low input bytes to words
+        emit "vpunpcklbw %xmm3, %xmm0, %xmm2"
+        
+        # Word-wise shift low input bytes
+        emit "vpsllw %xmm1, %xmm2, %xmm2"
+        
+        # Unpack and zero-extend high input bytes to words
+        emit "vpunpckhbw %xmm3, %xmm0, %xmm3"
+        
+        # Word-wise shift high input bytes
+        emit "vpsllw %xmm1, %xmm3, %xmm3"
+        
+        # Mask away higher bits of left-shifted results
+        emit "vpsllw $8, %xmm2, %xmm2"
+        emit "vpsllw $8, %xmm3, %xmm3"
+        emit "vpsrlw $8, %xmm2, %xmm2"
+        emit "vpsrlw $8, %xmm3, %xmm3"
+        
+        # Pack low and high results back to bytes
+        emit "vpackuswb %xmm3, %xmm2, %xmm0"
     else
         break # Not implemented
     end
@@ -6025,18 +6033,24 @@ ipintOp(_simd_i8x16_shr_s, macro()
         # Perform arithmetic right shift
         emit "sshl v16.16b, v16.16b, v17.16b"
     elsif X86_64
-        # Mask shift count to 0-7 range for 8-bit elements
         andi 7, t0
-        # Move shift count to XMM register
         emit "movd %eax, %xmm1"
-        # For i8x16 arithmetic right shifts, unpack to words, shift, then pack
-        emit "vmovdqa %xmm0, %xmm2"          # Copy original
-        emit "vpunpcklbw %xmm0, %xmm0, %xmm0" # Unpack low bytes to words (sign-extended)
-        emit "vpunpckhbw %xmm2, %xmm2, %xmm2" # Unpack high bytes to words (sign-extended)
-        emit "vpsraw %xmm1, %xmm0, %xmm0"    # Arithmetic shift low words
-        emit "vpsraw %xmm1, %xmm2, %xmm2"    # Arithmetic shift high words
-        # Pack back to bytes with signed saturation
-        emit "vpacksswb %xmm2, %xmm0, %xmm0" # Pack words back to signed bytes
+        
+        # Unpack and sign-extend low input bytes to words
+        emit "vpmovsxbw %xmm0, %xmm2"
+        
+        # Word-wise shift low input bytes
+        emit "vpsraw %xmm1, %xmm2, %xmm2"
+        
+        # Unpack and sign-extend high input bytes
+        emit "vpshufd $0x0e, %xmm0, %xmm3"  # Move high 8 bytes to low position
+        emit "vpmovsxbw %xmm3, %xmm3"
+        
+        # Word-wise shift high input bytes
+        emit "vpsraw %xmm1, %xmm3, %xmm3"
+        
+        # Pack low and high results back to signed bytes
+        emit "vpacksswb %xmm3, %xmm2, %xmm0"
     else
         break # Not implemented
     end
