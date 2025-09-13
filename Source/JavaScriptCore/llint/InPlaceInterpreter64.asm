@@ -5793,12 +5793,12 @@ ipintOp(_simd_i8x16_popcnt, macro()
         # lookup tables, similar to BBQ JIT implementation
         
         # Load bottom nibble mask constant (0x0f0f0f0f0f0f0f0f repeated)
-        loadConstantOrVariable(0x0f0f0f0f0f0f0f0f, t0)  # t0 -> rax
-        loadConstantOrVariable(0x0f0f0f0f0f0f0f0f, t1)  # t1 -> rsi
+        move 0x0f0f0f0f0f0f0f0f, t0  # t0 -> rax
+        move 0x0f0f0f0f0f0f0f0f, t1  # t1 -> rsi
         
         # Load popcount lookup table constants
-        loadConstantOrVariable(0x0302020102010100, t2)  # t2 -> rdx (Low 64 bits)
-        loadConstantOrVariable(0x0403030203020201, t3)  # t3 -> rcx (High 64 bits)
+        move 0x0302020102010100, t2  # t2 -> rdx (Low 64 bits)
+        move 0x0403030203020201, t3  # t3 -> rcx (High 64 bits)
         
         # Create 128-bit bottom nibble mask in xmm1
         emit "vmovq %rax, %xmm1"
