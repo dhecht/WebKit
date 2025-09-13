@@ -4282,35 +4282,51 @@ end)
 
 ipintOp(_simd_i8x16_shuffle, macro()
     # i8x16.shuffle - shuffle bytes from two vectors using 16 immediate indices
-    popVec(v1)
-    popVec(v0)    
-    loadv ImmLaneIdxOffset[PC], v2
     if ARM64 or ARM64E
+        popVec(v1)
+        popVec(v0)    
+        loadv ImmLaneIdxOffset[PC], v2
         emit "tbl v16.16b, {v16.16b, v17.16b}, v18.16b"
+        pushVec(v0)
     else
-        # Create constant 16 in each byte using register operations only
-        emit "vpcmpeqb %xmm3, %xmm3, %xmm3"          # All 1s (0xFF in each byte)
-        emit "vpsrlw $4, %xmm3, %xmm3"               # Shift right 4 bits: 0x0F0F pattern
-        emit "vpaddb %xmm3, %xmm3, %xmm3"            # Add to self: 0x0F + 0x0F = 0x1E
-        emit "vpsrlw $1, %xmm3, %xmm3"               # Shift right 1 bit per word
-        emit "vpcmpeqb %xmm5, %xmm5, %xmm5"          # Create mask register with all 1s
-        emit "vpsllw $7, %xmm5, %xmm5"               # Shift left to create 0x8080 pattern
-        emit "vpandn %xmm3, %xmm5, %xmm5"            # AND NOT to clear high bits, leaving ~0x10
-        emit "vpxor %xmm5, %xmm3, %xmm3"             # XOR to get exactly 0x10 in each byte
+        # Allocate space for result on stack
+        subp V128ISize, sp
 
-        # Copy shuffle mask and adjust for second vector
-        emit "vmovdqa %xmm2, %xmm4"           # Copy shuffle mask
-        emit "vpsubb %xmm3, %xmm4, %xmm4"            # Subtract 16 from each index
+        # Loop through 16 output positions
+        move 0, t0
 
-        # Shuffle both vectors
-        emit "vpshufb %xmm2, %xmm0, %xmm0"           # Shuffle v0 (indices 16-31 will zero out)
-        emit "vpshufb %xmm4, %xmm1, %xmm1"           # Shuffle v1 (indices 0-15 will zero out after adjustment)
+    .shuffleLoop:
+        loadb ImmLaneIdxOffset[PC, t0, 1], t1
+        
+        bigt t1, 31, .outOfBounds        
+        bigt t1, 15, .useRightVector
 
-        # Combine results
-        emit "vpor %xmm1, %xmm0, %xmm0"              # OR the results together
+    .useLeftVector:
+        loadb 32[sp, t1], t2
+        jmp .storeByte
+        
+    .useRightVector:
+        subq t1, 16, t3
+        loadb 16[sp, t3], t2
+        jmp .storeByte
+        
+    .outOfBounds:
+        move 0, t2
+        
+    .storeByte:
+        storeb t2, [sp, t0]               # Store to temp result
+        addq 1, t0                        # Increment loop counter
+        bilt t0, 16, .shuffleLoop
+        
+        # Copy temp result to final result location
+        loadq [sp], t0
+        loadq 8[sp], t1
+        storeq t0, 32[sp]
+        storeq t1, 40[sp]
+        
+        addp 2 * V128ISize, sp            # Pop temp result and right vector
     end
     
-    pushVec(v0)
     advancePC(18)  # 2 bytes opcode + 16 bytes immediate
     nextIPIntInstruction()
 end)
