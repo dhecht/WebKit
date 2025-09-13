@@ -6400,6 +6400,16 @@ ipintOp(_simd_i16x8_all_true, macro()
         emit "fmov w0, s17"              # Move to general register
         emit "cmp w0, #0"                # Compare with 0
         emit "cset w0, eq"               # Set to 1 if equal (all lanes non-zero), 0 otherwise
+    elsif X86_64
+        # Compare each 16-bit lane with zero
+        emit "vpxor %xmm1, %xmm1, %xmm1"     # Create zero vector
+        emit "vpcmpeqw %xmm1, %xmm0, %xmm1"  # Compare each word with 0 (1 if zero, 0 if non-zero)
+        
+        # Test if any lane is zero
+        emit "vpmovmskb %xmm1, %eax"         # Extract sign bits
+        emit "testl %eax, %eax"              # Test if any bits are set
+        emit "sete %al"                      # Set AL to 1 if no bits set (all lanes non-zero), 0 otherwise
+        emit "movzbl %al, %eax"              # Zero-extend to 32-bit
     else
         break # Not implemented
     end
@@ -6883,6 +6893,16 @@ ipintOp(_simd_i32x4_all_true, macro()
         emit "fmov w0, s17"              # Move to general register
         emit "cmp w0, #0"                # Compare with 0
         emit "cset w0, eq"               # Set to 1 if equal (all lanes non-zero), 0 otherwise
+    elsif X86_64
+        # Compare each 32-bit lane with zero
+        emit "vpxor %xmm1, %xmm1, %xmm1"     # Create zero vector
+        emit "vpcmpeqd %xmm1, %xmm0, %xmm1"  # Compare each dword with 0 (1 if zero, 0 if non-zero)
+        
+        # Test if any lane is zero
+        emit "vpmovmskb %xmm1, %eax"         # Extract sign bits
+        emit "testl %eax, %eax"              # Test if any bits are set
+        emit "sete %al"                      # Set AL to 1 if no bits set (all lanes non-zero), 0 otherwise
+        emit "movzbl %al, %eax"              # Zero-extend to 32-bit
     else
         break # Not implemented
     end
@@ -7276,6 +7296,16 @@ ipintOp(_simd_i64x2_all_true, macro()
         emit "fmov x0, d17"              # Move to general register
         emit "cmp x0, #0"                # Compare with 0
         emit "cset w0, eq"               # Set to 1 if equal (all lanes non-zero), 0 otherwise
+    elsif X86_64
+        # Compare each 64-bit lane with zero
+        emit "vpxor %xmm1, %xmm1, %xmm1"     # Create zero vector
+        emit "vpcmpeqq %xmm1, %xmm0, %xmm1"  # Compare each qword with 0 (1 if zero, 0 if non-zero)
+        
+        # Test if any lane is zero
+        emit "vpmovmskb %xmm1, %eax"         # Extract sign bits
+        emit "testl %eax, %eax"              # Test if any bits are set
+        emit "sete %al"                      # Set AL to 1 if no bits set (all lanes non-zero), 0 otherwise
+        emit "movzbl %al, %eax"              # Zero-extend to 32-bit
     else
         break # Not implemented
     end
