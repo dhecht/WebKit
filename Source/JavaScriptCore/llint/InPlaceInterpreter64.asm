@@ -6413,22 +6413,22 @@ ipintOp(_simd_i16x8_bitmask, macro()
     # Simple loop over the 8 16-bit values on the stack
     
     move 0, t0          # Initialize result
-    move 0, t1          # Lane counter
+    move 0, t3          # Lane counter
     
 .bitmask_i16x8_loop:
     # Load 16-bit value and check sign bit
-    loadh [sp, t1, 2], t3  # Load 16-bit value at offset t1*2
-    andq 0x8000, t3     # Extract sign bit (bit 15)
-    btiz t3, .bitmask_i16x8_next
+    loadh [sp, t3, 2], t1  # Load 16-bit value at offset t1*2
+    andq 0x8000, t1     # Extract sign bit (bit 15)
+    btiz t1, .bitmask_i16x8_next
     
     # Set corresponding bit in result
-    move 1, t3
-    lshiftq t1, t3      # Shift to bit position
-    orq t3, t0
+    move 1, t1
+    lshiftq t3, t1      # Shift to bit position
+    orq t1, t0
     
 .bitmask_i16x8_next:
-    addq 1, t1          # Next lane
-    bilt t1, 8, .bitmask_i16x8_loop
+    addq 1, t3          # Next lane
+    bilt t3, 8, .bitmask_i16x8_loop
     
     addp V128ISize, sp  # Pop the vector
     pushInt32(t0)
@@ -6896,23 +6896,22 @@ ipintOp(_simd_i32x4_bitmask, macro()
     # Simple loop over the 4 32-bit values on the stack
     
     move 0, t0          # Initialize result
-    move 0, t1          # Lane counter
-    move sp, t2         # Pointer to vector data
+    move 0, t3          # Lane counter
     
 .bitmask_i32x4_loop:
     # Load 32-bit value and check sign bit
-    loadi [sp, t1, 4], t3  # Load 32-bit value at offset t1*4
-    andq 0x80000000, t3 # Extract sign bit (bit 31)
-    btiz t3, .bitmask_i32x4_next
+    loadi [sp, t3, 4], t1  # Load 32-bit value at offset t1*4
+    andq 0x80000000, t1 # Extract sign bit (bit 31)
+    btiz t1, .bitmask_i32x4_next
     
     # Set corresponding bit in result
-    move 1, t3
-    lshiftq t1, t3      # Shift to bit position
-    orq t3, t0
+    move 1, t1
+    lshiftq t3, t1      # Shift to bit position
+    orq t1, t0
     
 .bitmask_i32x4_next:
-    addq 1, t1          # Next lane
-    bilt t1, 4, .bitmask_i32x4_loop
+    addq 1, t3          # Next lane
+    bilt t3, 4, .bitmask_i32x4_loop
     
     addp V128ISize, sp  # Pop the vector
     pushInt32(t0)
