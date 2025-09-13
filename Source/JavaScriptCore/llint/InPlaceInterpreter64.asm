@@ -5792,22 +5792,17 @@ ipintOp(_simd_i8x16_popcnt, macro()
         # x86_64 does not natively support vector lanewise popcount, so we emulate it using
         # lookup tables, similar to BBQ JIT implementation
         
-        # Load bottom nibble mask constant (0x0f0f0f0f0f0f0f0f repeated)
-        move 0x0f0f0f0f0f0f0f0f, t0  # t0 -> rax
-        move 0x0f0f0f0f0f0f0f0f, t1  # t1 -> rsi
-        
-        # Load popcount lookup table constants
-        move 0x0302020102010100, t2  # t2 -> rdx (Low 64 bits)
-        move 0x0403030203020201, t3  # t3 -> rcx (High 64 bits)
-        
-        # Create 128-bit bottom nibble mask in xmm1
+        # Create bottom nibble mask (0x0f repeated 16 times)
+        emit "movabsq $0x0f0f0f0f0f0f0f0f, %rax"
         emit "vmovq %rax, %xmm1"
-        emit "vmovq %rsi, %xmm4"
+        emit "vmovq %rax, %xmm4"
         emit "vpunpcklqdq %xmm4, %xmm1, %xmm1"  # xmm1 = bottom nibble mask
         
-        # Create 128-bit lookup table in xmm2  
-        emit "vmovq %rdx, %xmm2"
-        emit "vmovq %rcx, %xmm4"
+        # Create popcount lookup table
+        emit "movabsq $0x0302020102010100, %rax"   # Low 64 bits of lookup table
+        emit "vmovq %rax, %xmm2"
+        emit "movabsq $0x0403030203020201, %rax"   # High 64 bits of lookup table
+        emit "vmovq %rax, %xmm4"
         emit "vpunpcklqdq %xmm4, %xmm2, %xmm2"  # xmm2 = popcount lookup table
         
         # Split input into low and high nibbles
@@ -5816,11 +5811,11 @@ ipintOp(_simd_i8x16_popcnt, macro()
         emit "vpsrlw $4, %xmm3, %xmm3"           # Shift right 4 bits
         emit "vpand %xmm1, %xmm3, %xmm3"         # xmm3 = high nibbles ((input >> 4) & mask)
         
-        # Lookup popcount for both nibbles using pshufb (vectorSwizzle equivalent)
+        # Lookup popcount for both nibbles using pshufb
         emit "vpshufb %xmm0, %xmm2, %xmm0"       # Lookup low nibbles
         emit "vpshufb %xmm3, %xmm2, %xmm3"       # Lookup high nibbles
         
-        # Add the results (vectorAdd equivalent)
+        # Add the results
         emit "vpaddb %xmm3, %xmm0, %xmm0"        # Add popcount of low and high nibbles
     else
         break # Not implemented
