@@ -5789,40 +5789,39 @@ ipintOp(_simd_i8x16_popcnt, macro()
     if ARM64 or ARM64E
         emit "cnt v16.16b, v16.16b"
     elsif X86_64
-        # Create lookup table [0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4]
-        emit "vpxor %xmm1, %xmm1, %xmm1"             # Start with zeros
-        emit "vpcmpeqb %xmm2, %xmm2, %xmm2"          # All 1s
-        emit "vpsrlw $15, %xmm2, %xmm2"              # Create 0x0001 pattern
-        emit "vpackuswb %xmm2, %xmm2, %xmm2"         # Pack to bytes: 0x01 pattern
+        # x86_64 does not natively support vector lanewise popcount, so we emulate it using
+        # lookup tables, similar to BBQ JIT implementation
         
-        # Build lookup table
-        emit "vmovdqa %xmm1, %xmm3"           # Copy zeros for position 0
-        emit "vmovdqa %xmm2, %xmm4"           # Copy 1s for positions 1,2,4,8
-        emit "vpaddb %xmm2, %xmm4, %xmm4"            # Create 2s
-        emit "vmovdqa %xmm4, %xmm5"           # Copy 2s
-        emit "vpaddb %xmm2, %xmm5, %xmm5"            # Create 3s
-
-        emit "vmovdqa %xmm0, %xmm1"           # Copy input
-        emit "vmovdqa %xmm0, %xmm2"           # Copy input
+        # Load bottom nibble mask constant (0x0f0f0f0f0f0f0f0f repeated)
+        loadConstantOrVariable(0x0f0f0f0f0f0f0f0f, t0)  # t0 -> rax
+        loadConstantOrVariable(0x0f0f0f0f0f0f0f0f, t1)  # t1 -> rsi
         
-        # Count bits using bit manipulation
-        emit "vpsrlw $1, %xmm1, %xmm1"               # Shift right 1
-        emit "vpcmpeqb %xmm3, %xmm3, %xmm3"          # All 1s
-        emit "vpsrlw $1, %xmm3, %xmm3"               # Create 0x7F7F mask
-        emit "vpand %xmm3, %xmm1, %xmm1"             # Mask shifted bits
-        emit "vpsubb %xmm1, %xmm2, %xmm2"            # Subtract: x - (x >> 1) & 0x7F7F
+        # Load popcount lookup table constants
+        loadConstantOrVariable(0x0302020102010100, t2)  # t2 -> rdx (Low 64 bits)
+        loadConstantOrVariable(0x0403030203020201, t3)  # t3 -> rcx (High 64 bits)
         
-        # Continue bit manipulation for full popcnt
-        emit "vmovdqa %xmm2, %xmm1"           # Copy result
-        emit "vpsrlw $2, %xmm1, %xmm1"               # Shift right 2
-        emit "vpcmpeqb %xmm3, %xmm3, %xmm3"          # All 1s
-        emit "vpsrlw $2, %xmm3, %xmm3"               # Create mask
-        emit "vpsrlw $2, %xmm3, %xmm3"               # 0x3F3F mask
-        emit "vpand %xmm3, %xmm1, %xmm1"             # Mask
-        emit "vpand %xmm3, %xmm2, %xmm2"             # Mask original
-        emit "vpaddb %xmm1, %xmm2, %xmm2"            # Add: (x & 0x3F3F) + ((x >> 2) & 0x3F3F)
+        # Create 128-bit bottom nibble mask in xmm1
+        emit "vmovq %rax, %xmm1"
+        emit "vmovq %rsi, %xmm4"
+        emit "vpunpcklqdq %xmm4, %xmm1, %xmm1"  # xmm1 = bottom nibble mask
         
-        emit "vmovdqa %xmm2, %xmm0"           # Move result to output
+        # Create 128-bit lookup table in xmm2  
+        emit "vmovq %rdx, %xmm2"
+        emit "vmovq %rcx, %xmm4"
+        emit "vpunpcklqdq %xmm4, %xmm2, %xmm2"  # xmm2 = popcount lookup table
+        
+        # Split input into low and high nibbles
+        emit "vmovdqa %xmm0, %xmm3"              # xmm3 = copy of input
+        emit "vpand %xmm1, %xmm0, %xmm0"         # xmm0 = low nibbles (input & mask)
+        emit "vpsrlw $4, %xmm3, %xmm3"           # Shift right 4 bits
+        emit "vpand %xmm1, %xmm3, %xmm3"         # xmm3 = high nibbles ((input >> 4) & mask)
+        
+        # Lookup popcount for both nibbles using pshufb (vectorSwizzle equivalent)
+        emit "vpshufb %xmm0, %xmm2, %xmm0"       # Lookup low nibbles
+        emit "vpshufb %xmm3, %xmm2, %xmm3"       # Lookup high nibbles
+        
+        # Add the results (vectorAdd equivalent)
+        emit "vpaddb %xmm3, %xmm0, %xmm0"        # Add popcount of low and high nibbles
     else
         break # Not implemented
     end
