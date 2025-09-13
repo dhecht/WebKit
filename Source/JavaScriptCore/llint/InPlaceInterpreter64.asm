@@ -5992,11 +5992,16 @@ ipintOp(_simd_i8x16_shl, macro()
         # For i8x16 shifts, we need to use 16-bit shifts and mask the results
         # First, unpack bytes to words for shifting
         emit "vmovdqa %xmm0, %xmm2"          # Copy original
-        emit "vpunpcklbw %xmm0, %xmm0, %xmm0" # Unpack low bytes to words
-        emit "vpunpckhbw %xmm2, %xmm2, %xmm2" # Unpack high bytes to words
+        emit "vpunpcklbw %xmm0, %xmm0, %xmm0" # Unpack low bytes to words (zero-extended)
+        emit "vpunpckhbw %xmm2, %xmm2, %xmm2" # Unpack high bytes to words (zero-extended)
         emit "vpsllw %xmm1, %xmm0, %xmm0"    # Shift low words
         emit "vpsllw %xmm1, %xmm2, %xmm2"    # Shift high words
-        # Pack back to bytes with saturation
+        # Create mask to keep only low 8 bits of each word
+        emit "vpcmpeqw %xmm3, %xmm3, %xmm3"  # All 1s
+        emit "vpsrlw $8, %xmm3, %xmm3"       # 0x00FF pattern
+        emit "vpand %xmm3, %xmm0, %xmm0"     # Mask low words
+        emit "vpand %xmm3, %xmm2, %xmm2"     # Mask high words
+        # Pack back to bytes without saturation
         emit "vpackuswb %xmm2, %xmm0, %xmm0" # Pack words back to bytes
     else
         break # Not implemented
