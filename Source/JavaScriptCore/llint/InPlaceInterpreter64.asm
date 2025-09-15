@@ -5622,25 +5622,26 @@ end)
 ipintOp(_simd_i8x16_bitmask, macro()
     # i8x16.bitmask - extract most significant bit from each 8-bit lane into a 16-bit integer
     # Simple loop over the 16 bytes on the stack
-
+    
     move 0, t0          # Initialize result
-    move 0, t3          # Byte counter
-
+    move 0, t1          # Byte counter
+    move sp, t2         # Pointer to vector data
+    
 .bitmask_i8x16_loop:
     # Load byte and check sign bit
-    loadb [sp, t3], t1
-    andq 0x80, t1       # Extract sign bit
-    btiz t1, .bitmask_i8x16_next
-
+    loadb [t2, t1], t3
+    andq 0x80, t3       # Extract sign bit
+    btiz t3, .bitmask_i8x16_next
+    
     # Set corresponding bit in result
-    move 1, t1
-    lshiftq t3, t1      # Shift to bit position
-    orq t1, t0
-
+    move 1, t3
+    lshiftq t1, t3      # Shift to bit position
+    orq t3, t0
+    
 .bitmask_i8x16_next:
-    addq 1, t3          # Next byte
-    bilt t3, 16, .bitmask_i8x16_loop
-
+    addq 1, t1          # Next byte
+    bilt t1, 16, .bitmask_i8x16_loop
+    
     addp V128ISize, sp  # Pop the vector
     pushInt32(t0)
     advancePC(2)

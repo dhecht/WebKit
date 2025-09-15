@@ -563,8 +563,6 @@ class Instruction
     def handleX86Shift(opcode, kind)
         if operands[0].is_a? Immediate or operands[0].x86GPR == "ecx"
             $asm.puts "#{opcode} #{orderOperands(operands[0].x86Operand(:byte), operands[1].x86Operand(kind))}"
-        elsif operands[1].x86GPR == "ecx"
-            raise "shift destination cannot be t3 (%ecx)"
         else
             $asm.puts "xchg#{x86Suffix(:ptr)} #{operands[0].x86Operand(:ptr)}, #{x86GPRName("ecx", :ptr)}"
             $asm.puts "#{opcode} #{orderOperands(register("cl"), operands[1].x86Operand(kind))}"
