@@ -219,6 +219,7 @@ macro argumINTInitializeDefaultLocals()
     sxb2q argumINTTmp, argumINTTmp
     andq ValueNull, argumINTTmp
     storeq argumINTTmp, [argumINTDst]
+    #storeq 0, 8[argumINTDst]
     addp LocalSize, argumINTDst
 end
 
@@ -10043,7 +10044,7 @@ macro mintPop(reg)
 end
 
 macro mintPopF(reg)
-    loadd [mintSS], reg
+    loadv [mintSS], reg
     addq V128ISize, mintSS
 end
 
@@ -10848,35 +10849,35 @@ else
 end
 
 uintAlign(_fr0)
-    popFloat64(wfa0)
+    popVec(wfa0)
     uintDispatch()
 
 uintAlign(_fr1)
-    popFloat64(wfa1)
+    popVec(wfa1)
     uintDispatch()
 
 uintAlign(_fr2)
-    popFloat64(wfa2)
+    popVec(wfa2)
     uintDispatch()
 
 uintAlign(_fr3)
-    popFloat64(wfa3)
+    popVec(wfa3)
     uintDispatch()
 
 uintAlign(_fr4)
-    popFloat64(wfa4)
+    popVec(wfa4)
     uintDispatch()
 
 uintAlign(_fr5)
-    popFloat64(wfa5)
+    popVec(wfa5)
     uintDispatch()
 
 uintAlign(_fr6)
-    popFloat64(wfa6)
+    popVec(wfa6)
     uintDispatch()
 
 uintAlign(_fr7)
-    popFloat64(wfa7)
+    popVec(wfa7)
     uintDispatch()
 
 # destination on stack is sc0
@@ -10967,42 +10968,42 @@ else
 end
 
 argumINTAlign(_fa0)
-    stored wfa0, [argumINTDst]
+    storev wfa0, [argumINTDst]
     addp LocalSize, argumINTDst
     argumINTDispatch()
 
 argumINTAlign(_fa1)
-    stored wfa1, [argumINTDst]
+    storev wfa1, [argumINTDst]
     addp LocalSize, argumINTDst
     argumINTDispatch()
 
 argumINTAlign(_fa2)
-    stored wfa2, [argumINTDst]
+    storev wfa2, [argumINTDst]
     addp LocalSize, argumINTDst
     argumINTDispatch()
 
 argumINTAlign(_fa3)
-    stored wfa3, [argumINTDst]
+    storev wfa3, [argumINTDst]
     addp LocalSize, argumINTDst
     argumINTDispatch()
 
 argumINTAlign(_fa4)
-    stored wfa4, [argumINTDst]
+    storev wfa4, [argumINTDst]
     addp LocalSize, argumINTDst
     argumINTDispatch()
 
 argumINTAlign(_fa5)
-    stored wfa5, [argumINTDst]
+    storev wfa5, [argumINTDst]
     addp LocalSize, argumINTDst
     argumINTDispatch()
 
 argumINTAlign(_fa6)
-    stored wfa6, [argumINTDst]
+    storev wfa6, [argumINTDst]
     addp LocalSize, argumINTDst
     argumINTDispatch()
 
 argumINTAlign(_fa7)
-    stored wfa7, [argumINTDst]
+    storev wfa7, [argumINTDst]
     addp LocalSize, argumINTDst
     argumINTDispatch()
 
