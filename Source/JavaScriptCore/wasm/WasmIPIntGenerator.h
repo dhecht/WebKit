@@ -181,14 +181,12 @@ struct CallSignatureMetadata {
 enum class CallArgumentBytecode : uint8_t { // (mINT)
     ArgumentGPR = 0x0, // 0x00 - 0x07: push into a0, a1, ...
     ArgumentFPR = 0x8, // 0x08 - 0x0f: push into fa0, fa1, ...
-    ArgumentStackAligned = 0x10, // 0x10: pop stack value, push onto stack[0]
-    ArgumentStackUnaligned = 0x11, // 0x11: pop stack value, add another 16B for params, push onto stack[8]
-    TailArgumentStackAligned = 0x12, // 0x12: pop stack value, push onto stack[0]
-    TailArgumentStackUnaligned = 0x13, // 0x13: pop stack value, add another 16B for params, push onto stack[8]
-    StackAlign = 0x14, // 0x14: add another 16B for params
-    TailStackAlign = 0x15, // 0x15: add another 16B for params
-    TailCall = 0x16, // 0x16: tail call
-    Call = 0x17, // 0x17: regular call
+    ArgumentStack = 0x10, // pop stack value, push 16-bytes onto stack[0]
+    TailArgumentStack = 0x11, // pop stack value, push 16-bytes onto stack[0]
+    PadStack = 0x12, // pad stack by 16-bytes
+    TailPadStack = 0x13, // pad stack by 16-bytes
+    TailCall = 0x14, // tail call
+    Call = 0x15, // regular call
 
     NumOpcodes // this must be the last element of the enum!
 };
@@ -247,15 +245,14 @@ enum class CallResultBytecode : uint8_t { // (mINT)
     ResultGPR = 0x0, // 0x00 - 0x07: r0 - r7
     ResultFPR = 0x8, // 0x08 - 0x0f: fr0 - fr7
     ResultStack = 0x10, // 0x10: stack
-    StackGap = 0x11, // 0x11: skip a slot on the stack
-    End = 0x12, // 0x12: end
+    End = 0x11, // 0x11: end
 
     NumOpcodes // this must be the last element of the enum!
 };
 
 struct CallReturnMetadata {
     uint32_t stackFrameSize; // 4B for stack frame size
-    uint32_t firstStackArgumentSPOffset; // 4B for stack argument offset
+    uint32_t firstStackResultSPOffset; // 4B for stack argument offset
     CallResultBytecode resultBytecode[0];
 };
 

@@ -519,9 +519,9 @@ public:
     inline void assertAboutStackSize(bool condition)
     {
         // There's a few cases that we only want to assert our stack contents if SIMD isn't enabled.
-        // Since IPInt doesn't support SIMD, we don't update the stack size correctly, but this is
+        // When !useWasmIPIntSIMD, we don't update the stack size correctly, but this is
         // not an issue because the code never gets run.
-        ASSERT_UNUSED(condition, m_usesSIMD || condition);
+        ASSERT_UNUSED(condition, (m_usesSIMD && !Options::useWasmIPIntSIMD()) || condition);
     }
 
     void setParser(FunctionParser<IPIntGenerator>* parser) { m_parser = parser; };
@@ -917,6 +917,8 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addArguments(const TypeDefiniti
 
     for (size_t i = 0; i < numArgs; ++i) {
         auto loc = callCC.params[i].location;
+        dataLogLn("XXX: callCC: arg", i, " loc: ", loc);
+
         if (loc.isGPR()) {
 #if USE(JSVALUE64)
             ASSERT_UNUSED(NUM_ARGUMINT_GPRS, GPRInfo::toArgumentIndex(loc.jsr().gpr()) < NUM_ARGUMINT_GPRS);
@@ -2771,28 +2773,21 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature&, const CallInfor
                 return static_cast<uint8_t>(IPInt::CallArgumentBytecode::ArgumentFPR) + FPRInfo::toArgumentIndex(loc.fpr());
             }
 
-            if (loc.isStackArgument()) {
-                if (stackArgs++ & 1)
-                    return static_cast<uint8_t>(IPInt::CallArgumentBytecode::ArgumentStackUnaligned);
-                return static_cast<uint8_t>(IPInt::CallArgumentBytecode::ArgumentStackAligned);
-            }
+            RELEASE_ASSERT(loc.isStackArgument());
+            // mINT stack commands assume each argument slot is 16-bytes. If that changes, mINT needs to be updated.
+            ASSERT(index >= callConvention.params.size() - 1 || loc.offsetFromSP() == callConvention.params[index + 1].location.offsetFromSP() + 16);
 
-            RELEASE_ASSERT_NOT_REACHED();
-            return 0;
+            return static_cast<uint8_t>(IPInt::CallArgumentBytecode::ArgumentStack);
         });
-    if (stackArgs & 1) {
-        ++stackArgs;
-        m_cachedCallBytecode.append(static_cast<uint8_t>(IPInt::CallArgumentBytecode::StackAlign));
-    }
 
-    for (unsigned i = stackArgs; i < callConvention.numberOfStackValues; i += 2)
-        m_cachedCallBytecode.append(static_cast<uint8_t>(IPInt::CallArgumentBytecode::StackAlign));
+    for (unsigned i = stackArgs; i < callConvention.numberOfStackValues; i++)
+        m_cachedCallBytecode.append(static_cast<uint8_t>(IPInt::CallArgumentBytecode::PadStack));
 
     m_cachedCallBytecode.reverse();
 
     IPInt::CallReturnMetadata commonReturn {
         .stackFrameSize = static_cast<uint32_t>(callConvention.headerAndArgumentStackSizeInBytes),
-        .firstStackArgumentSPOffset = 0,
+        .firstStackResultSPOffset = 0, // TBD
         .resultBytecode = { }
     };
 
@@ -2821,18 +2816,16 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature&, const CallInfor
                 return static_cast<uint8_t>(IPInt::CallResultBytecode::ResultFPR) + FPRInfo::toArgumentIndex(loc.fpr());
             }
 
-            if (loc.isStackArgument()) {
-                if (!hasSeenStackArgument) {
-                    hasSeenStackArgument = true;
-                    // If our first argument starts further down the frame, we need to push a bunch of empty values
-                    // If our first stack argument is in an "odd" slot, we need to skip one slot.
-                    commonReturn.firstStackArgumentSPOffset = loc.offsetFromSP();
-                }
-                return static_cast<uint8_t>(IPInt::CallResultBytecode::ResultStack);
-            }
+            RELEASE_ASSERT(loc.isStackArgument());
 
-            RELEASE_ASSERT_NOT_REACHED();
-            return 0;
+            if (!hasSeenStackArgument) {
+                hasSeenStackArgument = true;
+                // uINT needs to be able to locate the first stack result.
+                commonReturn.firstStackResultSPOffset = loc.offsetFromSP();
+            }
+            // mINT stack commands assume each result slot is 16-bytes. If that changes, mINT needs to be updated.
+            ASSERT(index >= callConvention.results.size() - 1 || loc.offsetFromSP() + 16 == callConvention.results[index + 1].location.offsetFromSP());
+            return static_cast<uint8_t>(IPInt::CallResultBytecode::ResultStack);
         });
     returnBytecode.append(static_cast<uint8_t>(IPInt::CallResultBytecode::End));
 
@@ -2898,6 +2891,7 @@ void IPIntGenerator::addTailCallCommonData(const FunctionSignature& signature)
 
     uint32_t numStackValues = WTF::roundUpToMultipleOf(stackAlignmentRegisters(), callConvention.numberOfStackValues);
 
+    // XXX: what is this doing?
     // each stack value is 8B, so to calculate stack size in V128, we need to divide by two
     if (m_stackSize + numStackValues / 2 > m_maxStackSize)
         m_maxStackSize = m_stackSize + numStackValues / 2;
@@ -3084,6 +3078,7 @@ std::unique_ptr<FunctionIPIntMetadataGenerator> IPIntGenerator::finalize()
     if (m_metadata->m_numLocals % 2)
         m_metadata->m_argumINTBytecode.append(0);
 
+    // XXX: why / 2?
     m_metadata->m_maxFrameSizeInV128 = roundUpToMultipleOf<2>(m_metadata->m_numLocals) / 2;
     m_metadata->m_maxFrameSizeInV128 += m_metadata->m_numAlignedRethrowSlots / 2;
     m_metadata->m_maxFrameSizeInV128 += m_maxStackSize;

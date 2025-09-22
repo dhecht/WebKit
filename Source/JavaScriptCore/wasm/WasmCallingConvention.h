@@ -149,15 +149,15 @@ private:
     template<typename RegType>
     ArgumentLocation marshallLocationImpl(CallRole role, const Vector<RegType>& regArgs, size_t& count, size_t& stackOffset, size_t valueSize) const
     {
-        size_t alignedSize = WTF::roundUpToMultipleOf(valueSize, sizeof(Register));
-        Width width = widthForBytes(alignedSize);
-
-        if (count < regArgs.size())
-            return marshallRegs(regArgs, count, valueSize, width);
-
+        if (count < regArgs.size()) {
+            size_t registerSize = WTF::roundUpToMultipleOf(valueSize, sizeof(Register));
+            return marshallRegs(regArgs, count, valueSize, widthForBytes(registerSize));
+        }
         count++;
-        ArgumentLocation result = { role == CallRole::Caller ? ValueLocation::stackArgument(stackOffset) : ValueLocation::stack(stackOffset), width };
-        stackOffset += alignedSize;
+        // XXX: different constant for alignment of slot?
+        size_t stackSlotSize = WTF::roundUpToMultipleOf(valueSize, stackAlignmentBytes());
+        ArgumentLocation result = { role == CallRole::Caller ? ValueLocation::stackArgument(stackOffset) : ValueLocation::stack(stackOffset), widthForBytes(stackSlotSize) };
+        stackOffset += stackSlotSize;
         return result;
     }
 
@@ -308,13 +308,14 @@ public:
 
         ArgumentLocation thisArgument = { role == CallRole::Caller ? ValueLocation::stackArgument(headerSize) : ValueLocation::stack(headerSize), widthForBytes(sizeof(void*)) };
         headerSize += sizeof(Register);
+        ASSERT(!(headerSize % stackAlignmentBytes()));
 
         size_t argStackOffset = headerSize;
         Vector<ArgumentLocation, 8> params(signature.argumentCount(),
             [&](unsigned index) {
                 return marshallLocation(role, signature.argumentType(index), gpArgumentCount, fpArgumentCount, argStackOffset);
             });
-        uint32_t stackArgs = argStackOffset - headerSize;
+        uint32_t stackArgsInBytes = argStackOffset - headerSize;
         size_t stackArguments = 0;
         if (gpArgumentCount > jsrArgs.size())
             stackArguments += (gpArgumentCount - jsrArgs.size());
@@ -325,15 +326,19 @@ public:
         gpArgumentCount = 0;
         fpArgumentCount = 0;
         size_t stackResults = numberOfStackResults(signature);
-        uint32_t stackResultsInBytes = stackResults * sizeof(Register);
-        uint32_t stackCountAligned = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(std::max(stackArgs, stackResultsInBytes));
-        size_t resultStackOffset = headerSize + stackCountAligned - stackResultsInBytes;
+        // XXX: this was buggy before
+        uint32_t stackResultsInBytes = stackResults * stackAlignmentBytes();
+        uint32_t argsAndResultsStackSpaceInBytes = WTF::roundUpToMultipleOf<stackAlignmentBytes()>(std::max(stackArgsInBytes, stackResultsInBytes));
+        size_t resultStackOffset = headerSize + argsAndResultsStackSpaceInBytes - stackResultsInBytes;
         Vector<ArgumentLocation, 1> results(signature.returnCount(),
             [&](unsigned index) {
                 return marshallLocation(role, signature.returnType(index), gpArgumentCount, fpArgumentCount, resultStackOffset);
             });
+        // Preceding logic arranged for the results to be adjacent to the top.
+        ASSERT(headerSize + argsAndResultsStackSpaceInBytes == resultStackOffset);
+        ASSERT(argStackOffset <= resultStackOffset);
 
-        return { thisArgument, WTFMove(params), WTFMove(results), std::max(argStackOffset, resultStackOffset), std::max(stackArguments, stackResults) };
+        return { thisArgument, WTFMove(params), WTFMove(results), resultStackOffset, std::max(stackArguments, stackResults) };
     }
 
     RegisterSet argumentGPRs() const { return RegisterSetBuilder::argumentGPRs(); }

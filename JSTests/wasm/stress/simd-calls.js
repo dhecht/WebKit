@@ -28,12 +28,42 @@ let wat = `
         (v128.store (local.get $dst1) (local.get $temp1))
         (v128.store (local.get $dst2) (local.get $temp2))
     )
+    
+    ;; Function with 12 parameters alternating f64 and v128 to force stack usage
+    (func $many_args 
+        (param $f1 f64) (param $v1 v128) (param $f2 f64) (param $v2 v128)
+        (param $f3 f64) (param $v3 v128) (param $f4 f64) (param $v4 v128)
+        (param $f5 f64) (param $v5 v128) (param $f6 f64) (param $v6 v128)
+        (param $addr i32)
+        
+        ;; Just store the last v128 argument to verify it was passed correctly
+        (v128.store (local.get $addr) (local.get $v6))
+    )
+    
+    ;; Test function that calls many_args with 12 parameters  
+    (func (export "test_many_args") (param $dst i32)
+        (call $many_args
+            (f64.const 1.5)                    ;; f1
+            (v128.const i32x4 1 2 3 4)         ;; v1
+            (f64.const 2.5)                    ;; f2
+            (v128.const i32x4 5 6 7 8)         ;; v2  
+            (f64.const 3.5)                    ;; f3
+            (v128.const i32x4 9 10 11 12)      ;; v3
+            (f64.const 4.5)                    ;; f4
+            (v128.const i32x4 13 14 15 16)     ;; v4
+            (f64.const 5.5)                    ;; f5
+            (v128.const i32x4 17 18 19 20)     ;; v5
+            (f64.const 6.5)                    ;; f6
+            (v128.const i32x4 21 22 23 24)     ;; v6 - should be stored
+            (local.get $dst)                   ;; addr
+        )
+    )
 )
 `
 
 async function test() {
     const instance = await instantiate(wat, {}, { simd: true });
-    const { memory, test_v128_call } = instance.exports;
+    const { memory, test_v128_call, test_many_args } = instance.exports;
 
     // Create typed array views for easy data manipulation
     const i32View = new Int32Array(memory.buffer);
@@ -65,6 +95,21 @@ async function test() {
         assert.eq(result2[1], 20);
         assert.eq(result2[2], 30);
         assert.eq(result2[3], 40);
+    }
+    
+    // Test many arguments forcing stack parameter passing
+    {
+        const dstAddr = 32;
+        
+        // Call function with 12 parameters alternating v128 and f64
+        test_many_args(dstAddr);
+        
+        // Verify the last v128 argument (v6) was passed correctly [21, 22, 23, 24]
+        const result = getI32x4(dstAddr);
+        assert.eq(result[0], 21);
+        assert.eq(result[1], 22);
+        assert.eq(result[2], 23);
+        assert.eq(result[3], 24);
     }
 }
 
