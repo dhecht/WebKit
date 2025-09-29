@@ -291,43 +291,37 @@ static ALWAYS_INLINE uint64_t* buildEntryBufferForLoopOSR(Wasm::IPIntCallee* ipi
         return nullptr;
 
     uint32_t index = 0;
-    // Use uniform buffer sizing like BBQ->OMG: when SIMD is used, all values get 16-byte slots
 
-    // Store loop index with uniform sizing
-    buffer[index] = osrEntryData.loopIndex;
-    if constexpr (savedFPWidth == SavedFPWidth::SaveVectors)
-        buffer[index + 1] = 0; // Zero the upper part for consistency
-    index += valueSize;
-
-    for (uint32_t i = 0; i < ipintCallee->numLocals(); ++i) {
-        // Store the local value with uniform sizing
-        buffer[index] = pl[i].i64;
-        if constexpr (savedFPWidth == SavedFPWidth::SaveVectors) {
-            // For v128 locals, store the second part; for others, zero it
-            buffer[index + 1] = pl[i].v128.u64x2[1];
-        }
-        index += valueSize;
-    }
-
-    // If there's no rethrow slots just 0 fill the buffer.
-    ASSERT(osrEntryData.tryDepth <= ipintCallee->rethrowSlots() || !ipintCallee->rethrowSlots());
-    for (uint32_t i = 0; i < osrEntryData.tryDepth; ++i) {
-        uint64_t rethrowValue = ipintCallee->rethrowSlots() ? pl[ipintCallee->localSizeToAlloc() + i].i64 : 0;
-        buffer[index] = rethrowValue;
+    auto copyValueToBuffer = [&](const IPIntLocal& local) ALWAYS_INLINE_LAMBDA {
         if constexpr (savedFPWidth == SavedFPWidth::SaveVectors)
-            buffer[index + 1] = 0; // Rethrow slots are always 64-bit
+            *std::bit_cast<v128_t*>(buffer + index) = local.v128;
+        else
+            buffer[index] = local.i64;
         index += valueSize;
+    };
+
+    // The loop index isn't really a WASM value, but it occupies the first slot of the OSR scratch buffer
+    IPIntLocal loopIndexLocal { .v128 = vectorAllZeros() };
+    loopIndexLocal.i64 = osrEntryData.loopIndex;
+    copyValueToBuffer(loopIndexLocal);
+
+    for (uint32_t i = 0; i < ipintCallee->numLocals(); ++i)
+        copyValueToBuffer(pl[i]);
+
+    if (ipintCallee->rethrowSlots()) {
+        ASSERT(osrEntryData.tryDepth <= ipintCallee->rethrowSlots());
+        for (uint32_t i = 0; i < osrEntryData.tryDepth; ++i)
+            copyValueToBuffer(pl[ipintCallee->localSizeToAlloc() + i]);
+    } else {
+        // If there's no rethrow slots just 0 fill the buffer.
+        IPIntLocal zeroValue { .v128 = vectorAllZeros() };
+        for (uint32_t i = 0; i < osrEntryData.tryDepth; ++i)
+            copyValueToBuffer(zeroValue);
     }
 
     for (uint32_t i = 0; i < osrEntryData.numberOfStackValues; ++i) {
         pl -= 1;
-        // Store stack value with uniform sizing
-        buffer[index] = pl->i64;
-        if constexpr (savedFPWidth == SavedFPWidth::SaveVectors) {
-            // For v128 stack values, store the second part; for others, zero it
-            buffer[index + 1] = pl->v128.u64x2[1];
-        }
-        index += valueSize;
+        copyValueToBuffer(*pl);
     }
     return buffer;
 }
