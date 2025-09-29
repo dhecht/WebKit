@@ -3480,7 +3480,9 @@ StackMap BBQJIT::makeStackMap(const ControlData& data, Stack& enclosingStack)
         stackMap[stackMapIndex ++] = OSREntryValue(toB3Rep(data.argumentLocations()[i]), toB3Type(data.argumentType(i).kind));
 
     RELEASE_ASSERT(stackMapIndex == numElements);
-    m_osrEntryScratchBufferSize = std::max(m_osrEntryScratchBufferSize, numElements + BBQCallee::extraOSRValuesForLoopIndex);
+    // Use the same buffer sizing pattern as BBQ->OMG OSR: valueSize depends on SIMD usage
+    unsigned valueSize = m_usesSIMD ? 2 : 1;
+    m_osrEntryScratchBufferSize = std::max(m_osrEntryScratchBufferSize, valueSize * (numElements + BBQCallee::extraOSRValuesForLoopIndex));
     return stackMap;
 }
 

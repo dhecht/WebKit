@@ -1188,46 +1188,78 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationWasmTriggerOSREntryNow, void, (Probe:
 JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationWasmLoopOSREnterBBQJIT, void, (Probe::Context & context))
 {
     uint64_t* osrEntryScratchBuffer = std::bit_cast<uint64_t*>(context.gpr(GPRInfo::argumentGPR0));
-    unsigned loopIndex = osrEntryScratchBuffer[0]; // First entry in scratch buffer is the loop index when tiering up to BBQ.
 
     // We just populated the callee in the frame before we entered this operation, so let's use it.
     BBQCallee& callee = *static_cast<BBQCallee*>(context.fp<CallFrame*>()->callee().asNativeCallee());
     ASSERT(callee.compilationMode() == Wasm::CompilationMode::BBQMode);
     ASSERT(callee.refCount());
+
+    // Use uniform buffer sizing like BBQ->OMG OSR
+    unsigned valueSize = (callee.savedFPWidth() == SavedFPWidth::SaveVectors) ? 2 : 1;
+
+    // Extract loop index using uniform sizing
+    unsigned loopIndex = osrEntryScratchBuffer[0]; // Loop index is always in first 8 bytes
+
     OSREntryData& entryData = callee.tierUpCounter().osrEntryData(loopIndex);
     RELEASE_ASSERT(entryData.loopIndex() == loopIndex);
 
     const StackMap& stackMap = entryData.values();
-    auto writeValueToRep = [&](uint64_t encodedValue, const OSREntryValue& value) {
+    auto writeValueToRep = [&](uint64_t* buffer, unsigned& bufferIndex, const OSREntryValue& value) {
         B3::Type type = value.type();
         if (value.isGPR()) {
             ASSERT(!type.isFloat() && !type.isVector());
-            context.gpr(value.gpr()) = encodedValue;
+            context.gpr(value.gpr()) = buffer[bufferIndex];
+            bufferIndex += valueSize;
 #if USE(JSVALUE32_64)
         } else if (value.isRegPair(B3::ValueRep::OSRValueRep)) {
+            uint64_t encodedValue = buffer[bufferIndex];
             context.gpr(value.gprHi(B3::ValueRep::OSRValueRep)) = (encodedValue >> 32) & 0xffffffff;
             context.gpr(value.gprLo(B3::ValueRep::OSRValueRep)) = encodedValue & 0xffffffff;
+            bufferIndex += valueSize;
 #endif
         } else if (value.isFPR()) {
-            ASSERT(type.isFloat()); // We don't expect vectors from IPInt right now.
-            context.fpr(value.fpr()) = encodedValue;
+            switch (type.kind()) {
+            case B3::Float:
+            case B3::Double:
+                context.fpr(value.fpr()) = buffer[bufferIndex];
+                bufferIndex += valueSize;
+                break;
+            case B3::V128:
+                // Handle v128 values in FPRs consistently with BBQ->OMG OSR
+                RELEASE_ASSERT(valueSize == 2);
+#if CPU(X86_64) || CPU(ARM64)
+                *std::bit_cast<v128_t*>(&context.vector(value.fpr())) = *std::bit_cast<v128_t*>(buffer + bufferIndex);
+#else
+                UNREACHABLE_FOR_PLATFORM();
+#endif
+                bufferIndex += valueSize; // v128 values occupy 2 uint64_t slots
+                break;
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+            }
         } else if (value.isStack()) {
             auto* baseStore = std::bit_cast<uint8_t*>(context.fp()) + value.offsetFromFP();
             switch (type.kind()) {
             case B3::Int32:
-                *std::bit_cast<uint32_t*>(baseStore) = static_cast<uint32_t>(encodedValue);
+                *std::bit_cast<uint32_t*>(baseStore) = static_cast<uint32_t>(buffer[bufferIndex]);
+                bufferIndex += valueSize;
                 break;
             case B3::Int64:
-                *std::bit_cast<uint64_t*>(baseStore) = encodedValue;
+                *std::bit_cast<uint64_t*>(baseStore) = buffer[bufferIndex];
+                bufferIndex += valueSize;
                 break;
             case B3::Float:
-                *std::bit_cast<float*>(baseStore) = std::bit_cast<float>(static_cast<uint32_t>(encodedValue));
+                *std::bit_cast<float*>(baseStore) = std::bit_cast<float>(static_cast<uint32_t>(buffer[bufferIndex]));
+                bufferIndex += valueSize;
                 break;
             case B3::Double:
-                *std::bit_cast<double*>(baseStore) = std::bit_cast<double>(encodedValue);
+                *std::bit_cast<double*>(baseStore) = std::bit_cast<double>(buffer[bufferIndex]);
+                bufferIndex += valueSize;
                 break;
             case B3::V128:
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("We shouldn't be receiving v128 values when tiering up from IPInt into BBQ.");
+                // Handle v128 stack values consistently with BBQ->OMG OSR
+                *std::bit_cast<v128_t*>(baseStore) = *std::bit_cast<v128_t*>(buffer + bufferIndex);
+                bufferIndex += valueSize; // v128 values occupy 2 uint64_t slots
                 break;
             default:
                 RELEASE_ASSERT_NOT_REACHED();
@@ -1237,9 +1269,9 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationWasmLoopOSREnterBBQJIT, void, (Probe:
             RELEASE_ASSERT_NOT_REACHED();
     };
 
-    unsigned indexInScratchBuffer = BBQCallee::extraOSRValuesForLoopIndex;
+    unsigned indexInScratchBuffer = Wasm::BBQCallee::extraOSRValuesForLoopIndex * valueSize;
     for (const auto& entry : stackMap)
-        writeValueToRep(osrEntryScratchBuffer[indexInScratchBuffer++], entry);
+        writeValueToRep(osrEntryScratchBuffer, indexInScratchBuffer, entry);
 
     context.gpr(GPRInfo::nonPreservedNonArgumentGPR0) = std::bit_cast<UCPURegister>(callee.loopEntrypoints()[loopIndex].taggedPtr());
 }

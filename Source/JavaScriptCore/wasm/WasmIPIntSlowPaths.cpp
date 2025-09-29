@@ -305,25 +305,54 @@ WASM_IPINT_EXTERN_CPP_DECL(loop_osr, CallFrame* callFrame, uint8_t* pc, IPIntLoc
     auto* bbqCallee = static_cast<Wasm::BBQCallee*>(compiledCallee.get());
     ASSERT(bbqCallee->compilationMode() == Wasm::CompilationMode::BBQMode);
     size_t osrEntryScratchBufferSize = bbqCallee->osrEntryScratchBufferSize();
-    RELEASE_ASSERT(osrEntryScratchBufferSize >= callee->numLocals() + osrEntryData.numberOfStackValues + osrEntryData.tryDepth);
+
+    // Check buffer size accounting for uniform sizing
+    unsigned valueSize = (bbqCallee->savedFPWidth() == SavedFPWidth::SaveVectors) ? 2 : 1;
+    size_t expectedSize = valueSize * (callee->numLocals() + osrEntryData.numberOfStackValues + osrEntryData.tryDepth + Wasm::BBQCallee::extraOSRValuesForLoopIndex);
+    RELEASE_ASSERT(osrEntryScratchBufferSize >= expectedSize);
 
     uint64_t* buffer = instance->vm().wasmContext.scratchBufferForSize(osrEntryScratchBufferSize);
     if (!buffer)
         WASM_RETURN_TWO(nullptr, nullptr);
 
     uint32_t index = 0;
-    buffer[index++] = osrEntryData.loopIndex;
-    for (uint32_t i = 0; i < callee->numLocals(); ++i)
-        buffer[index++] = pl[i].i64;
+    // Use uniform buffer sizing like BBQ->OMG: when SIMD is used, all values get 16-byte slots
+
+    // Store loop index with uniform sizing
+    buffer[index] = osrEntryData.loopIndex;
+    if (valueSize == 2)
+        buffer[index + 1] = 0; // Zero the upper part for consistency
+    index += valueSize;
+
+    for (uint32_t i = 0; i < callee->numLocals(); ++i) {
+        // Store the local value with uniform sizing
+        buffer[index] = pl[i].i64;
+        if (valueSize == 2) {
+            // For v128 locals, store the second part; for others, zero it
+            buffer[index + 1] = pl[i].v128.u64x2[1];
+        }
+        index += valueSize;
+    }
 
     // If there's no rethrow slots just 0 fill the buffer.
     ASSERT(osrEntryData.tryDepth <= callee->rethrowSlots() || !callee->rethrowSlots());
-    for (uint32_t i = 0; i < osrEntryData.tryDepth; ++i)
-        buffer[index++] = callee->rethrowSlots() ? pl[callee->localSizeToAlloc() + i].i64 : 0;
+    for (uint32_t i = 0; i < osrEntryData.tryDepth; ++i) {
+        uint64_t rethrowValue = callee->rethrowSlots() ? pl[callee->localSizeToAlloc() + i].i64 : 0;
+        buffer[index] = rethrowValue;
+        if (valueSize == 2)
+            buffer[index + 1] = 0; // Rethrow slots are always 64-bit
+        index += valueSize;
+    }
 
     for (uint32_t i = 0; i < osrEntryData.numberOfStackValues; ++i) {
         pl -= 1;
-        buffer[index++] = pl->i64;
+        // Store stack value with uniform sizing
+        buffer[index] = pl->i64;
+        if (valueSize == 2) {
+            // For v128 stack values, store the second part; for others, zero it
+            buffer[index + 1] = pl->v128.u64x2[1];
+        }
+        index += valueSize;
     }
 
     auto sharedLoopEntrypoint = bbqCallee->sharedLoopEntrypoint();
