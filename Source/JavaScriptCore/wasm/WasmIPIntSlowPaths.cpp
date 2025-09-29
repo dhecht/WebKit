@@ -284,7 +284,14 @@ static ALWAYS_INLINE uint64_t* buildEntryBufferForLoopOSR(Wasm::IPIntCallee* ipi
 
     // Check buffer size accounting for uniform sizing
     constexpr unsigned valueSize = (savedFPWidth == SavedFPWidth::SaveVectors) ? 2 : 1;
-    RELEASE_ASSERT(osrEntryScratchBufferSize >= valueSize * (ipintCallee->numLocals() + osrEntryData.numberOfStackValues + osrEntryData.tryDepth + Wasm::BBQCallee::extraOSRValuesForLoopIndex));
+
+    // Debug: Check if BBQ's calculation matches IPInt's needs
+    size_t expectedSize = valueSize * (ipintCallee->numLocals() + osrEntryData.numberOfStackValues + osrEntryData.tryDepth + Wasm::BBQCallee::extraOSRValuesForLoopIndex);
+    if (false && osrEntryScratchBufferSize < expectedSize) {
+        dataLogLn("OSR buffer size mismatch: BBQ allocated ", osrEntryScratchBufferSize, " but IPInt needs ", expectedSize);
+        dataLogLn("  numLocals=", ipintCallee->numLocals(), " numberOfStackValues=", osrEntryData.numberOfStackValues, " tryDepth=", osrEntryData.tryDepth, " extraOSRValues=", Wasm::BBQCallee::extraOSRValuesForLoopIndex, " valueSize=", valueSize);
+    }
+    RELEASE_ASSERT(osrEntryScratchBufferSize >= expectedSize);
 
     uint64_t* buffer = instance->vm().wasmContext.scratchBufferForSize(osrEntryScratchBufferSize);
     if (!buffer)

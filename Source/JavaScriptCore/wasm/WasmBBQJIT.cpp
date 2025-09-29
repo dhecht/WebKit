@@ -3481,8 +3481,12 @@ StackMap BBQJIT::makeStackMap(const ControlData& data, Stack& enclosingStack)
 
     RELEASE_ASSERT(stackMapIndex == numElements);
     // Use the same buffer sizing pattern as BBQ->OMG OSR: valueSize depends on SIMD usage
-    unsigned valueSize = m_usesSIMD ? 2 : 1;
-    m_osrEntryScratchBufferSize = std::max(m_osrEntryScratchBufferSize, valueSize * (numElements + BBQCallee::extraOSRValuesForLoopIndex));
+    unsigned valueSize = (m_callee.savedFPWidth() == SavedFPWidth::SaveVectors) ? 2 : 1;
+    // IPInt writes: loop_index + locals + rethrow_slots + stack_values
+    // We need to ensure buffer is large enough for IPInt's access pattern
+    unsigned bufferSize = valueSize * (numElements + BBQCallee::extraOSRValuesForLoopIndex);
+    //dataLogLn("BBQ OSR buffer: numElements=", numElements, " (locals=", m_locals.size(), " enclosedHeight=", data.enclosedHeight(), " argumentLocations=", data.argumentLocations().size(), " tryBlocks=", (numElements - m_locals.size() - data.enclosedHeight() - data.argumentLocations().size()), ") extraOSRValues=", BBQCallee::extraOSRValuesForLoopIndex, " valueSize=", valueSize, " savedFPWidth=", (m_callee.savedFPWidth() == SavedFPWidth::SaveVectors ? "SaveVectors" : "DontSaveVectors"), " total=", bufferSize);
+    m_osrEntryScratchBufferSize = std::max(m_osrEntryScratchBufferSize, bufferSize);
     return stackMap;
 }
 

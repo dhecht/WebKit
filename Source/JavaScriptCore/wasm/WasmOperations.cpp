@@ -779,6 +779,7 @@ static void triggerOMGReplacementCompile(TierUpCount& tierUp, JSWebAssemblyInsta
 void loadValuesIntoBuffer(Probe::Context& context, const StackMap& values, uint64_t* buffer, SavedFPWidth savedFPWidth)
 {
     ASSERT(Options::useWasmSIMD() || savedFPWidth == SavedFPWidth::DontSaveVectors);
+    // XXX
     unsigned valueSize = (savedFPWidth == SavedFPWidth::SaveVectors) ? 2 : 1;
 
     constexpr bool verbose = false || WasmOperationsInternal::verbose;
@@ -875,6 +876,7 @@ static void doOSREntry(JSWebAssemblyInstance* instance, Probe::Context& context,
         context.gpr(GPRInfo::nonPreservedNonArgumentGPR0) = 0;
     };
 
+    // XXX
     unsigned valueSize = (callee.savedFPWidth() == SavedFPWidth::SaveVectors) ? 2 : 1;
     RELEASE_ASSERT(osrEntryCallee.osrEntryScratchBufferSize() == valueSize * osrEntryData.values().size());
 
@@ -1195,6 +1197,7 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationWasmLoopOSREnterBBQJIT, void, (Probe:
     ASSERT(callee.refCount());
 
     // Use uniform buffer sizing like BBQ->OMG OSR
+    // XXX
     unsigned valueSize = (callee.savedFPWidth() == SavedFPWidth::SaveVectors) ? 2 : 1;
 
     // Extract loop index using uniform sizing

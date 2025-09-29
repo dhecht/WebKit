@@ -166,6 +166,7 @@ static inline void emitThrowImpl(CCallHelpers& jit, unsigned exceptionIndex)
 template<SavedFPWidth savedFPWidth>
 static ALWAYS_INLINE void buildEntryBufferForCatch(Probe::Context& context)
 {
+    // XXX
     unsigned valueSize = (savedFPWidth == SavedFPWidth::SaveVectors) ? 2 : 1;
     CallFrame* callFrame = context.fp<CallFrame*>();
     CallSiteIndex callSiteIndex = callFrame->callSiteIndex();
