@@ -692,21 +692,23 @@ WASM_IPINT_EXTERN_CPP_DECL(struct_new_default, uint32_t type)
     IPINT_RETURN(JSValue::encode(result));
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(struct_get, EncodedJSValue object, uint32_t fieldIndex)
+WASM_IPINT_EXTERN_CPP_DECL(struct_get, EncodedJSValue object, uint32_t fieldIndex, IPIntStackEntry* result)
 {
     UNUSED_PARAM(instance);
     if (JSValue::decode(object).isNull()) [[unlikely]]
         IPINT_THROW(Wasm::ExceptionType::NullAccess);
-    IPINT_RETURN(Wasm::structGet(object, fieldIndex));
+
+    Wasm::structGet(object, fieldIndex, result);
+    IPINT_END();
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(struct_get_s, EncodedJSValue object, uint32_t fieldIndex)
+WASM_IPINT_EXTERN_CPP_DECL(struct_get_s, EncodedJSValue object, uint32_t fieldIndex, IPIntStackEntry* result)
 {
     UNUSED_PARAM(instance);
     if (JSValue::decode(object).isNull()) [[unlikely]]
         IPINT_THROW(Wasm::ExceptionType::NullAccess);
 
-    EncodedJSValue value = Wasm::structGet(object, fieldIndex);
+    Wasm::structGet(object, fieldIndex, result);
 
     // sign extension
     JSWebAssemblyStruct* structObject = jsCast<JSWebAssemblyStruct*>(JSValue::decode(object).getObject());
@@ -714,10 +716,11 @@ WASM_IPINT_EXTERN_CPP_DECL(struct_get_s, EncodedJSValue object, uint32_t fieldIn
     ASSERT(type.is<Wasm::PackedType>());
     size_t elementSize = type.as<Wasm::PackedType>() == Wasm::PackedType::I8 ? sizeof(uint8_t) : sizeof(uint16_t);
     uint8_t bitShift = (sizeof(uint32_t) - elementSize) * 8;
-    int32_t result = static_cast<int32_t>(value);
-    result = result << bitShift;
+    int32_t value = static_cast<int32_t>(result->i64);
+    value = value << bitShift;
 
-    IPINT_RETURN(static_cast<EncodedJSValue>(result >> bitShift));
+    result->i64 = static_cast<EncodedJSValue>(value >> bitShift);
+    IPINT_END();
 }
 
 WASM_IPINT_EXTERN_CPP_DECL(struct_set, EncodedJSValue object, uint32_t fieldIndex, IPIntStackEntry* sp)

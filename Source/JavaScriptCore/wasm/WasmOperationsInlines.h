@@ -36,6 +36,7 @@
 #include "JSWebAssemblyStruct.h"
 #include "TypedArrayController.h"
 #include "WaiterListManager.h"
+#include "WasmIPIntGenerator.h"
 #include "WasmModuleInformation.h"
 #include "WasmTypeDefinition.h"
 
@@ -495,6 +496,28 @@ inline EncodedJSValue structGet(EncodedJSValue encodedStructReference, uint32_t 
     ASSERT(structureAsObject->inherits<JSWebAssemblyStruct>());
     JSWebAssemblyStruct* structPointer = jsCast<JSWebAssemblyStruct*>(structureAsObject);
     return structPointer->get(fieldIndex);
+}
+
+inline void structGet(EncodedJSValue encodedStructReference, uint32_t fieldIndex, IPInt::IPIntStackEntry* result)
+{
+    auto structReference = JSValue::decode(encodedStructReference);
+    ASSERT(structReference.isObject());
+    JSObject* structureAsObject = jsCast<JSObject*>(structReference);
+    ASSERT(structureAsObject->inherits<JSWebAssemblyStruct>());
+    JSWebAssemblyStruct* structPointer = jsCast<JSWebAssemblyStruct*>(structureAsObject);
+
+    // Check if this is a v128 field
+    Wasm::FieldType field = structPointer->fieldType(fieldIndex);
+    if (field.type.is<Wasm::Type>() && field.type.as<Wasm::Type>().kind == Wasm::TypeKind::V128) {
+        // For v128 types, get the vector value and store it in the result location
+        v128_t vectorValue = structPointer->getVector(fieldIndex);
+        result->v128 = vectorValue;
+        return;
+    }
+
+    // For non-v128 types, use the regular getter and store as i64
+    EncodedJSValue value = structPointer->get(fieldIndex);
+    result->i64 = value;
 }
 
 inline void structSet(EncodedJSValue encodedStructReference, uint32_t fieldIndex, EncodedJSValue argument)
