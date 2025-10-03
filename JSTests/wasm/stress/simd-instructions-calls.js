@@ -1,9 +1,10 @@
-//@ requireOptions("--useWasmSIMD=1", "--useWasmTailCalls=1")
+//@ requireOptions("--useWasmSIMD=1", "--useWasmTailCalls=1", "--useDollarVM=1", "--useOMGInlining=0")
 //@ skip if !$isSIMDPlatform
 import { instantiate } from "../wabt-wrapper.js"
 import * as assert from "../assert.js"
 
 const verbose = false;
+const verboseTier = false;
 
 function logV(...args) {
     if (verbose)
@@ -210,41 +211,96 @@ function generateInputs(params) {
     });
 }
 
-function buildWAT(callOp, testCases) {
+// Helper to generate tiering loop code
+function generateTieringCode(hot, funcId) {
+    let code = '';
+    if (hot) {
+        code += `        (local $i i32)\n`;
+    }
+    code += `        ;; Function ID ${funcId}\n`;
+    code += `        (call $logOMG (i32.const ${funcId}) (call $isOMG))\n`;
+    if (hot) {
+        code += `        (loop $inner
+            local.get $i
+            i32.const 1
+            i32.add
+            local.tee $i
+            i32.const 50
+            i32.lt_s
+            br_if $inner
+        )
+`;
+    }
+    return code;
+}
+
+function buildCalleeModule(callOp, testCases, hot) {
+    let imports = `    (import "m" "isOMG" (func $isOMG (result i32)))
+    (import "m" "logOMG" (func $logOMG (param i32 i32)))
+`;
+    let functions = '';
+
+    for (const testCase of testCases) {
+        const calleeName = `${testCase.name}_callee`;
+        const funcId = testCases.indexOf(testCase) * 2;
+
+        functions += generateSignature(calleeName, testCase.signature.params, testCase.signature.results) + '\n';
+        functions += generateTieringCode(hot, funcId);
+        functions += '        ' + generateCalleeBody(testCase.resultMapping) + '\n';
+        functions += '    )\n';
+        functions += `    (export "${testCase.name}_callee" (func $${calleeName}))\n\n`;
+    }
+
+    return `
+(module
+${imports}
+${functions}
+)
+`;
+}
+
+function buildCallerModule(callOp, testCases, hot) {
+    let imports = `    (import "m" "isOMG" (func $isOMG (result i32)))
+    (import "m" "logOMG" (func $logOMG (param i32 i32)))
+`;
+
+    // Import all callees
+    for (const testCase of testCases) {
+        const calleeName = `${testCase.name}_callee`;
+        const paramStr = testCase.signature.params.map(type => `(param ${type})`).join(' ');
+        const resultStr = testCase.signature.results.map(type => `(result ${type})`).join(' ');
+        imports += `    (import "callees" "${testCase.name}_callee" (func $${calleeName} ${paramStr} ${resultStr}))\n`;
+    }
+
     let functions = '';
     let exports = '';
 
     for (const testCase of testCases) {
-        const calleeName = `${testCase.name}_callee`;
         const callerName = `${testCase.name}_caller`;
+        const funcId = testCases.indexOf(testCase) * 2 + 1;
 
-        // Generate callee function
-        functions += generateSignature(calleeName, testCase.signature.params, testCase.signature.results) + '\n';
-        functions += '        ' + generateCalleeBody(testCase.resultMapping) + '\n';
-        functions += '    )\n\n';
-
-        // Generate caller function (same result signature as callee)
+        // Generate caller function
         functions += `    (func $${callerName} ${testCase.signature.results.map(type => `(result ${type})`).join(' ')}\n`;
+        functions += generateTieringCode(hot, funcId);
         functions += generateCallerBody(callOp, testCase) + '\n';
         functions += '    )\n\n';
 
-        // Generate export wrapper (just calls caller and stores results)
+        // Generate export wrapper
         exports += `    (func (export "${testCase.name}") (param $result_addr i32)\n`;
 
-        // Add local declarations for temporary storage
+        // Local declarations for temporary storage
         for (let i = 0; i < testCase.signature.results.length; i++) {
-            const type = testCase.signature.results[i];
-            exports += `        (local $temp${i} ${type})\n`;
+            exports += `        (local $temp${i} ${testCase.signature.results[i]})\n`;
         }
 
         exports += `        (call $${callerName})\n`;
 
-        // Pop results from stack in reverse order into locals
+        // Pop results into locals in reverse order
         for (let i = testCase.signature.results.length - 1; i >= 0; i--) {
             exports += `        (local.set $temp${i})\n`;
         }
 
-        // Store results to memory with 16-byte spacing, in forward order
+        // Store results to memory with 16-byte spacing
         for (let i = 0; i < testCase.signature.results.length; i++) {
             const offset = i * 16;
             const type = testCase.signature.results[i];
@@ -255,6 +311,7 @@ function buildWAT(callOp, testCases) {
 
     return `
 (module
+${imports}
     (memory (export "memory") 1)
 
 ${functions}
@@ -263,35 +320,73 @@ ${exports}
 `;
 }
 
-async function runTests(callOp, testCases) {
-    const wat = buildWAT(callOp, testCases);
-    logV(`\n=== Generated WAT for ${callOp} ===`);
-    logV(wat);
-    logV('=== End WAT ===\n');
+async function runTests(callOp, testCases, tieringMode = 'none') {
+    if (tieringMode === 'none') {
+        // Skip the 'none' mode since we're focusing on cross-tier testing
+        return;
+    }
 
-    const instance = await instantiate(wat, {}, { simd: true, tail_call: true });
-    const { memory } = instance.exports;
+    const hotCallee = tieringMode === 'hot_callee';
+    const hotCaller = tieringMode === 'hot_caller';
+
+    const watCallee = buildCalleeModule(callOp, testCases, hotCallee);
+    const watCaller = buildCallerModule(callOp, testCases, hotCaller);
+
+    logV(`\n=== Generated Callee WAT for ${callOp} (${tieringMode}) ===`);
+    logV(watCallee);
+    logV('=== End Callee WAT ===\n');
+    logV(`\n=== Generated Caller WAT for ${callOp} (${tieringMode}) ===`);
+    logV(watCaller);
+    logV('=== End Caller WAT ===\n');
+
+    let omgTracker = {};
+    let currentIteration = 0;
+
+    function logOMG(funcId, isOMG) {
+        if (isOMG && !omgTracker[funcId]) {
+            omgTracker[funcId] = true;
+            if (verboseTier)
+                print(`Function ${funcId} reached OMG at iteration ${currentIteration} (${tieringMode})`);
+        }
+    }
+
+    const imports = {
+        m: {
+            isOMG: $vm.omgTrue,
+            logOMG: logOMG
+        }
+    };
+
+    // First instantiate the callee module
+    const calleeInstance = await instantiate(watCallee, imports, { simd: true, tail_call: true });
+
+    // Create imports object for caller module that includes the callee exports
+    const calleeExports = {};
+    for (const testCase of testCases) {
+        calleeExports[`${testCase.name}_callee`] = calleeInstance.exports[`${testCase.name}_callee`];
+    }
+
+    // Then instantiate the caller module with callee imports
+    const callerInstance = await instantiate(watCaller, {
+        ...imports,
+        callees: calleeExports
+    }, { simd: true, tail_call: true });
+
+    const { memory } = callerInstance.exports;
 
     const f64View = new Float64Array(memory.buffer);
     const i32View = new Int32Array(memory.buffer);
     const i64View = new BigInt64Array(memory.buffer);
 
-    function getI32x4(byteOffset) {
+    const getI32x4 = (byteOffset) => {
         const i32Offset = byteOffset / 4;
         return [i32View[i32Offset], i32View[i32Offset + 1], i32View[i32Offset + 2], i32View[i32Offset + 3]];
-    }
+    };
 
-    function getF64(byteOffset) {
-        return f64View[byteOffset / 8];
-    }
+    const getF64 = (byteOffset) => f64View[byteOffset / 8];
+    const getI64 = (byteOffset) => i64View[byteOffset / 8];
 
-    function getI64(byteOffset) {
-        return i64View[byteOffset / 8];
-    }
-
-    function verifyTestCase(testCase, resultAddr, expectedInputs) {
-        // Verify results match expected values based on result mapping
-        // Results are stored at 16-byte intervals: result[0] at offset 0, result[1] at offset 16, etc.
+    function verifyTestCase(testCase, expectedInputs) {
         for (let i = 0; i < testCase.signature.results.length; i++) {
             const offset = i * 16;
             const type = testCase.signature.results[i];
@@ -317,31 +412,33 @@ async function runTests(callOp, testCases) {
         }
     }
 
-    logV(`Testing with ${callOp}...`);
+    logV(`Testing with ${callOp} (${tieringMode})...`);
 
     for (const testCase of testCases) {
         logV(`  Running ${testCase.name}...`);
-        const resultAddr = 0;
         const expectedInputs = generateInputs(testCase.signature.params);
 
-        // Run multiple times to trigger tier-up (100 iterations to ensure BBQ compilation)
         for (let iteration = 0; iteration < wasmTestLoopCount; iteration++) {
+            currentIteration = iteration;
+
             // Clear memory
             for (let i = 0; i < 256; i++)
                 i32View[i] = 0;
 
-            // Run the test case and verify
-            instance.exports[testCase.name](resultAddr);
-            verifyTestCase(testCase, resultAddr, expectedInputs);
+            callerInstance.exports[testCase.name](0);
+            verifyTestCase(testCase, expectedInputs);
         }
     }
 }
 
 async function test() {
     const operations = ['call', 'return_call'];
+    const tieringModes = ['none', 'hot_caller', 'hot_callee'];
 
     for (const callOp of operations) {
-        await runTests(callOp, testCases);
+        for (const tieringMode of tieringModes) {
+            await runTests(callOp, testCases, tieringMode);
+        }
     }
 }
 
