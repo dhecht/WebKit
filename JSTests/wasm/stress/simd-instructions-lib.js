@@ -126,15 +126,16 @@ function scalarToWasmText(val, instruction) {
  * @param {Array} testData - Array of test cases, each containing [instruction, input0, input1, expected]
  * @param {boolean} verbose - Whether to print verbose output
  * @param {string} testType - Description of test type for logging
+ * @param {Object} options - Options to pass to instantiate (e.g., { simd: true, relaxed_simd: true })
  */
-export async function runSIMDTests(testData, verbose = false, testType = "SIMD") {
+export async function runSIMDTests(testData, verbose = false, testType = "SIMD", options = { simd: true }) {
 
     const numInputs = instruction => {
-        if (/\.(bitselect|shuffle|replace_lane)/.test(instruction)) return 3;
-        
+        if (/\.(bitselect|shuffle|replace_lane|relaxed_madd|relaxed_nmadd|relaxed_laneselect|relaxed_dot_i8x16_i7x16_add_s)/.test(instruction)) return 3;
+
         if (/\.(abs|neg|sqrt|not|any_true|popcnt|all_true|bitmask|splat|ceil|floor|trunc|nearest)/.test(instruction)) return 1;
-        if (/\.(demote|promote|convert|extend|extadd_pairwise)/.test(instruction)) return 1;
-        
+        if (/\.(demote|promote|convert|extend|extadd_pairwise|relaxed_trunc)/.test(instruction)) return 1;
+
         // Default: 2-input instructions (binary operations)
         return 2;
     };
@@ -207,7 +208,7 @@ export async function runSIMDTests(testData, verbose = false, testType = "SIMD")
         print(wat);
     }
 
-    const instance = await instantiate(wat, {}, { simd: true });
+    const instance = await instantiate(wat, {}, options);
     const memory = instance.exports.memory;
     const buffer = memory.buffer;
     const u8 = new Uint8Array(buffer);
