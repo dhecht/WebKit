@@ -218,7 +218,13 @@ macro argumINTInitializeDefaultLocals()
     addp 1, MC
     sxb2p argumINTTmp, argumINTTmp
     andp ValueNull, argumINTTmp
+if ARM64 or ARM64E
+    # offlineasm doesn't have xzr so emit it
+    emit "stp x19, xzr, [x9]"
+elsif X86_64
     storep argumINTTmp, [argumINTDst]
+    storep 0, 8[argumINTDst]
+end
     addp LocalSize, argumINTDst
 end
 
