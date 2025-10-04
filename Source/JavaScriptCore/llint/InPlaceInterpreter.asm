@@ -1237,11 +1237,18 @@ if WEBASSEMBLY and (ARM64 or ARM64E or X86_64 or ARMv7)
     unboxWasmCallee(ws0, ws1)
     storep ws0, UnboxedWasmCalleeStackSlot[cfr]
 
+    # OSR Check
+if ARMv7
+    ipintPrologueOSR(500000) # FIXME: support IPInt.
+    break
+else
+    ipintPrologueOSR(5)
+end
     # on x86, PL will hold the PC relative offset for argumINT, then IB will take over
     if X86_64
         initPCRelative(ipint_entry, PL)
     end
-ipintEntry()
+    ipintEntry()
 else
     break
 end
@@ -1256,13 +1263,6 @@ if WEBASSEMBLY and (ARM64 or ARM64E or X86_64 or ARMv7)
     argumINTFinish()
 
     loadp CodeBlock[cfr], wasmInstance
-    # OSR Check
-if ARMv7
-    ipintPrologueOSR(500000) # FIXME: support IPInt.
-    break
-else
-    ipintPrologueOSR(5)
-end
     move sp, PL
 
     loadp Wasm::IPIntCallee::m_bytecode[ws0], PC
