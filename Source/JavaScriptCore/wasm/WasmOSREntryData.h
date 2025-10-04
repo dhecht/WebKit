@@ -42,6 +42,9 @@ public:
         : B3::ValueRep(valueRep)
         , m_type(type)
     {
+        if (isFPR() && !m_type.isFloat() && !m_type.isVector())
+            dataLogLn("XXX: valueRep=", valueRep, " type=", type, " this=", *this);
+        ASSERT(!isFPR() || m_type.isFloat() || m_type.isVector());
     }
 
     B3::Type type() const { return m_type; }

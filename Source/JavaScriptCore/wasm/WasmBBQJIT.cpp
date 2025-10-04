@@ -3439,6 +3439,9 @@ StackMap BBQJIT::makeStackMap(const ControlData& data, Stack& enclosingStack)
             ++numSlots;
         for (unsigned i = 0; i < numSlots; i ++) {
             Value exception = this->exception(entry.controlData);
+            if (toB3Rep(locationOf(exception)).isFPR())
+                dataLogLn("XXX: exception=", exception);
+
             stackMap[stackMapIndex ++] = OSREntryValue(toB3Rep(locationOf(exception)), B3::Int64); // Exceptions are EncodedJSValues, so they are always Int64
         }
     }
