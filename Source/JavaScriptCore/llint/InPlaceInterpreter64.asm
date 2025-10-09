@@ -8090,10 +8090,19 @@ ipintOp(_simd_f32x4_min, macro()
         emit "fmin v16.4s, v16.4s, v17.4s"
     elsif X86_64
         # IEEE 754-2008 semantics: if either operand is NaN, result is NaN
-        # vminps doesn't handle NaN propagation correctly, so we need to check for NaN
-        emit "vcmpunordps %xmm1, %xmm0, %xmm2"  # Check for NaN in either operand
-        emit "vminps %xmm1, %xmm0, %xmm0"       # Compute min (may not handle NaN correctly)
-        emit "vorps %xmm2, %xmm0, %xmm0"        # OR with NaN mask to propagate NaN
+        # vminps doesn't handle NaN propagation correctly on x86
+        # Compute result in both directions to handle NaN asymmetry
+        emit "vminps %xmm1, %xmm0, %xmm2"       # xmm2 = min(xmm0, xmm1)
+        emit "vminps %xmm0, %xmm1, %xmm0"       # xmm0 = min(xmm1, xmm0)
+
+        # OR results to propagate sign bits and NaN bits
+        emit "vorps %xmm0, %xmm2, %xmm2"        # xmm2 = xmm0 | xmm2
+
+        # Canonicalize NaNs by checking for unordered values and clearing mantissa
+        emit "vcmpunordps %xmm2, %xmm0, %xmm0" # xmm0 = NaN mask (all 1's where NaN)
+        emit "vorps %xmm0, %xmm2, %xmm2"        # xmm2 |= NaN mask
+        emit "vpsrld $10, %xmm0, %xmm0"         # Shift mask to clear mantissa bits (f32 uses 10)
+        emit "vpandn %xmm2, %xmm0, %xmm0"       # Clear mantissa to canonicalize NaN
     else
         break # Not implemented
     end
@@ -8110,10 +8119,24 @@ ipintOp(_simd_f32x4_max, macro()
         emit "fmax v16.4s, v16.4s, v17.4s"
     elsif X86_64
         # IEEE 754-2008 semantics: if either operand is NaN, result is NaN
-        # vmaxps doesn't handle NaN propagation correctly, so we need to check for NaN
-        emit "vcmpunordps %xmm1, %xmm0, %xmm2"  # Check for NaN in either operand
-        emit "vmaxps %xmm1, %xmm0, %xmm0"       # Compute max (may not handle NaN correctly)
-        emit "vorps %xmm2, %xmm0, %xmm0"        # OR with NaN mask to propagate NaN
+        # vmaxps doesn't handle NaN propagation correctly on x86
+        # Compute result in both directions to handle NaN asymmetry
+        emit "vmaxps %xmm1, %xmm0, %xmm2"       # xmm2 = max(xmm0, xmm1)
+        emit "vmaxps %xmm0, %xmm1, %xmm0"       # xmm0 = max(xmm1, xmm0)
+
+        # Check for discrepancies by XORing the results
+        emit "vxorps %xmm0, %xmm2, %xmm0"       # xmm0 = xmm0 ^ xmm2
+
+        # OR results to propagate sign bits and NaN bits
+        emit "vorps %xmm0, %xmm2, %xmm2"        # xmm2 = xmm0 | xmm2
+
+        # Propagate discrepancies in sign bit
+        emit "vsubps %xmm0, %xmm2, %xmm2"       # xmm2 = xmm2 - xmm0
+
+        # Canonicalize NaNs by checking for unordered values and clearing mantissa
+        emit "vcmpunordps %xmm2, %xmm0, %xmm0" # xmm0 = NaN mask (all 1's where NaN)
+        emit "vpsrld $10, %xmm0, %xmm0"         # Shift mask to clear mantissa bits (f32 uses 10)
+        emit "vpandn %xmm2, %xmm0, %xmm0"       # Clear mantissa to canonicalize NaN
     else
         break # Not implemented
     end
@@ -8291,10 +8314,19 @@ ipintOp(_simd_f64x2_min, macro()
         emit "fmin v16.2d, v16.2d, v17.2d"
     elsif X86_64
         # IEEE 754-2008 semantics: if either operand is NaN, result is NaN
-        # vminpd doesn't handle NaN propagation correctly, so we need to check for NaN
-        emit "vcmpunordpd %xmm1, %xmm0, %xmm2"  # Check for NaN in either operand
-        emit "vminpd %xmm1, %xmm0, %xmm0"       # Compute min (may not handle NaN correctly)
-        emit "vorpd %xmm2, %xmm0, %xmm0"        # OR with NaN mask to propagate NaN
+        # vminpd doesn't handle NaN propagation correctly on x86
+        # Compute result in both directions to handle NaN asymmetry
+        emit "vminpd %xmm1, %xmm0, %xmm2"       # xmm2 = min(xmm0, xmm1)
+        emit "vminpd %xmm0, %xmm1, %xmm0"       # xmm0 = min(xmm1, xmm0)
+
+        # OR results to propagate sign bits and NaN bits
+        emit "vorpd %xmm0, %xmm2, %xmm2"        # xmm2 = xmm0 | xmm2
+
+        # Canonicalize NaNs by checking for unordered values and clearing mantissa
+        emit "vcmpunordpd %xmm2, %xmm0, %xmm0" # xmm0 = NaN mask (all 1's where NaN)
+        emit "vorpd %xmm0, %xmm2, %xmm2"        # xmm2 |= NaN mask
+        emit "vpsrlq $13, %xmm0, %xmm0"         # Shift mask to clear mantissa bits
+        emit "vpandn %xmm2, %xmm0, %xmm0"       # Clear mantissa to canonicalize NaN
     else
         break # Not implemented
     end
@@ -8311,10 +8343,24 @@ ipintOp(_simd_f64x2_max, macro()
         emit "fmax v16.2d, v16.2d, v17.2d"
     elsif X86_64
         # IEEE 754-2008 semantics: if either operand is NaN, result is NaN
-        # vmaxpd doesn't handle NaN propagation correctly, so we need to check for NaN
-        emit "vcmpunordpd %xmm1, %xmm0, %xmm2"  # Check for NaN in either operand
-        emit "vmaxpd %xmm1, %xmm0, %xmm0"       # Compute max (may not handle NaN correctly)
-        emit "vorpd %xmm2, %xmm0, %xmm0"        # OR with NaN mask to propagate NaN
+        # vmaxpd doesn't handle NaN propagation correctly on x86
+        # Compute result in both directions to handle NaN asymmetry
+        emit "vmaxpd %xmm1, %xmm0, %xmm2"       # xmm2 = max(xmm0, xmm1)
+        emit "vmaxpd %xmm0, %xmm1, %xmm0"       # xmm0 = max(xmm1, xmm0)
+
+        # Check for discrepancies by XORing the results
+        emit "vxorpd %xmm0, %xmm2, %xmm0"       # xmm0 = xmm0 ^ xmm2
+
+        # OR results to propagate sign bits and NaN bits
+        emit "vorpd %xmm0, %xmm2, %xmm2"        # xmm2 = xmm0 | xmm2
+
+        # Propagate discrepancies in sign bit
+        emit "vsubpd %xmm0, %xmm2, %xmm2"       # xmm2 = xmm2 - xmm0
+
+        # Canonicalize NaNs by checking for unordered values and clearing mantissa
+        emit "vcmpunordpd %xmm2, %xmm0, %xmm0" # xmm0 = NaN mask (all 1's where NaN)
+        emit "vpsrlq $13, %xmm0, %xmm0"         # Shift mask to clear mantissa bits
+        emit "vpandn %xmm2, %xmm0, %xmm0"       # Clear mantissa to canonicalize NaN
     else
         break # Not implemented
     end
