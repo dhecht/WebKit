@@ -4370,7 +4370,15 @@ ipintOp(_simd_i8x16_swizzle, macro()
     if ARM64 or ARM64E
         emit "tbl v16.16b, {v16.16b}, v17.16b"
     elsif X86_64
-        emit "vpshufb %xmm1, %xmm0, %xmm0"
+        # vpshufb only checks bit 7 for out-of-bounds (returns 0 if bit 7 is set)
+        # WebAssembly requires returning 0 for any index >= 16
+        # Solution: add 0x70 with unsigned saturation, so any index > 15 sets bit 7
+        # (15 + 0x70 = 0x7F sets bit 7, anything > 15 saturates to 0xFF)
+        emit "movabsq $0x7070707070707070, %rax"
+        emit "vmovq %rax, %xmm2"
+        emit "vpunpcklqdq %xmm2, %xmm2, %xmm2"   # xmm2 = [0x70, 0x70, ..., 0x70] (16 bytes)
+        emit "vpaddusb %xmm2, %xmm1, %xmm1"      # Saturating add to set bit 7 for indices > 15
+        emit "vpshufb %xmm1, %xmm0, %xmm0"       # Now vpshufb will return 0 for out-of-bounds
     else
         break # Not implemented
     end
