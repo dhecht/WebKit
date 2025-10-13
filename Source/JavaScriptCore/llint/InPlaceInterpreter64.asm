@@ -4234,7 +4234,9 @@ ipintOp(_simd_v128_load8_splat_mem, macro()
             emit "dup v16.16b, w1"
         elsif X86_64
             # memoryBase is r14, t0 is eax
-            emit "vpbroadcastb (%r14,%rax), %xmm0"
+            emit "vpinsrb $0, (%r14,%rax), %xmm0, %xmm0"
+            emit "vpxor %xmm1, %xmm1, %xmm1"
+            emit "vpshufb %xmm1, %xmm0, %xmm0"
         else
             break # Not implemented
         end
@@ -4250,7 +4252,9 @@ ipintOp(_simd_v128_load16_splat_mem, macro()
             emit "dup v16.8h, w1"
         elsif X86_64
             # memoryBase is r14, t0 is eax
-            emit "vpbroadcastw (%r14,%rax), %xmm0"
+            emit "vpinsrw $0, (%r14,%rax), %xmm0, %xmm0"
+            emit "vpshuflw $0, %xmm0, %xmm0"
+            emit "vpunpcklqdq %xmm0, %xmm0, %xmm0"
         else
             break # Not implemented
         end
@@ -4267,7 +4271,7 @@ ipintOp(_simd_v128_load32_splat_mem, macro()
         elsif X86_64
             # Load and broadcast 32-bit value directly from memory to all 4 dwords
             # memoryBase is r14, t0 is eax
-            emit "vpbroadcastd (%r14,%rax), %xmm0"
+            emit "vbroadcastss (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4284,7 +4288,7 @@ ipintOp(_simd_v128_load64_splat_mem, macro()
         elsif X86_64
             # Load and broadcast 64-bit value directly from memory to both qwords
             # memoryBase is r14, t0 is eax
-            emit "vpbroadcastq (%r14,%rax), %xmm0"
+            emit "vmovddup (%r14,%rax), %xmm0"
         else
             break # Not implemented
         end
@@ -4397,7 +4401,10 @@ ipintOp(_simd_i8x16_splat, macro()
         emit "dup v16.16b, w0"
     elsif X86_64
         # t0 is eax on X86_64, move to xmm0 and broadcast to all 16 bytes
-        emit "vpbroadcastb %eax, %xmm0"
+        emit "vmovd %eax, %xmm0"
+        emit "vpinsrb $1, %eax, %xmm0, %xmm0"
+        emit "vpshuflw $0, %xmm0, %xmm0"
+        emit "vpunpcklqdq %xmm0, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -4414,8 +4421,10 @@ ipintOp(_simd_i16x8_splat, macro()
     if ARM64 or ARM64E
         emit "dup v16.8h, w0"
     elsif X86_64
-        # t0 is eax on X86_64
-        emit "vpbroadcastw %eax, %xmm0"
+        # t0 is eax on X86_64, move to xmm0 and broadcast to all 8 words
+        emit "vmovd %eax, %xmm0"
+        emit "vpshuflw $0, %xmm0, %xmm0"
+        emit "vpunpcklqdq %xmm0, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -4432,8 +4441,9 @@ ipintOp(_simd_i32x4_splat, macro()
     if ARM64 or ARM64E
         emit "dup v16.4s, w0"
     elsif X86_64
-        # t0 is eax on X86_64
-        emit "vpbroadcastd %eax, %xmm0"
+        # t0 is eax on X86_64, move to xmm0 and broadcast to all 4 dwords
+        emit "vmovd %eax, %xmm0"
+        emit "vshufps $0, %xmm0, %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -4450,8 +4460,9 @@ ipintOp(_simd_i64x2_splat, macro()
     if ARM64 or ARM64E
         emit "dup v16.2d, x0"
     elsif X86_64
-        # t0 is rax on X86_64, move to xmm0 and broadcast to both qwords
-        emit "vpbroadcastq %rax, %xmm0"
+        # t0 is rax on X86_64
+        emit "vmovq %rax, %xmm0"
+        emit "vmovddup %xmm0, %xmm0"
     else
         break # Not implemented
     end
@@ -8432,9 +8443,9 @@ ipintOp(_simd_i32x4_trunc_sat_f32x4_s, macro()
         emit "vandnps %xmm0, %xmm1, %xmm1"                   # xmm1 = src with NaN lanes cleared
         
         # Load 0x1.0p+31f (2147483648.0f) constant
-        emit "movabsq $0x4f0000004f000000, %rax"             # 0x1.0p+31f in both lanes
-        emit "vmovq %rax, %xmm2"
-        emit "vpunpcklqdq %xmm2, %xmm2, %xmm2"               # Broadcast to all 4 lanes
+        emit "movl $0x4f000000, %eax"                        # 0x1.0p+31f
+        emit "vmovd %eax, %xmm2"
+        emit "vshufps $0, %xmm2, %xmm2, %xmm2"               # Broadcast to all 4 lanes
         
         emit "vcmpnltps %xmm2, %xmm1, %xmm3"                 # xmm3 = positive overflow mask (src >= 0x80000000)
         emit "vcvttps2dq %xmm1, %xmm1"                       # Convert with overflow saturated to 0x80000000
@@ -8457,10 +8468,10 @@ ipintOp(_simd_i32x4_trunc_sat_f32x4_u, macro()
         emit "vxorps %xmm1, %xmm1, %xmm1"                    # xmm1 = 0
         emit "vmaxps %xmm1, %xmm0, %xmm0"                    # Clear NaN and negatives
         
-        # Load 2147483647.0f constant
-        emit "movabsq $0x4effffff4effffff, %rax"             # 2147483647.0f in both lanes
-        emit "vmovq %rax, %xmm2"
-        emit "vpunpcklqdq %xmm2, %xmm2, %xmm2"               # Broadcast to all 4 lanes
+        # Load 2147483647.0f constant (rounds to 2147483648.0f in float32)
+        emit "movl $0x4f000000, %eax"                        # 2147483647.0f
+        emit "vmovd %eax, %xmm2"
+        emit "vshufps $0, %xmm2, %xmm2, %xmm2"               # Broadcast to all 4 lanes
         
         emit "vmovaps %xmm0, %xmm3"                          # xmm3 = src copy
         emit "vsubps %xmm2, %xmm3, %xmm3"                    # xmm3 = src - 2147483647.0f
@@ -8611,16 +8622,17 @@ ipintOp(_simd_f64x2_convert_low_i32x4_u, macro()
         # See MacroAssembler::vectorConvertLowUnsignedInt32
         # Load 0x43300000 (high32Bits) and splat to all lanes
         emit "movl $0x43300000, %eax"
-        emit "vpbroadcastd %eax, %xmm1"                   # xmm1 = [0x43300000, 0x43300000, 0x43300000, 0x43300000]
-        
+        emit "vmovd %eax, %xmm1"
+        emit "vpshufd $0, %xmm1, %xmm1"
+
         # Unpack lower 2 i32 with high32Bits
         emit "vunpcklps %xmm1, %xmm0, %xmm0"              # Interleave: [i32_0, 0x43300000, i32_1, 0x43300000]
-        
+
         # Load 0x1.0p+52 mask
         emit "movabsq $0x4330000000000000, %rax"          # 0x1.0p+52 as double
         emit "vmovq %rax, %xmm1"
         emit "vpunpcklqdq %xmm1, %xmm1, %xmm1"            # xmm1 = [0x1.0p+52, 0x1.0p+52]
-        
+
         # Subtract to get the correct unsigned values
         emit "vsubpd %xmm1, %xmm0, %xmm0"
     else
