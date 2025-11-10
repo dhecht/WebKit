@@ -807,9 +807,22 @@ private:
         return m_map[groupForTmp(tmp)].assigned;
     }
 
-    StackSlot* spillSlot(Tmp tmp)
+    bool wasSpilled(Tmp tmp)
     {
-        return m_map[groupForTmp(tmp)].spillSlot;
+        return m_map[groupForTmp(tmp)].stage == Stage::Spilled;
+    }
+
+    StackSlot* ensureSpillSlot(Tmp tmp)
+    {
+        TmpData& tmpData = m_map[groupForTmp(tmp)];
+        ASSERT(tmpData.stage == Stage::Spilled);
+
+        if (tmpData.spillSlot)
+            return tmpData.spillSlot;
+
+        tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
+        m_stats[tmp.bank()].numSpillStackSlots++;
+        return tmpData.spillSlot;
     }
 
     float adjustedBlockFrequency(BasicBlock* block)
@@ -1807,15 +1820,20 @@ private:
     }
 
     template <Bank bank>
+    StackSlot* ensureSpillSlot(Tmp tmp, TmpData& tmpData)
+    {
+        ASSERT(tmpData.stage == Stage::Spilled);
+        if (tmpData.spillSlot)
+            return tmpData.spillSlot;
+
+        tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
+        m_stats[bank].numSpillStackSlots++;
+        return tmpData.spillSlot;        
+    }
+
+    template <Bank bank>
     void emitSpillCodeAndEnqueueNewTmps()
     {
-        m_code.forEachTmp<bank>([&](Tmp tmp) {
-            TmpData& tmpData = m_map[tmp];
-            if (tmpData.stage == Stage::Spilled && !tmpData.spillSlot) {
-                tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
-                m_stats[bank].numSpillStackSlots++;
-            }
-        });
         for (BasicBlock* block : m_code) {
             Point positionOfHead = this->positionOfHead(block);
             for (unsigned instIndex = 0; instIndex < block->size(); ++instIndex) {
@@ -1847,8 +1865,7 @@ private:
                         if (arg.isReg())
                             return;
 
-                        StackSlot* spilled = spillSlot(arg.tmp());
-                        if (!spilled)
+                        if (!wasSpilled(arg.tmp()))
                             return;
                         bool needScratchIfSpilledInPlace = false;
                         if (!inst.admitsStack(arg)) {
@@ -1916,6 +1933,7 @@ private:
                         if (spillWidth != Width32)
                             canUseMove32IfDidSpill = false;
 
+                        StackSlot* spilled = ensureSpillSlot(arg.tmp());
                         spilled->ensureSize(canUseMove32IfDidSpill ? 4 : bytesForWidth(width));
                         didSpill = true;
                         if (needScratchIfSpilledInPlace) {
@@ -1950,8 +1968,7 @@ private:
                 inst.forEachTmp([&] (Tmp& tmp, Arg::Role role, Bank argBank, Width) {
                     if (tmp.isReg() || argBank != bank)
                         return;
-                    StackSlot* spilled = spillSlot(tmp);
-                    if (!spilled)
+                    if (!wasSpilled(tmp))
                         return;
 
                     Opcode move = moveOpcode(tmp);
@@ -1960,7 +1977,6 @@ private:
                     if (role == Arg::Scratch)
                         return;
 
-                    Arg arg = Arg::stack(spilled);
                     if (Arg::isAnyUse(role)) {
                         auto tryRematerialize = [&]() {
                             if constexpr (bank == GP) {
@@ -1985,11 +2001,13 @@ private:
                         };
 
                         if (!tryRematerialize()) {
+                            Arg arg = Arg::stack(ensureSpillSlot(tmp));
                             m_insertionSets[block].insert(instIndex, spillLoad, move, inst.origin, arg, tmp);
                             m_stats[bank].numLoadSpill++;
                         }
                     }
                     if (Arg::isAnyDef(role)) {
+                        Arg arg = Arg::stack(ensureSpillSlot(tmp));                        
                         m_insertionSets[block].insert(instIndex + 1, spillStore, move, inst.origin, tmp, arg);
                         m_stats[bank].numStoreSpill++;
                     }
@@ -2004,7 +2022,7 @@ private:
         for (auto& metadata : m_splitMetadata) {
             if (!metadata.originalTmp)
                 continue;
-            if (spillSlot(metadata.originalTmp))
+            if (wasSpilled(metadata.originalTmp))
                 continue; // If spilled, better to not split after all. See spill().
             ASSERT(assignedReg(metadata.originalTmp));
             // Emit moves to and from the gapTmps (or stack stot) that fill the split holes.
@@ -2018,9 +2036,9 @@ private:
                     Inst& inst = block->at(instIndex);
 
                     Arg arg = gapTmp;
-                    StackSlot* spilled = spillSlot(gapTmp);
-                    if (spilled)
-                        arg = Arg::stack(spilled);
+                    if (wasSpilled(gapTmp))
+                        arg = Arg::stack(ensureSpillSlot(gapTmp));
+
                     Opcode move = moveOpcode(gapTmp);
                     m_insertionSets[block].insert(instIndex, splitMoveFrom, move, inst.origin, metadata.originalTmp, arg);
                     m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, inst.origin, arg, metadata.originalTmp);
