@@ -232,9 +232,16 @@ public:
     {
         m_stackIsAllocated = value;
     }
-    
+
     bool stackIsAllocated() const { return m_stackIsAllocated; }
-    
+
+    void setFoundIntraBlockSplitOpportunities(bool value)
+    {
+        m_foundIntraBlockSplitOpportunities = value;
+    }
+
+    bool foundIntraBlockSplitOpportunities() const { return m_foundIntraBlockSplitOpportunities; }
+
     // This sets the callee save registers.
     void setCalleeSaveRegisterAtOffsetList(RegisterAtOffsetList&&, StackSlot*);
 
@@ -402,6 +409,7 @@ private:
     bool m_stackIsAllocated { false };
     bool m_preserveB3Origins { true };
     bool m_forceIRC { false };
+    bool m_foundIntraBlockSplitOpportunities { false };
     RegisterAtOffsetList m_uncorrectedCalleeSaveRegisterAtOffsetList;
     RegisterSetBuilder m_calleeSaveRegisters;
     StackSlot* m_calleeSaveStackSlot { nullptr };

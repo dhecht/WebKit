@@ -646,9 +646,17 @@ public:
 
         // Dump IR if we found intra-block split opportunities
         if (m_foundIntraBlockOpportunities && Options::airAnalyzeIntraBlockSplitOpportunities()) {
-            dataLogLn("\n=== AIR BEFORE REGISTER ASSIGNMENT (showing Tmps) ===");
+            dataLogLn("\n=== SPILL SLOT MAPPING FOR OPPORTUNITIES ===");
+            for (Tmp tmp : m_intraBlockOpportunityTmps) {
+                StackSlot* slot = m_map[tmp].spillSlot;
+                dataLogLn("  ", tmp, " -> ", pointerDump(slot), " (", slot ? slot->byteSize() : 0, " bytes)");
+            }
+            dataLogLn("\n=== AIR BEFORE REGISTER ASSIGNMENT (showing Tmps and StackSlots) ===");
             dataLogLn(m_code);
             dataLogLn("=== END IR ===\n");
+
+            // Signal to fixObviousSpills that we found opportunities
+            m_code.setFoundIntraBlockSplitOpportunities(true);
         }
 
         assignRegisters();
@@ -1818,6 +1826,9 @@ private:
             m_stats[bank].numIntraBlockSplitOpportunities++;
             m_stats[bank].totalIntraBlockSplitBenefit += static_cast<unsigned>(totalBenefit);
 
+            // Track this tmp for later spill slot reporting
+            m_intraBlockOpportunityTmps.append(tmp);
+
             dataLogLn("\n=== INTRA-BLOCK SPLIT OPPORTUNITY ===");
             dataLogLn("Spilled: ", tmp, " with ", clusters.size(), " use clusters (total benefit: ", totalBenefit, ")");
 
@@ -2235,6 +2246,7 @@ private:
     std::array<AirAllocateRegistersStats, numBanks> m_stats = { GP, FP };
     bool m_didSpill { false };
     bool m_foundIntraBlockOpportunities { false };
+    Vector<Tmp> m_intraBlockOpportunityTmps; // Track tmps with split opportunities for later reporting
 };
 
 } // namespace JSC::B3::Air::Greedy

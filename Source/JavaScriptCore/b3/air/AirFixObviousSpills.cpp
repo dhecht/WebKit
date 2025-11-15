@@ -32,6 +32,7 @@
 #include "AirCode.h"
 #include "AirInstInlines.h"
 #include "AirPhaseScope.h"
+#include "Options.h"
 #include <wtf/IndexMap.h>
 #include <wtf/ListDump.h>
 
@@ -664,6 +665,16 @@ void fixObviousSpills(Code& code)
 
     FixObviousSpills fixObviousSpills(code);
     fixObviousSpills.run();
+
+    if (AirFixObviousSpillsInternal::verbose)
+        dataLog("Code after fixObviousSpills:\n", code);
+
+    // Dump IR after fixObviousSpills only if we found intra-block split opportunities
+    if (Options::airAnalyzeIntraBlockSplitOpportunities() && code.foundIntraBlockSplitOpportunities()) {
+        dataLogLn("\n=== AIR AFTER fixObviousSpills ===");
+        dataLogLn(code);
+        dataLogLn("=== END IR (after fixObviousSpills) ===\n");
+    }
 }
 
 } } } // namespace JSC::B3::Air
