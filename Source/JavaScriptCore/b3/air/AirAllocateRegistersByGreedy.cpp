@@ -41,6 +41,7 @@
 #include "AirTmpMap.h"
 #include "AirTmpWidthInlines.h"
 #include "AirUseCounts.h"
+#include "Options.h"
 #include <wtf/IntervalSet.h>
 #include <wtf/IterationStatus.h>
 #include <wtf/ListDump.h>
@@ -642,6 +643,13 @@ public:
 
         validateAssignments<GP>();
         validateAssignments<FP>();
+
+        // Dump IR if we found intra-block split opportunities
+        if (m_foundIntraBlockOpportunities && Options::airAnalyzeIntraBlockSplitOpportunities()) {
+            dataLogLn("\n=== AIR BEFORE REGISTER ASSIGNMENT (showing Tmps) ===");
+            dataLogLn(m_code);
+            dataLogLn("=== END IR ===\n");
+        }
 
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
@@ -1751,6 +1759,80 @@ private:
         return 16;
     }
 
+    void analyzeIntraBlockSplitOpportunity(Tmp tmp, TmpData&)
+    {
+        if (!Options::airAnalyzeIntraBlockSplitOpportunities())
+            return;
+
+        // Look for blocks where this tmp has dense clusters of uses
+        // that could benefit from intra-block splitting
+
+        struct BlockUseCluster {
+            BasicBlock* block;
+            unsigned firstUse;
+            unsigned lastUse;
+            unsigned useCount;
+
+            unsigned clusterSize() const { return lastUse - firstUse + 1; }
+            float useDensity() const { return float(useCount) / clusterSize(); }
+        };
+
+        Vector<BlockUseCluster> clusters;
+
+        for (BasicBlock* block : m_code) {
+            unsigned firstUse = UINT_MAX;
+            unsigned lastUse = 0;
+            unsigned useCount = 0;
+
+            for (unsigned instIndex = 0; instIndex < block->size(); ++instIndex) {
+                Inst& inst = block->at(instIndex);
+
+                inst.forEachTmp([&](Tmp t, Arg::Role role, Bank, Width) {
+                    if (t == tmp && (Arg::isAnyUse(role) || Arg::isAnyDef(role))) {
+                        firstUse = std::min(firstUse, instIndex);
+                        lastUse = std::max(lastUse, instIndex);
+                        useCount++;
+                    }
+                });
+            }
+
+            // Record if we found a dense use cluster
+            if (useCount >= 2) {
+                unsigned clusterSize = lastUse - firstUse + 1;
+                if (clusterSize >= 2) {
+                    BlockUseCluster cluster { block, firstUse, lastUse, useCount };
+                    clusters.append(cluster);
+                }
+            }
+        }
+
+        // Only report if we have multiple clusters (otherwise no benefit to splitting)
+        if (clusters.size() >= 2) {
+            // Calculate total benefit
+            float totalBenefit = 0;
+            for (auto& cluster : clusters)
+                totalBenefit += cluster.block->frequency() * cluster.useCount * cluster.useDensity();
+
+            // Update stats
+            Bank bank = tmp.bank();
+            m_stats[bank].numIntraBlockSplitOpportunities++;
+            m_stats[bank].totalIntraBlockSplitBenefit += static_cast<unsigned>(totalBenefit);
+
+            dataLogLn("\n=== INTRA-BLOCK SPLIT OPPORTUNITY ===");
+            dataLogLn("Spilled: ", tmp, " with ", clusters.size(), " use clusters (total benefit: ", totalBenefit, ")");
+
+            for (auto& cluster : clusters) {
+                dataLogLn("  BB", *cluster.block, " [inst ", cluster.firstUse, "-", cluster.lastUse,
+                         "] ", cluster.useCount, " uses, density=", cluster.useDensity(),
+                         ", freq=", cluster.block->frequency());
+            }
+
+            // Mark that we found an opportunity so we can dump IR later
+            m_foundIntraBlockOpportunities = true;
+            dataLogLn("");
+        }
+    }
+
     void spill(Tmp tmp, TmpData& tmpData)
     {
         RELEASE_ASSERT(tmpData.spillCost() != unspillableCost);
@@ -1758,7 +1840,12 @@ private:
         ASSERT(!tmpData.isGroup()); // Should have been split
         tmpData.stage = Stage::Spilled;
 
+        m_stats[tmp.bank()].numSpilledTmps++;
+
         dataLogLnIf(verbose(), "Spilled ", tmp);
+
+        // Analyze if this spill could have been avoided with intra-block splitting
+        analyzeIntraBlockSplitOpportunity(tmp, tmpData);
         if (tmpData.splitMetadataIndex) {
             // Splitting didn't prevent originalTmp from spilling after all, so no point assigning
             // registers or stack slots to the gap tmps for this split.
@@ -2147,6 +2234,7 @@ private:
     TmpWidth m_tmpWidth;
     std::array<AirAllocateRegistersStats, numBanks> m_stats = { GP, FP };
     bool m_didSpill { false };
+    bool m_foundIntraBlockOpportunities { false };
 };
 
 } // namespace JSC::B3::Air::Greedy

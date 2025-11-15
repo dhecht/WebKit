@@ -41,12 +41,15 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numSpillTmps)                         \
     macro(numSplitTmps)                         \
     macro(numTmpsOut)                           \
+    macro(numSpilledTmps)                       \
+    macro(numIntraBlockSplitOpportunities)      \
     macro(numSpillStackSlots)                   \
     macro(numLoadSpill)                         \
     macro(numStoreSpill)                        \
     macro(numMoveSpillSpillInsts)               \
     macro(numRematerializeConst)                \
     macro(maxLiveRangeSize)                     \
+    macro(totalIntraBlockSplitBenefit)          \
 
 class AirAllocateRegistersStats {
     WTF_MAKE_NONCOPYABLE(AirAllocateRegistersStats);
