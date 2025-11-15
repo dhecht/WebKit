@@ -371,6 +371,16 @@ def generate_report(analysis: Dict) -> str:
     report_lines.append("JSC INTRA-BLOCK SPLIT OPPORTUNITY ANALYSIS REPORT")
     report_lines.append("=" * 80)
     report_lines.append("")
+    report_lines.append("This report analyzes intra-block split opportunities identified by JSC's")
+    report_lines.append("register allocator and determines which ones were optimized away by the")
+    report_lines.append("fixObviousSpills pass.")
+    report_lines.append("")
+    report_lines.append("KEY INSIGHT:")
+    report_lines.append("- If fixObviousSpills optimized all blocks for an opportunity, splitting")
+    report_lines.append("  is NOT needed (the redundant spills were already removed).")
+    report_lines.append("- If blocks remain unfixed, intra-block splitting could provide benefit")
+    report_lines.append("  by keeping the value in a register within those hot blocks.")
+    report_lines.append("")
 
     # Overall statistics
     report_lines.append("OVERALL STATISTICS")
@@ -380,6 +390,9 @@ def generate_report(analysis: Dict) -> str:
                        f"({100.0 * analysis['opportunities_with_some_fixes'] / max(1, analysis['total_opportunities']):.1f}%)")
     report_lines.append(f"Opportunities fully fixed: {analysis['opportunities_fully_fixed']} "
                        f"({100.0 * analysis['opportunities_fully_fixed'] / max(1, analysis['total_opportunities']):.1f}%)")
+    not_fixed = analysis['total_opportunities'] - analysis['opportunities_with_some_fixes']
+    report_lines.append(f"Opportunities NOT fixed at all: {not_fixed} "
+                       f"({100.0 * not_fixed / max(1, analysis['total_opportunities']):.1f}%)")
     report_lines.append("")
 
     # Top 10 opportunities
