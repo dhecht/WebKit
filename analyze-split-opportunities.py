@@ -187,18 +187,24 @@ def parse_air_instruction(line: str) -> Optional[Tuple[int, str, str, float]]:
     return None
 
 
-def parse_test_name(lines: List[str], start_idx: int, look_back: int = 100) -> Optional[str]:
+def parse_test_name(lines: List[str], start_idx: int, look_back: int = 100000) -> Optional[str]:
     """
     Try to find a test name by looking backwards from the current position.
     Searches for patterns like:
+    - "Running <test-name>:"
     - "Running: <test-name>"
     - "Test: <test-name>"
     - "<test-name>.js"
     Returns test name if found, None otherwise.
     """
     # Look backwards from start_idx
-    for i in range(max(0, start_idx - look_back), start_idx):
+    for i in range(start_idx - 1, max(0, start_idx - look_back), -1):
         line = lines[i]
+
+        # Pattern: Running test-name: (JetStream3 format)
+        match = re.match(r'^Running\s+([^:]+):', line)
+        if match:
+            return match.group(1).strip()
 
         # Pattern: Running: testname or Test: testname
         match = re.search(r'(?:Running|Test):\s*(\S+)', line)
