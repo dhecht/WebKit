@@ -66,6 +66,8 @@ class SplitOpportunity:
     clusters: List[UseCluster] = field(default_factory=list)
     spill_slot: Optional[str] = None
     basic_blocks: Set[int] = field(default_factory=set)
+    test_name: Optional[str] = None  # JS3 test name (if available)
+    function_name: Optional[str] = None  # Function name (if available)
 
 
 @dataclass
@@ -79,6 +81,23 @@ class SpillSlotLoad:
 
 
 @dataclass
+class IRBasicBlock:
+    """Represents a basic block in the IR."""
+    bb_num: int
+    frequency: float
+    instructions: List[str] = field(default_factory=list)
+    line_start: int = 0
+    line_end: int = 0
+
+
+@dataclass
+class IRSection:
+    """Complete IR section (before or after fixObviousSpills)."""
+    blocks: Dict[int, IRBasicBlock] = field(default_factory=dict)  # bb_num -> block
+    is_after_fix: bool = False
+
+
+@dataclass
 class AnalysisResult:
     """Results of analyzing a single compilation unit."""
     opportunities: List[SplitOpportunity]
@@ -86,6 +105,10 @@ class AnalysisResult:
     loads_before: List[SpillSlotLoad]
     loads_after: List[SpillSlotLoad]
     fixed_loads: Dict[Tuple[int, str], bool]  # (bb_num, spill_slot) -> was_fixed
+    ir_before: Optional[IRSection] = None
+    ir_after: Optional[IRSection] = None
+    test_name: Optional[str] = None  # JS3 test name (if available)
+    compilation_unit: Optional[str] = None  # Compilation unit identifier (if available)
 
 
 def parse_opportunity_header(line: str) -> Optional[Tuple[str, int, float]]:
@@ -137,24 +160,81 @@ def parse_spill_mapping(line: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def parse_air_instruction(line: str) -> Optional[Tuple[int, str, str]]:
+def parse_air_instruction(line: str) -> Optional[Tuple[int, str, str, float]]:
     """
     Parse an AIR instruction line to extract BB number and check for spill slot loads.
     Example: "Air BB#10: ; frequency = 1.000000"
     Example: "Air     Move (spill42), %rax"
     Example: "Air     Move32 (spill42), %x0"
-    Returns: (bb_num, instruction, spill_slot) or None
+    Returns: (bb_num, instruction, spill_slot, frequency) or None
     """
-    # Check for BB header
+    # Check for BB header with frequency
+    bb_match = re.match(r'Air BB#(\d+):\s*;\s*frequency\s*=\s*([\d.]+)', line)
+    if bb_match:
+        return int(bb_match.group(1)), '', '', float(bb_match.group(2))
+
+    # Check for BB header without frequency
     bb_match = re.match(r'Air BB#(\d+):', line)
     if bb_match:
-        return int(bb_match.group(1)), '', ''
+        return int(bb_match.group(1)), '', '', 1.0
 
     # Check for Move instruction with spill slot as source
     # Matches: Move (spillX), Move32 (spillX), Move64 (spillX), Move<...> (spillX)
     inst_match = re.match(r'Air\s+Move(?:\d+|<[^>]+>)?\s+\((spill\d+)\)', line)
     if inst_match:
-        return -1, line.strip(), inst_match.group(1)
+        return -1, line.strip(), inst_match.group(1), 0.0
+
+    return None
+
+
+def parse_test_name(lines: List[str], start_idx: int, look_back: int = 100) -> Optional[str]:
+    """
+    Try to find a test name by looking backwards from the current position.
+    Searches for patterns like:
+    - "Running: <test-name>"
+    - "Test: <test-name>"
+    - "<test-name>.js"
+    Returns test name if found, None otherwise.
+    """
+    # Look backwards from start_idx
+    for i in range(max(0, start_idx - look_back), start_idx):
+        line = lines[i]
+
+        # Pattern: Running: testname or Test: testname
+        match = re.search(r'(?:Running|Test):\s*(\S+)', line)
+        if match:
+            return match.group(1)
+
+        # Pattern: testname.js
+        match = re.search(r'([a-zA-Z0-9_-]+)\.js', line)
+        if match:
+            return match.group(1)
+
+    return None
+
+
+def parse_function_name(lines: List[str], start_idx: int, look_back: int = 50) -> Optional[str]:
+    """
+    Try to find a function name by looking backwards from the current position.
+    Searches for patterns like:
+    - "Function: <name>"
+    - "Compiling: <name>"
+    - JavaScript function patterns
+    Returns function name if found, None otherwise.
+    """
+    # Look backwards from start_idx
+    for i in range(max(0, start_idx - look_back), start_idx):
+        line = lines[i]
+
+        # Pattern: Function: name or Compiling: name
+        match = re.search(r'(?:Function|Compiling):\s*(\S+)', line)
+        if match:
+            return match.group(1)
+
+        # Pattern: JavaScript function name(...)
+        match = re.search(r'function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(', line)
+        if match:
+            return match.group(1)
 
     return None
 
@@ -168,11 +248,19 @@ def parse_log_section(lines: List[str], start_idx: int) -> AnalysisResult:
     loads_before = []
     loads_after = []
     fixed_loads = {}
+    ir_before = IRSection(is_after_fix=False)
+    ir_after = IRSection(is_after_fix=True)
+
+    # Try to extract test name and function name from context
+    test_name = parse_test_name(lines, start_idx)
+    function_name = parse_function_name(lines, start_idx)
 
     idx = start_idx
     state = 'opportunities'
     current_opp = None
     current_bb = -1
+    current_bb_freq = 1.0
+    current_ir_block = None
 
     while idx < len(lines):
         line = lines[idx]
@@ -185,18 +273,29 @@ def parse_log_section(lines: List[str], start_idx: int) -> AnalysisResult:
         elif '=== AIR BEFORE REGISTER ASSIGNMENT' in line:
             state = 'ir_before'
             current_bb = -1
+            current_ir_block = None
             idx += 1
             continue
-        elif '=== END IR ===' in line or '=== AIR AFTER fixObviousSpills ===' in line:
+        elif '=== END IR ===' in line:
+            # End of IR BEFORE section - transition to IR AFTER
             if state == 'ir_before':
+                # Save the last block if any
+                if current_ir_block:
+                    ir_before.blocks[current_ir_block.bb_num] = current_ir_block
                 state = 'ir_after'
                 current_bb = -1
-            elif state == 'ir_after':
-                # End of this section
-                break
+                current_ir_block = None
+            idx += 1
+            continue
+        elif '=== AIR AFTER fixObviousSpills ===' in line:
+            # Marker for start of IR AFTER content (already in ir_after state)
+            # Just skip this line and continue parsing
             idx += 1
             continue
         elif '=== END IR (after fixObviousSpills) ===' in line:
+            # End of IR AFTER section
+            if current_ir_block:
+                ir_after.blocks[current_ir_block.bb_num] = current_ir_block
             # End of this section
             break
         elif line.strip() == '' or line.startswith('   num'):
@@ -221,7 +320,9 @@ def parse_log_section(lines: List[str], start_idx: int) -> AnalysisResult:
                     current_opp = SplitOpportunity(
                         tmp_name=tmp_name,
                         num_clusters=num_clusters,
-                        total_benefit=benefit
+                        total_benefit=benefit,
+                        test_name=test_name,
+                        function_name=function_name
                     )
             else:
                 # Try to parse cluster line
@@ -239,22 +340,42 @@ def parse_log_section(lines: List[str], start_idx: int) -> AnalysisResult:
         elif state in ['ir_before', 'ir_after']:
             parsed = parse_air_instruction(line)
             if parsed:
-                bb_num, instruction, spill_slot = parsed
+                bb_num, instruction, spill_slot, frequency = parsed
                 if bb_num >= 0:
+                    # New basic block starts
+                    # Save the previous block if any
+                    if current_ir_block:
+                        current_ir_block.line_end = idx - 1
+                        if state == 'ir_before':
+                            ir_before.blocks[current_ir_block.bb_num] = current_ir_block
+                        else:
+                            ir_after.blocks[current_ir_block.bb_num] = current_ir_block
+
+                    # Start new block
                     current_bb = bb_num
-                elif spill_slot and current_bb >= 0:
-                    # Found a spill slot load
-                    load = SpillSlotLoad(
-                        bb_num=current_bb,
-                        inst_line=instruction,
-                        spill_slot=spill_slot,
-                        dest_reg='',
-                        line_num=idx
-                    )
-                    if state == 'ir_before':
-                        loads_before.append(load)
-                    else:
-                        loads_after.append(load)
+                    current_bb_freq = frequency
+                    current_ir_block = IRBasicBlock(bb_num=bb_num, frequency=frequency, line_start=idx)
+                    current_ir_block.instructions.append(line.rstrip())
+                elif current_ir_block and line.strip().startswith('Air'):
+                    # Regular instruction within a block
+                    current_ir_block.instructions.append(line.rstrip())
+
+                    # Check for spill slot load
+                    if spill_slot and current_bb >= 0:
+                        load = SpillSlotLoad(
+                            bb_num=current_bb,
+                            inst_line=instruction,
+                            spill_slot=spill_slot,
+                            dest_reg='',
+                            line_num=idx
+                        )
+                        if state == 'ir_before':
+                            loads_before.append(load)
+                        else:
+                            loads_after.append(load)
+            elif current_ir_block and line.strip().startswith('Air'):
+                # Other Air instruction
+                current_ir_block.instructions.append(line.rstrip())
 
         idx += 1
 
@@ -281,7 +402,11 @@ def parse_log_section(lines: List[str], start_idx: int) -> AnalysisResult:
         spill_mappings=spill_mappings,
         loads_before=loads_before,
         loads_after=loads_after,
-        fixed_loads=fixed_loads
+        fixed_loads=fixed_loads,
+        ir_before=ir_before,
+        ir_after=ir_after,
+        test_name=test_name,
+        compilation_unit=function_name  # Use function_name as compilation unit identifier
     )
 
 
@@ -333,6 +458,261 @@ def parse_log_file(filepath: str) -> List[AnalysisResult]:
         print("Expected to find lines containing '=== INTRA-BLOCK SPLIT OPPORTUNITY ==='", file=sys.stderr)
 
     return results
+
+
+def annotate_ir_instruction(instruction: str, spill_slot: str, is_opportunity_block: bool,
+                            cluster_info: str, before_instructions: Set[str],
+                            after_instructions: Set[str], is_after: bool) -> str:
+    """
+    Annotate a single IR instruction with relevant information.
+    """
+    annotation_parts = []
+
+    # Check if this is a load from the spill slot
+    load_match = re.search(rf'\bMove(?:\d+|<[^>]+>)?\s+\({spill_slot}\)', instruction)
+    # Check if this is a store to the spill slot
+    store_match = re.search(rf'\bMove(?:\d+|<[^>]+>)?\s+[^,]+,\s*\({spill_slot}\)', instruction)
+
+    if load_match:
+        if is_after and instruction in before_instructions:
+            annotation_parts.append("LOAD from spill slot - NOT OPTIMIZED (still loading from stack)")
+        else:
+            annotation_parts.append("LOAD from spill slot")
+    elif store_match:
+        if is_after and instruction in before_instructions:
+            annotation_parts.append("STORE to spill slot - NOT OPTIMIZED (still storing to stack)")
+        else:
+            annotation_parts.append("STORE to spill slot")
+    elif spill_slot in instruction:
+        # Other uses of the spill slot
+        annotation_parts.append(f"uses {spill_slot}")
+
+    if annotation_parts:
+        return f"{instruction}   <- {', '.join(annotation_parts)}"
+    return instruction
+
+
+def extract_ir_for_opportunity(opp: SplitOpportunity, result: AnalysisResult,
+                               max_lines_per_block: int = 50) -> Dict[str, any]:
+    """
+    Extract and annotate IR for a specific opportunity.
+    Returns a dict with 'blocks_info', 'ir_before_annotated', 'ir_after_annotated'.
+    """
+    if not opp.spill_slot or not result.ir_before or not result.ir_after:
+        return None
+
+    spill_slot = opp.spill_slot
+    affected_blocks = sorted(opp.basic_blocks)
+
+    # Build cluster info for each block
+    cluster_by_block = {}
+    for cluster in opp.clusters:
+        cluster_by_block[cluster.bb_num] = cluster
+
+    # Extract IR for affected blocks
+    blocks_info = []
+    ir_before_annotated = []
+    ir_after_annotated = []
+
+    for bb_num in affected_blocks[:10]:  # Limit to first 10 blocks
+        if bb_num not in result.ir_before.blocks:
+            continue
+
+        block_before = result.ir_before.blocks[bb_num]
+        block_after = result.ir_after.blocks.get(bb_num)
+
+        cluster = cluster_by_block.get(bb_num)
+        cluster_info = ""
+        if cluster:
+            cluster_info = f"freq={cluster.frequency:.0f}, {cluster.num_uses} uses"
+
+        blocks_info.append({
+            'bb_num': bb_num,
+            'frequency': block_before.frequency,
+            'cluster': cluster_info,
+            'num_instructions': len(block_before.instructions)
+        })
+
+        # Build sets of instructions for comparison
+        before_insts = set(block_before.instructions[1:])  # Skip BB header
+        after_insts = set(block_after.instructions[1:]) if block_after else set()
+
+        # Annotate BEFORE
+        ir_before_annotated.append("")
+        header = f"BB#{bb_num}:"
+        if cluster:
+            header += f"  <- OPPORTUNITY CLUSTER ({cluster_info})"
+        ir_before_annotated.append(header)
+
+        for inst in block_before.instructions[1:max_lines_per_block]:
+            annotated = annotate_ir_instruction(
+                inst, spill_slot, True, cluster_info,
+                before_insts, after_insts, False
+            )
+            ir_before_annotated.append("  " + annotated)
+
+        if len(block_before.instructions) > max_lines_per_block:
+            ir_before_annotated.append(f"  ... ({len(block_before.instructions) - max_lines_per_block} more instructions)")
+
+        # Annotate AFTER
+        if block_after:
+            ir_after_annotated.append("")
+            ir_after_annotated.append(f"BB#{bb_num}:")
+
+            for inst in block_after.instructions[1:max_lines_per_block]:
+                annotated = annotate_ir_instruction(
+                    inst, spill_slot, True, cluster_info,
+                    before_insts, after_insts, True
+                )
+                ir_after_annotated.append("  " + annotated)
+
+            if len(block_after.instructions) > max_lines_per_block:
+                ir_after_annotated.append(f"  ... ({len(block_after.instructions) - max_lines_per_block} more instructions)")
+
+    return {
+        'blocks_info': blocks_info,
+        'ir_before_annotated': ir_before_annotated,
+        'ir_after_annotated': ir_after_annotated,
+        'affected_blocks': affected_blocks
+    }
+
+
+def get_top_unfixed_opportunities(analysis: Dict, top_n: int = 5) -> List[Tuple[SplitOpportunity, AnalysisResult, float, int, int]]:
+    """
+    Get the top N opportunities that are NOT fully fixed, prioritized by benefit × unfixed percentage.
+    Returns list of (opportunity, parent_result, unfixed_score, blocks_fixed, total_blocks).
+    """
+    unfixed_opportunities = []
+
+    for result in analysis['results']:
+        for opp in result.opportunities:
+            if not opp.spill_slot or not opp.basic_blocks:
+                continue
+
+            blocks_fixed = 0
+            for bb in opp.basic_blocks:
+                key = (bb, opp.spill_slot)
+                if key in result.fixed_loads and result.fixed_loads[key]:
+                    blocks_fixed += 1
+
+            total_blocks = len(opp.basic_blocks)
+            unfixed_blocks = total_blocks - blocks_fixed
+
+            if unfixed_blocks > 0:  # Has unfixed blocks
+                unfixed_percentage = unfixed_blocks / total_blocks
+                # Score = benefit × unfixed percentage (prioritize high benefit with low fix rate)
+                unfixed_score = opp.total_benefit * unfixed_percentage
+                unfixed_opportunities.append((opp, result, unfixed_score, blocks_fixed, total_blocks))
+
+    # Sort by unfixed_score descending
+    unfixed_opportunities.sort(key=lambda x: x[2], reverse=True)
+
+    return unfixed_opportunities[:top_n]
+
+
+def generate_detailed_ir_analysis(analysis: Dict, top_n: int = 5) -> str:
+    """
+    Generate detailed IR analysis for the top N unfixed opportunities.
+    """
+    lines = []
+
+    lines.append("")
+    lines.append("=" * 80)
+    lines.append(f"DETAILED IR ANALYSIS OF TOP {top_n} UNFIXED OPPORTUNITIES")
+    lines.append("=" * 80)
+    lines.append("")
+    lines.append("This section shows the actual AIR (Assembly IR) code for opportunities that")
+    lines.append("were NOT fully optimized by fixObviousSpills, making them prime candidates for")
+    lines.append("intra-block splitting. Each opportunity shows:")
+    lines.append("  - IR BEFORE: Code before fixObviousSpills optimization")
+    lines.append("  - IR AFTER: Code after fixObviousSpills optimization")
+    lines.append("  - Annotations highlight spill slot loads/stores and whether they were optimized")
+    lines.append("")
+
+    top_unfixed = get_top_unfixed_opportunities(analysis, top_n)
+
+    if not top_unfixed:
+        lines.append("No unfixed opportunities found.")
+        return "\n".join(lines)
+
+    for rank, (opp, result, unfixed_score, blocks_fixed, total_blocks) in enumerate(top_unfixed, 1):
+        lines.append("")
+        lines.append("=" * 80)
+        lines.append(f"#{rank}: {opp.tmp_name}")
+        if opp.test_name or opp.function_name:
+            if opp.test_name:
+                lines.append(f"Test: {opp.test_name}")
+            if opp.function_name:
+                lines.append(f"Function: {opp.function_name}")
+        lines.append("=" * 80)
+
+        fix_rate = blocks_fixed / total_blocks if total_blocks > 0 else 0
+        unfixed_rate = 1.0 - fix_rate
+
+        lines.append(f"Benefit: {opp.total_benefit:.2f}")
+        lines.append(f"Spill slot: {opp.spill_slot}")
+        lines.append(f"Blocks fixed: {blocks_fixed}/{total_blocks} ({fix_rate*100:.1f}%)")
+        lines.append(f"Unfixed score: {unfixed_score:.2f} (benefit × {unfixed_rate*100:.1f}% unfixed)")
+        lines.append("")
+
+        # Extract and annotate IR
+        ir_data = extract_ir_for_opportunity(opp, result, max_lines_per_block=30)
+
+        if not ir_data:
+            lines.append("IR data not available for this opportunity.")
+            continue
+
+        # Show affected blocks summary
+        lines.append(f"Affected basic blocks: {', '.join(f'BB#{bb}' for bb in ir_data['affected_blocks'][:15])}")
+        if len(ir_data['affected_blocks']) > 15:
+            lines.append(f"  ... and {len(ir_data['affected_blocks']) - 15} more")
+        lines.append("")
+
+        # Show clusters info
+        lines.append("Use clusters:")
+        for block_info in ir_data['blocks_info']:
+            lines.append(f"  BB#{block_info['bb_num']}: {block_info['cluster']}")
+        lines.append("")
+
+        # Show IR BEFORE
+        lines.append("-" * 80)
+        lines.append("IR BEFORE fixObviousSpills:")
+        lines.append("-" * 80)
+        lines.extend(ir_data['ir_before_annotated'])
+        lines.append("")
+
+        # Show IR AFTER
+        lines.append("-" * 80)
+        lines.append("IR AFTER fixObviousSpills:")
+        lines.append("-" * 80)
+        lines.extend(ir_data['ir_after_annotated'])
+        lines.append("")
+
+        # Analysis summary
+        lines.append("-" * 80)
+        lines.append("ANALYSIS:")
+        lines.append("-" * 80)
+        if fix_rate < 0.5:
+            lines.append(f"** HIGH PRIORITY: Less than half the blocks were optimized ({fix_rate*100:.1f}%)")
+            lines.append("   Intra-block splitting could provide significant benefit here.")
+        elif fix_rate < 1.0:
+            lines.append(f"** MODERATE PRIORITY: Some blocks remain unfixed ({unfixed_rate*100:.1f}%)")
+            lines.append("   Intra-block splitting could help with the remaining blocks.")
+
+        # Check if loads are still present in the after IR
+        loads_still_present = False
+        for line in ir_data['ir_after_annotated']:
+            if 'NOT OPTIMIZED' in line:
+                loads_still_present = True
+                break
+
+        if loads_still_present:
+            lines.append("   Spill slot loads/stores are still present in the optimized IR,")
+            lines.append("   indicating fixObviousSpills could not eliminate them.")
+
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def analyze_results(results: List[AnalysisResult]) -> Dict:
@@ -427,6 +807,17 @@ def generate_report(analysis: Dict) -> str:
     report_lines.append("  by keeping the value in a register within those hot blocks.")
     report_lines.append("")
 
+    # Check if we have test/function name information
+    has_test_names = any(opp.test_name for result in analysis['results'] for opp in result.opportunities)
+    has_function_names = any(opp.function_name for result in analysis['results'] for opp in result.opportunities)
+
+    if not has_test_names and not has_function_names:
+        report_lines.append("NOTE: Test names and function names were not found in the log file.")
+        report_lines.append("To add this information, you would need to:")
+        report_lines.append("  1. Modify the JetStream3 test runner to output test names before each test")
+        report_lines.append("  2. Modify JSC's AIR dump to include function names in compilation unit headers")
+        report_lines.append("")
+
     # Overall statistics
     report_lines.append("OVERALL STATISTICS")
     report_lines.append("-" * 80)
@@ -458,6 +849,14 @@ def generate_report(analysis: Dict) -> str:
             f"{item['fix_rate']*100:<7.1f}%"
             f"{opp.spill_slot or 'N/A':<12}"
         )
+        # Add test/function name info if available
+        if opp.test_name or opp.function_name:
+            info_parts = []
+            if opp.test_name:
+                info_parts.append(f"Test: {opp.test_name}")
+            if opp.function_name:
+                info_parts.append(f"Function: {opp.function_name}")
+            report_lines.append(f"        [{', '.join(info_parts)}]")
 
     report_lines.append("")
 
@@ -469,6 +868,10 @@ def generate_report(analysis: Dict) -> str:
         opp = item['opportunity']
         report_lines.append("")
         report_lines.append(f"#{rank}: {opp.tmp_name} (benefit: {opp.total_benefit:.2f})")
+        if opp.test_name:
+            report_lines.append(f"  Test: {opp.test_name}")
+        if opp.function_name:
+            report_lines.append(f"  Function: {opp.function_name}")
         report_lines.append(f"  Spill slot: {opp.spill_slot or 'N/A'}")
         report_lines.append(f"  Number of clusters: {opp.num_clusters}")
         report_lines.append(f"  Basic blocks involved: {sorted(opp.basic_blocks)[:10]}"
@@ -574,6 +977,11 @@ def generate_report(analysis: Dict) -> str:
     report_lines.append("END OF REPORT")
     report_lines.append("=" * 80)
 
+    # Add detailed IR analysis
+    detailed_ir = generate_detailed_ir_analysis(analysis, top_n=5)
+    report_lines.append("")
+    report_lines.append(detailed_ir)
+
     return "\n".join(report_lines)
 
 
@@ -586,7 +994,7 @@ def export_to_csv(analysis: Dict, csv_file: str):
             writer = csv.writer(f)
             writer.writerow([
                 'Tmp', 'Benefit', 'Num_Clusters', 'Total_Blocks', 'Blocks_Fixed',
-                'Fix_Rate', 'Spill_Slot', 'Basic_Blocks', 'Priority'
+                'Fix_Rate', 'Spill_Slot', 'Basic_Blocks', 'Priority', 'Test_Name', 'Function_Name'
             ])
 
             # Collect all opportunities with their fix status
@@ -622,7 +1030,9 @@ def export_to_csv(analysis: Dict, csv_file: str):
                         f"{fix_rate:.2f}",
                         opp.spill_slot,
                         ','.join(str(bb) for bb in sorted(opp.basic_blocks)[:20]),
-                        priority if blocks_fixed < len(opp.basic_blocks) else "N/A"
+                        priority if blocks_fixed < len(opp.basic_blocks) else "N/A",
+                        opp.test_name or '',
+                        opp.function_name or ''
                     ])
 
         print(f"CSV export saved to: {csv_file}")
