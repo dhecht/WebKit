@@ -1767,7 +1767,7 @@ private:
         return 16;
     }
 
-    void analyzeIntraBlockSplitOpportunity(Tmp tmp, TmpData&)
+    void analyzeIntraBlockSplitOpportunity(Tmp tmp, TmpData& tmpData)
     {
         if (!Options::airAnalyzeIntraBlockSplitOpportunities())
             return;
@@ -1830,6 +1830,13 @@ private:
             m_intraBlockOpportunityTmps.append(tmp);
 
             dataLogLn("\n=== INTRA-BLOCK SPLIT OPPORTUNITY ===");
+
+            // Check if a prior split (clobber-based) was already attempted
+            if (tmpData.splitMetadataIndex)
+                dataLogLn("  ALREADY_TRIED_SPLIT: yes");
+            else
+                dataLogLn("  ALREADY_TRIED_SPLIT: no");
+
             dataLogLn("Spilled: ", tmp, " with ", clusters.size(), " use clusters (total benefit: ", totalBenefit, ")");
 
             for (auto& cluster : clusters) {

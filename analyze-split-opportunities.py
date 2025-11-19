@@ -68,6 +68,7 @@ class SplitOpportunity:
     basic_blocks: Set[int] = field(default_factory=set)
     test_name: Optional[str] = None  # JS3 test name (if available)
     function_name: Optional[str] = None  # Function name (if available)
+    had_prior_split: bool = False  # Whether clobber split was already tried
 
 
 @dataclass
@@ -145,6 +146,18 @@ def parse_cluster_line(line: str) -> Optional[UseCluster]:
             density=float(match.group(5)),
             frequency=float(match.group(6))
         )
+    return None
+
+
+def parse_prior_split_marker(line: str) -> Optional[bool]:
+    """
+    Parse the ALREADY_TRIED_SPLIT marker.
+    Example: "  ALREADY_TRIED_SPLIT: yes"
+    Returns: True if yes, False if no, None if not found
+    """
+    match = re.match(r'\s+ALREADY_TRIED_SPLIT:\s+(yes|no)', line)
+    if match:
+        return match.group(1) == 'yes'
     return None
 
 
@@ -336,6 +349,11 @@ def parse_log_section(lines: List[str], start_idx: int) -> AnalysisResult:
                 if cluster:
                     current_opp.clusters.append(cluster)
                     current_opp.basic_blocks.add(cluster.bb_num)
+
+                # Try to parse prior split marker
+                prior_split = parse_prior_split_marker(line)
+                if prior_split is not None:
+                    current_opp.had_prior_split = prior_split
 
         elif state == 'mappings':
             mapping = parse_spill_mapping(line)
@@ -835,6 +853,39 @@ def generate_report(analysis: Dict) -> str:
     not_fixed = analysis['total_opportunities'] - analysis['opportunities_with_some_fixes']
     report_lines.append(f"Opportunities NOT fixed at all: {not_fixed} "
                        f"({100.0 * not_fixed / max(1, analysis['total_opportunities']):.1f}%)")
+
+    # NEW: Prior split analysis
+    total_with_prior_split = sum(1 for opp in analysis['all_opportunities'] if opp.had_prior_split)
+    total_without_prior_split = len(analysis['all_opportunities']) - total_with_prior_split
+
+    report_lines.append("")
+    report_lines.append("SPLIT STRATEGY ANALYSIS")
+    report_lines.append("-" * 80)
+    report_lines.append(f"Opportunities where clobber split was already tried: {total_with_prior_split} "
+                       f"({100.0 * total_with_prior_split / max(1, analysis['total_opportunities']):.1f}%)")
+    report_lines.append(f"Opportunities with no prior split attempt: {total_without_prior_split} "
+                       f"({100.0 * total_without_prior_split / max(1, analysis['total_opportunities']):.1f}%)")
+
+    if total_with_prior_split > 0:
+        report_lines.append("")
+        report_lines.append("INTERPRETATION:")
+        report_lines.append(f"  • {total_with_prior_split} opportunities ({100.0 * total_with_prior_split / max(1, analysis['total_opportunities']):.1f}%) show that clobber splitting")
+        report_lines.append(f"    was tried but didn't prevent spilling.")
+        report_lines.append(f"  • This validates the fallback strategy: try clobber split first,")
+        report_lines.append(f"    then fall back to intra-block splitting if it doesn't help.")
+
+        # Calculate benefit of opportunities with prior splits
+        benefit_with_prior = sum(opp.total_benefit for opp in analysis['all_opportunities'] if opp.had_prior_split)
+        benefit_without_prior = sum(opp.total_benefit for opp in analysis['all_opportunities'] if not opp.had_prior_split)
+
+        report_lines.append(f"  • Total benefit of opportunities with prior split: {benefit_with_prior:,.0f}")
+        report_lines.append(f"  • Total benefit of opportunities without prior split: {benefit_without_prior:,.0f}")
+
+        if benefit_with_prior > benefit_without_prior:
+            report_lines.append(f"  • HIGH VALUE: Most benefit comes from cases where clobber split failed!")
+        else:
+            report_lines.append(f"  • Most benefit comes from cases with no prior split (pure pressure).")
+
     report_lines.append("")
 
     # Top 10 opportunities
@@ -1000,7 +1051,7 @@ def export_to_csv(analysis: Dict, csv_file: str):
             writer = csv.writer(f)
             writer.writerow([
                 'Tmp', 'Benefit', 'Num_Clusters', 'Total_Blocks', 'Blocks_Fixed',
-                'Fix_Rate', 'Spill_Slot', 'Basic_Blocks', 'Priority', 'Test_Name', 'Function_Name'
+                'Fix_Rate', 'Spill_Slot', 'Basic_Blocks', 'Priority', 'Test_Name', 'Function_Name', 'Had_Prior_Split'
             ])
 
             # Collect all opportunities with their fix status
@@ -1038,7 +1089,8 @@ def export_to_csv(analysis: Dict, csv_file: str):
                         ','.join(str(bb) for bb in sorted(opp.basic_blocks)[:20]),
                         priority if blocks_fixed < len(opp.basic_blocks) else "N/A",
                         opp.test_name or '',
-                        opp.function_name or ''
+                        opp.function_name or '',
+                        'yes' if opp.had_prior_split else 'no'
                     ])
 
         print(f"CSV export saved to: {csv_file}")
