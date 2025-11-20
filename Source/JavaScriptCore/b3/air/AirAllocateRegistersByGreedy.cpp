@@ -1774,6 +1774,87 @@ private:
         return 16;
     }
 
+    bool trySplitIntrablock(Tmp tmp, TmpData& tmpData)
+    {
+        struct Cluster {
+            Interval interval { };
+            unsigned numUses { 0 };
+        };
+
+
+        Vector<Cluster, 8> clusters;
+
+        Interval cluster;
+        Vector<Tmp*, 8> tmpPtrs;
+
+        auto finishCluster = [&]() {
+            return true;
+        };
+
+        LiveRange& range = tmpData.liveRange;
+        for (Interval interval : range.intervals()) {
+            Interval remaining = interval;
+
+            while (true) {
+                Point startPoint = remaining.begin();
+                BasicBlock* block = findBlockContainingPoint(startPoint);
+                Point positionOfHead = this->positionOfHead(block);
+                auto startIndex = instIndex(positionOfHead, startPoint);
+                Point positionOfTail = this->positionOfTail(block);
+                Point endPoint = std::min(positionOfTail + 1, interval.end());
+                auto endIndex = instIndex(positionOfHead, endPoint);
+
+                for (auto instIndex = startIndex; instIndex < endIndex; instIndex++) {
+                    Inst& inst = block->at(instIndex);
+                    Point positionOfEarly = this->positionOfEarly(positionOfHead, instIndex);
+
+                    bool earlyUse = false;
+                    bool earlyDef = false;
+                    bool lateUse = false;
+                    bool lateDef = false;
+                    inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
+                        if (t != tmp)
+                            return;
+                        tmpPtrs.append(&t);
+                        earlyDef |= Arg::isEarlyDef(role);
+                        earlyUse |= Arg::isEarlyUse(role);
+                        lateDef |= Arg::isLateDef(role);
+                        lateUse |= Arg::isLateUse(role);
+                    });
+                    // XXX: opcode == Patch clobbers
+                    if (earlyDef) {
+                        finishCluster();
+                        cluster |= earlyInterval(positionOfEarly);
+                    }
+                    if (earlyUse) {
+                        cluster |= earlyInterval(positionOfEarly);
+                    }
+                    // XXX: should we split this cluster or is it better to keep the same Tmp for RMW?
+                    if (lateDef) {
+                        finishCluster();
+                        cluster |= lateInterval(positionOfEarly);
+                    }
+                    if (lateUse) {
+                        cluster |= lateInterval(positionOfEarly);
+                    }
+                }
+
+                // XXX what if use is before def? i.e. no gap between in RMW inst.
+                // check interval size too
+                if (finishCluster(cluster)) {
+                    clusters.append(WTFMove(cluster));
+                }
+                
+                if (endPoint == interval.end())
+                    break;
+                // The interval crosses a block boundary, start a new cluster.
+                remaining = { endPoint, remaining.end() };
+                cluster = { };
+            };
+        }
+        return false;
+    }
+
     void analyzeIntraBlockSplitOpportunity(Tmp tmp, TmpData& tmpData)
     {
         if (!Options::airAnalyzeIntraBlockSplitOpportunities())
@@ -1872,6 +1953,7 @@ private:
         // Analyze if this spill could have been avoided with intra-block splitting
         analyzeIntraBlockSplitOpportunity(tmp, tmpData);
         if (tmpData.splitMetadataIndex) {
+            // XXX: handle spilling of cluster Tmps.
             // Splitting didn't prevent originalTmp from spilling after all, so no point assigning
             // registers or stack slots to the gap tmps for this split.
             dataLogLnIf(verbose(), "   evicting tmps created during split");
