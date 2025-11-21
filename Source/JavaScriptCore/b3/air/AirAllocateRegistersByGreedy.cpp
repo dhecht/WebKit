@@ -1819,16 +1819,18 @@ private:
         if (tmpData.splitMetadataIndex)
             return false;
 
-        LiveRange& range = tmpData.liveRange;
-        BasicBlock* startBlock = findBlockContainingPoint(range.intervals().first().begin());
-        Point last = range.intervals().last().end() - 1;
+        BasicBlock* startBlock = findBlockContainingPoint(tmpData.liveRange.intervals().first().begin());
+        Point last = tmpData.liveRange.intervals().last().end() - 1;
         if (last <= positionOfTail(startBlock))
             return false;
 
         SplitMetadata* metadata = nullptr;
         Vector<Tmp*, 8> tmpPtrs;
 
-        for (const Interval& interval : range.intervals()) {
+        size_t numIntervals = tmpData.liveRange.intervals().size();
+        // Note: this loop calls newTmp() which invalidates the tmpData reference.
+        for (size_t i = 0; i < numIntervals; i++) {
+            Interval interval = *(m_map[tmp].liveRange.intervals().begin() + i);
             Interval remaining = interval;
 
             while (true) {
@@ -1864,7 +1866,7 @@ private:
                 // Worthwhile to have a cluster tmp only if more than one instruction will access it.
                 if (cluster && instIndex(positionOfHead, cluster.begin()) != instIndex(positionOfHead, cluster.end() - 1)) {
                     if (!metadata) {
-                        tmpData.splitMetadataIndex = m_splitMetadata.size();
+                        m_map[tmp].splitMetadataIndex = m_splitMetadata.size();
                         m_splitMetadata.constructAndAppend(SplitMetadata::Type::IntraBlock, tmp);
                         metadata = &m_splitMetadata.last();
                     }
@@ -1896,7 +1898,7 @@ private:
         if (metadata) {
             // The original Tmp is spilled, but the cluster Tmps will hopefully
             // carry the value in registers during intra-block regions.
-            setStageAndEnqueue(tmp, tmpData, Stage::Spill);
+            setStageAndEnqueue(tmp, m_map[tmp], Stage::Spill);
             return true;
         }
         return false; // Caller will handle Tmp
