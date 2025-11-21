@@ -1851,7 +1851,7 @@ private:
                     Point positionOfEarly = this->positionOfEarly(positionOfHead, instIndex);
 
                     inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
-                        if (t == tmp) {
+                        if (t == tmp && !Arg::isColdUse(role)) {
                             tmpPtrs.append(&t);
                             // Note that the timing is irrelevant, just need to know the instruction that
                             // performs the def so we know where to insert the store back to the spill slot.
