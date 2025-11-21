@@ -1481,7 +1481,8 @@ private:
                     // If we couldn't allocate tmp, allow it to split next time.
                     Stage nextStage = Stage::TrySplit;
                     // If we already know splitting won't be profitable, skip it.
-                    if (!tmpData.isGroup() && tmpData.liveRange.size() < splitMinRangeSize)
+                    // XXX
+                    if (!tmpData.isGroup() && tmpData.liveRange.size() < 2 * PointOffsets::PointsPerInst)
                         nextStage = Stage::Spill;
                     setStageAndEnqueue(tmp, tmpData, nextStage);
                     continue;
@@ -1689,7 +1690,9 @@ private:
         ASSERT(tmpData.spillCost() != unspillableCost); // Should have evicted.
         if (trySplitGroup(tmp, tmpData))
             return true;
-        return trySplitAroundClobbers<bank>(tmp, tmpData);
+        if (trySplitAroundClobbers<bank>(tmp, tmpData))
+            return true;
+        return trySplitIntraBlock(tmp, tmpData);
     }
 
     bool trySplitGroup(Tmp tmp, TmpData& tmpData)
@@ -1809,6 +1812,12 @@ private:
 
     bool trySplitIntraBlock(Tmp tmp, TmpData& tmpData)
     {
+        if (!Options::splitIntraBlocks())
+            return false;
+        // XXX revisit
+        if (tmpData.splitMetadataIndex)
+            return false;
+
         struct Cluster {
             Interval interval { };
             unsigned numUses { 0 };
@@ -1999,18 +2008,19 @@ private:
         // Analyze if this spill could have been avoided with intra-block splitting
         analyzeIntraBlockSplitOpportunity(tmp, tmpData);
         if (tmpData.splitMetadataIndex) {
-            // XXX: handle spilling of cluster Tmps.
-            // Splitting didn't prevent originalTmp from spilling after all, so no point assigning
-            // registers or stack slots to the gap tmps for this split.
-            dataLogLnIf(verbose(), "   evicting tmps created during split");
             auto& metadata = m_splitMetadata[tmpData.splitMetadataIndex];
-            ASSERT(metadata.originalTmp == tmp);
-            for (auto& split : metadata.splits) {
-                Tmp gapTmp = split.tmp;
-                Reg reg = m_map[gapTmp].assigned;
-                if (reg)
-                    evict(gapTmp, m_map[gapTmp], reg);
-                m_map[gapTmp].stage = Stage::Replaced;
+            if (metadata.type == SplitMetadata::Type::AroundClobbers) {
+                // Splitting didn't prevent originalTmp from spilling after all, so no point assigning
+                // registers or stack slots to the gap tmps for this split.
+                dataLogLnIf(verbose(), "   evicting tmps created during split");
+                ASSERT(metadata.originalTmp == tmp);
+                for (auto& split : metadata.splits) {
+                    Tmp gapTmp = split.tmp;
+                    Reg reg = m_map[gapTmp].assigned;
+                    if (reg)
+                        evict(gapTmp, m_map[gapTmp], reg);
+                    m_map[gapTmp].stage = Stage::Replaced;
+                }
             }
         }
         // Batch the generation of spill/fill tmps so that we can limit traversals of the code while
