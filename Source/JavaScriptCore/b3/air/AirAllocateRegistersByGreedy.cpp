@@ -546,7 +546,7 @@ struct TmpData {
     void dump(PrintStream& out) const
     {
         out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
-            ", coalescables = ", listDump(coalescables), ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
+            ", coalescables = ", listDump(coalescables), ", parentGroup = ", parentGroup, ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
             ", useDefCost = ", useDefCost, ", spillability = ", spillability, ", assigned = ", assigned, ", spilled = ", pointerDump(spillSlot), ", splitMetadataIndex = ", splitMetadataIndex, "}");
     }
 
@@ -725,6 +725,7 @@ public:
         m_code.forEachTmp([&](Tmp tmp) {
             out.println("    ", tmp, ": ", m_map[tmp], " useWidth=", m_tmpWidth.useWidth(tmp));
         });
+        out.println("Splits:\n", listDump(m_splitMetadata, "\n"));
         out.println("Stats (GP):", m_stats[GP]);
         out.println("Stats (FP):", m_stats[FP]);
     }
@@ -950,8 +951,8 @@ private:
             checkConflicts(block, localCalc);
         }
         if (anyFailures) {
-            dataLogLn("IR:");
-            dataLogLn(m_code);
+            dataLogLn("IR:\n", m_code);
+            dataLogLn("State:\n", *this);
             RELEASE_ASSERT_NOT_REACHED();
         }
     }
@@ -1818,15 +1819,15 @@ private:
         if (tmpData.splitMetadataIndex)
             return false;
 
-        struct Cluster {
-            Interval interval { };
-            unsigned numUses { 0 };
-        };
+        LiveRange& range = tmpData.liveRange;
+        BasicBlock* startBlock = findBlockContainingPoint(range.intervals().first().begin());
+        Point last = range.intervals().last().end() - 1;
+        if (last <= positionOfTail(startBlock))
+            return false;
 
         SplitMetadata* metadata = nullptr;
         Vector<Tmp*, 8> tmpPtrs;
 
-        LiveRange& range = tmpData.liveRange;
         for (const Interval& interval : range.intervals()) {
             Interval remaining = interval;
 
@@ -1841,6 +1842,7 @@ private:
 
                 Point lastDefPoint = 0;
                 Interval cluster = { };
+                tmpPtrs.shrink(0);
 
                 for (auto instIndex = startIndex; instIndex < endIndex; instIndex++) {
                     Inst& inst = block->at(instIndex);
@@ -1882,13 +1884,13 @@ private:
                         *ptr = clusterTmp; // Within this cluster, use clusterTmp rather than Tmp
                     // Move to/from the original Tmp will be inserted as needed during insertFixupCode().
                     metadata->splits.append({ clusterTmp, lastDefPoint });
+                    setStageAndEnqueue(clusterTmp, m_map[clusterTmp], Stage::TryAllocate);
                 }
 
                 if (endPoint == interval.end())
                     break;
                 // The interval crosses a block boundary, start a new cluster.
                 remaining = { endPoint, remaining.end() };
-                tmpPtrs.shrink(0);
             };
         }
         if (metadata) {
@@ -2076,9 +2078,11 @@ private:
                     for (auto& split : metadata.splits) {
                         Tmp clusterTmp = split.tmp;
                         TmpData& clusterData = m_map[clusterTmp];
-                        if (clusterData.stage == Stage::Spilled && !clusterData.spillSlot)
-                            clusterData.spillSlot = spillSlot(tmp);
-                        ASSERT(spillSlot(clusterTmp) == spillSlot(tmp));
+                        if (clusterData.stage == Stage::Spilled) {
+                            if (!clusterData.spillSlot)
+                                clusterData.spillSlot = spillSlot(tmp);
+                            ASSERT(spillSlot(clusterTmp) == spillSlot(tmp));
+                        }
                     }
                 }
             }
@@ -2352,7 +2356,7 @@ private:
             }
 
             LiveRange& clusterRange = m_map[clusterTmp].liveRange;
-            ASSERT(clusterRange.size() == 1);
+            ASSERT(clusterRange.intervals().size() == 1);
             const Interval& clusterInterval = clusterRange.intervals().first();
             bool liveBefore = isLiveAt(clusterInterval.begin() - 1);
             bool liveAfter = isLiveAt(clusterInterval.end());
@@ -2440,7 +2444,8 @@ private:
                         return;
                     Reg reg = assignedReg(tmp);
                     if (!reg) {
-                        dataLogLn("Failed to allocate reg: BB", *block, " inst=", inst, " tmp=", tmp);
+                        dataLogLn("Failed to allocate register: BB", *block, " inst=", inst, " tmp=", tmp);
+                        dataLogLn("Reg Alloc State: ", *this);
                         RELEASE_ASSERT_NOT_REACHED();
                     }
                     tmp = Tmp(reg);
