@@ -608,9 +608,24 @@ struct TmpData {
 // across the "gaps".
 struct SplitMetadata {
     enum class Type : uint8_t {
-        Clobber,
+        Invalid,
+        AroundClobbers,
         IntraBlock,
     };
+
+    struct Split {
+        Tmp tmp;
+        Point lastDefPoint;
+
+        void dump(PrintStream& out) const
+        {
+            out.print(tmp);
+            if (lastDefPoint)
+                out.print(" defPoint=", lastDefPoint);
+        }
+    };
+
+    SplitMetadata() : type(Type::Invalid) { }
 
     SplitMetadata(Type t, Tmp tmp)
     : type(t)
@@ -618,13 +633,12 @@ struct SplitMetadata {
 
     void dump(PrintStream& out) const
     {
-        out.print(originalTmp, " : ", type, " { ", listDump(splitTmps), " } ");
+        out.print(originalTmp, " : ", type, " { ", listDump(splits), " } ");
     }
 
     Type type;
     Tmp originalTmp;
-    Vector<Tmp> splitTmps;
-    Vector<Point> defPoints; // Only for IntraBlock
+    Vector<Split> splits;
 };
 
 class GreedyAllocator {
@@ -1748,7 +1762,7 @@ private:
         tmpData.splitMetadataIndex = m_splitMetadata.size();
         setStageAndEnqueue(tmp, tmpData, Stage::TryAllocate);
 
-        SplitMetadata metadata(SplitMetadata::Type::Clobber, tmp);
+        SplitMetadata metadata(SplitMetadata::Type::AroundClobbers, tmp);
         // Create tmps to carry the value across register clobbering instructions. These tmps
         // might spill or be assigned another register.
         for (Interval hole : holeRange.intervals()) {
@@ -1766,7 +1780,7 @@ private:
             // analysis (see lowerAfterRegAlloc()), and that's unlikely to be worth it.
             Interval gapInterval = hole | Interval(hole.begin() - 1);
             Tmp gapTmp = newTmp(tmp, freq, gapInterval);
-            metadata.splitTmps.append(gapTmp);
+            metadata.splits.append({ gapTmp, 0 });
             setStageAndEnqueue(gapTmp, m_map[gapTmp], Stage::TryAllocate);
         }
         dataLogLnIf(verbose(), "Split (clobbers): reg = ", bestSplitReg, " spillCost = ", m_map[tmp].spillCost(), " splitCost = ", minSplitCost, " split tmp = ", metadata);
@@ -1774,17 +1788,7 @@ private:
         return true;
     }
 
-    static unsigned stackSlotMinimumWidth(Width width)
-    {
-        if (width <= Width32)
-            return 4;
-        if (width <= Width64)
-            return 8;
-        ASSERT(width == Width128);
-        return 16;
-    }
-
-    bool trySplitIntrablock(Tmp tmp, TmpData& tmpData)
+    bool trySplitIntraBlock(Tmp tmp, TmpData& tmpData)
     {
         struct Cluster {
             Interval interval { };
@@ -1807,8 +1811,7 @@ private:
                 Point endPoint = std::min(positionOfTail + 1, interval.end());
                 auto endIndex = instIndex(positionOfHead, endPoint);
 
-                unsigned numInsts = 0;
-                Point defPoint = 0;
+                Point lastDefPoint = 0;
                 Interval cluster = { };
 
                 for (auto instIndex = startIndex; instIndex < endIndex; instIndex++) {
@@ -1818,12 +1821,10 @@ private:
                     inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
                         if (t == tmp) {
                             tmpPtrs.append(&t);
-                            numInsts++;
-                            // Track the latest def; this will be where a move back to the original Tmp's
-                            // spill slot is needed. Note that the timing is irrelevant, we just need to know
-                            // the instruction that performs the def insert the move.
+                            // Note that the timing is irrelevant, just need to know the instruction that
+                            // performs the def so we know where to insert the store back to the spill slot.
                             if (Arg::isAnyDef(role))
-                                defPoint = positionOfEarly;
+                                lastDefPoint = positionOfEarly;
                             if (instIndex == startIndex && Arg::isLateDef(role))
                                 cluster |= lateInterval(positionOfEarly);
                             else
@@ -1833,7 +1834,8 @@ private:
                 }
                 // XXX what if use is before def? i.e. no gap between in RMW inst.
                 // Or instA def; instB use: also no gap. Should this be split? This does have a gap now with 4 ppi
-                if (numInsts > 1) {
+                // Worthwhile to have a cluster tmp only if more than one instruction will access it.
+                if (cluster.distance() && instIndex(positionOfHead, cluster.begin()) != instIndex(positionOfHead, cluster.end() - 1)) {
                     if (!metadata) {
                         tmpData.splitMetadataIndex = m_splitMetadata.size();
                         m_splitMetadata.constructAndAppend(SplitMetadata::Type::IntraBlock, tmp);
@@ -1845,8 +1847,7 @@ private:
                     for (auto& ptr : tmpPtrs)
                         *ptr = clusterTmp; // Within this cluster, use clusterTmp rather than Tmp
                     // Move to/from the original Tmp will be inserted as needed during insertFixupCode().
-                    metadata->splitTmps.append(clusterTmp);
-                    metadata->defPoints.append(defPoint);
+                    metadata->splits.append({ clusterTmp, lastDefPoint });
                 }
 
                 if (endPoint == interval.end())
@@ -1949,6 +1950,16 @@ private:
         }
     }
 
+    static unsigned stackSlotMinimumWidth(Width width)
+    {
+        if (width <= Width32)
+            return 4;
+        if (width <= Width64)
+            return 8;
+        ASSERT(width == Width128);
+        return 16;
+    }
+
     void spill(Tmp tmp, TmpData& tmpData)
     {
         RELEASE_ASSERT(tmpData.spillCost() != unspillableCost);
@@ -1969,7 +1980,8 @@ private:
             dataLogLnIf(verbose(), "   evicting tmps created during split");
             auto& metadata = m_splitMetadata[tmpData.splitMetadataIndex];
             ASSERT(metadata.originalTmp == tmp);
-            for (Tmp gapTmp : metadata.splitTmps) {
+            for (auto& split : metadata.splits) {
+                Tmp gapTmp = split.tmp;
                 Reg reg = m_map[gapTmp].assigned;
                 if (reg)
                     evict(gapTmp, m_map[gapTmp], reg);
@@ -2026,7 +2038,8 @@ private:
                 ASSERT(tmpData.stage == Stage::Spilled && spillSlot(tmp));
                 auto& metadata = m_splitMetadata[tmpData.splitMetadataIndex];
                 if (metadata.type == SplitMetadata::Type::IntraBlock) {
-                    for (Tmp clusterTmp : metadata.splitTmps) {
+                    for (auto& split : metadata.splits) {
+                        Tmp clusterTmp = split.tmp;
                         TmpData& clusterData = m_map[clusterTmp];
                         if (clusterData.stage == Stage::Spilled && !clusterData.spillSlot)
                             clusterData.spillSlot = spillSlot(tmp);
@@ -2233,29 +2246,29 @@ private:
     void insertFixupCode()
     {
         for (auto& metadata : m_splitMetadata) {
-            if (!metadata.originalTmp)
-                continue;
             switch (metadata.type) {
-            case SplitMetadata::Type::Clobber:
-                insertSplitClobberFixupCode(metadata);
+            case SplitMetadata::Type::Invalid:
+                break;
+            case SplitMetadata::Type::AroundClobbers:
+                insertSplitAroundClobbersFixupCode(metadata);
                 break;
             case SplitMetadata::Type::IntraBlock:
                 insertSplitIntraBlockFixupCode(metadata);
                 break;
             }
         }
-
         for (BasicBlock* block : m_code)
             m_insertionSets[block].execute(block);
     }
 
-    void insertSplitClobberFixupCode(SplitMetadata& metadata)
+    void insertSplitAroundClobbersFixupCode(SplitMetadata& metadata)
     {
         if (spillSlot(metadata.originalTmp))
             return; // If spilled, better to not split after all. See spill().
         ASSERT(assignedReg(metadata.originalTmp));
         // Emit moves to and from the gapTmps (or stack stot) that fill the split holes.
-        for (Tmp gapTmp : metadata.splitTmps) {
+        for (auto& split : metadata.splits) {
+            Tmp gapTmp = split.tmp;
             TmpData& gapData = m_map[gapTmp];
             for (auto& interval : gapData.liveRange.intervals()) {
                 ASSERT(interval.distance() == 2);
@@ -2290,14 +2303,14 @@ private:
 
         auto isLiveAt = [&](Point point) {
             // Point queries are monotonicly increasing
-            ASSERT(intervalIter == liveRange.intervals().begin() || (intervalIter - 1)->end() <= point);
+            ASSERT(intervalIter == liveRange.intervals().begin() || intervalIter->begin() <= point);
             while (intervalIter != intervalEnd && intervalIter->end() <= point)
                 ++intervalIter;
             return intervalIter != intervalEnd && intervalIter->contains(point);
         };
 
-        for (size_t i = 0; i < metadata.splitTmps.size(); i++) {
-            Tmp clusterTmp = metadata.splitTmps[i];
+        for (auto& split : metadata.splits) {
+            Tmp clusterTmp = split.tmp;
             if (spillSlot(clusterTmp)) {
                 ASSERT(spillSlot(clusterTmp) == spillSlot(originalTmp));
                 continue; // Nothing to do since the same spill slot was used
@@ -2316,10 +2329,11 @@ private:
                 unsigned instIndex = this->instIndex(positionOfHead, clusterInterval.begin());
                 m_insertionSets[block].insert(instIndex, splitMoveFrom, move, block->at(instIndex).origin, Arg::stack(spilled), clusterTmp);
             } else
-                ASSERT(metadata.defPoints[i]);
+                ASSERT(split.lastDefPoint);
 
-            if (liveAfter && metadata.defPoints[i]) {
-                unsigned instIndex = this->instIndex(positionOfHead, metadata.defPoints[i]);
+            // Need to store back into the spill slot only if the cluster def'ed the Tmp
+            if (liveAfter && split.lastDefPoint) {
+                unsigned instIndex = this->instIndex(positionOfHead, split.lastDefPoint);
                 m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, block->at(instIndex).origin, clusterTmp, Arg::stack(spilled));
             }
         }
