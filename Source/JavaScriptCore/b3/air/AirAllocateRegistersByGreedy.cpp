@@ -802,10 +802,15 @@ private:
         return positionOfHead + instIndex * PointOffsets::PointsPerInst + PointOffsets::Late;
     }
 
-    static Point positionOfEarly(Interval interval)
+    static Point instStartPosition(Point point)
     {
         static_assert(!(PointOffsets::PointsPerInst & (PointOffsets::PointsPerInst - 1)));
-        return (interval.begin() & ~(PointOffsets::PointsPerInst - 1)) + PointOffsets::Early;
+        return (point & ~(PointOffsets::PointsPerInst - 1));
+    }
+
+    static Point positionOfEarly(Interval interval)
+    {
+        return instStartPosition(interval.begin()) + PointOffsets::Early;
     }
 
     static Interval earlyInterval(Point positionOfEarly)
@@ -823,6 +828,20 @@ private:
     static Interval earlyAndLateInterval(Point positionOfEarly)
     {
         return earlyInterval(positionOfEarly) | lateInterval(positionOfEarly);
+    }
+
+    static Interval intervalForTiming(Point positionOfEarly, Arg::Timing timing)
+    {
+        switch (timing) {
+        case Arg::OnlyEarly:
+            return earlyInterval(positionOfEarly);
+        case Arg::OnlyLate:
+            return lateInterval(positionOfEarly);
+        case Arg::EarlyAndLate:
+            return earlyAndLateInterval(positionOfEarly);
+        }
+        ASSERT_NOT_REACHED();
+        return Interval();
     }
 
     static Interval intervalForSpill(Point positionOfEarly, Arg::Role role)
@@ -1799,7 +1818,7 @@ private:
         Vector<Tmp*, 8> tmpPtrs;
 
         LiveRange& range = tmpData.liveRange;
-        for (Interval interval : range.intervals()) {
+        for (const Interval& interval : range.intervals()) {
             Interval remaining = interval;
 
             while (true) {
@@ -1825,22 +1844,28 @@ private:
                             // performs the def so we know where to insert the store back to the spill slot.
                             if (Arg::isAnyDef(role))
                                 lastDefPoint = positionOfEarly;
-                            if (instIndex == startIndex && Arg::isLateDef(role))
-                                cluster |= lateInterval(positionOfEarly);
-                            else
-                                cluster |= earlyAndLateInterval(positionOfEarly);
+                            cluster |= intervalForTiming(positionOfEarly, Arg::timing(role));
                         }
                     });
                 }
                 // XXX what if use is before def? i.e. no gap between in RMW inst.
                 // Or instA def; instB use: also no gap. Should this be split? This does have a gap now with 4 ppi
                 // Worthwhile to have a cluster tmp only if more than one instruction will access it.
-                if (cluster.distance() && instIndex(positionOfHead, cluster.begin()) != instIndex(positionOfHead, cluster.end() - 1)) {
+                if (cluster && instIndex(positionOfHead, cluster.begin()) != instIndex(positionOfHead, cluster.end() - 1)) {
                     if (!metadata) {
                         tmpData.splitMetadataIndex = m_splitMetadata.size();
                         m_splitMetadata.constructAndAppend(SplitMetadata::Type::IntraBlock, tmp);
                         metadata = &m_splitMetadata.last();
                     }
+                    Point entryPre = instStartPosition(cluster.begin());
+                    // If the Tmp is live into the cluster then cluster range may need to be extended to
+                    // model the load from the Tmp's spill slot before the first use.
+                    if (interval.contains(entryPre))
+                        cluster |= Interval(entryPre);
+                    // Likewise, if the cluster defs Tmp then a store to Tmp's spill slot will be needed
+                    // after the final def point.
+                    if (lastDefPoint)
+                        cluster |= Interval(instStartPosition(lastDefPoint) + PointOffsets::Post);
 
                     ASSERT(tmpPtrs.size() > 1);
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
