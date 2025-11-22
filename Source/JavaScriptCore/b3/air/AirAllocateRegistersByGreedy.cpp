@@ -1898,7 +1898,7 @@ private:
         if (metadata) {
             // The original Tmp is spilled, but the cluster Tmps will hopefully
             // carry the value in registers during intra-block regions.
-            setStageAndEnqueue(tmp, m_map[tmp], Stage::Spill);
+            spill(tmp, m_map[tmp]);
             return true;
         }
         return false; // Caller will handle Tmp
@@ -2074,9 +2074,9 @@ private:
                 m_stats[bank].numSpillStackSlots++;
             }
             if (tmpData.splitMetadataIndex) {
-                ASSERT(tmpData.stage == Stage::Spilled && spillSlot(tmp));
                 auto& metadata = m_splitMetadata[tmpData.splitMetadataIndex];
                 if (metadata.type == SplitMetadata::Type::IntraBlock) {
+                    ASSERT(tmpData.stage == Stage::Spilled && spillSlot(tmp));
                     for (auto& split : metadata.splits) {
                         Tmp clusterTmp = split.tmp;
                         TmpData& clusterData = m_map[clusterTmp];
