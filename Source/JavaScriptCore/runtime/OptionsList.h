@@ -496,7 +496,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, airGreedyRegAllocVerbose, false, Normal, nullptr) \
     v(Bool, airAnalyzeIntraBlockSplitOpportunities, false, Normal, "Log when spilled tmps have intra-block use clusters that could benefit from splitting"_s) \
     v(Bool, airUseGreedyRegAlloc, true, Normal, nullptr) \
-    v(Bool, splitIntraBlocks, true, Normal, nullptr) \
+    v(Unsigned, splitIntraBlocks, 100000000, Normal, nullptr) \
     v(Double, airGreedyRegAllocSplitMultiplier, 2.0, Normal, nullptr) \
     v(Bool, airDumpRegAllocStats, false, Normal, nullptr) \
     v(Bool, airValidateGreedRegAlloc, ASSERT_ENABLED, Normal, nullptr) \

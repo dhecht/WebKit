@@ -52,6 +52,8 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC { namespace B3 { namespace Air {
 
+static constexpr bool debugIntraBlock = false;
+
 namespace Greedy {
 
 // Experiments
@@ -1693,7 +1695,7 @@ private:
             return true;
         if (trySplitAroundClobbers<bank>(tmp, tmpData))
             return true;
-        return trySplitIntraBlock(tmp, tmpData);
+        return trySplitIntraBlock<bank>(tmp, tmpData);
     }
 
     bool trySplitGroup(Tmp tmp, TmpData& tmpData)
@@ -1811,12 +1813,19 @@ private:
         return true;
     }
 
+    template<Bank bank>
     bool trySplitIntraBlock(Tmp tmp, TmpData& tmpData)
     {
-        if (!Options::splitIntraBlocks())
+        static unsigned count;
+        if (count >= Options::splitIntraBlocks())
             return false;
         // XXX revisit
         if (tmpData.splitMetadataIndex)
+            return false;
+
+        // XXX revisit
+        unsigned tmpIndex = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
+        if (bank == GP && m_useCounts.isConstDef<bank>(tmpIndex))
             return false;
 
         BasicBlock* startBlock = findBlockContainingPoint(tmpData.liveRange.intervals().first().begin());
@@ -1851,6 +1860,7 @@ private:
                     Point positionOfEarly = this->positionOfEarly(positionOfHead, instIndex);
 
                     inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
+                        // XXX revisit colduse
                         if (t == tmp && !Arg::isColdUse(role)) {
                             tmpPtrs.append(&t);
                             // Note that the timing is irrelevant, just need to know the instruction that
@@ -1887,6 +1897,10 @@ private:
                     // Move to/from the original Tmp will be inserted as needed during insertFixupCode().
                     metadata->splits.append({ clusterTmp, lastDefPoint });
                     setStageAndEnqueue(clusterTmp, m_map[clusterTmp], Stage::TryAllocate);
+
+                    count++;
+                    if (count >= Options::splitIntraBlocks())
+                        break;
                 }
 
                 if (endPoint == interval.end())
@@ -1894,6 +1908,9 @@ private:
                 // The interval crosses a block boundary, start a new cluster.
                 remaining = { endPoint, remaining.end() };
             };
+            if (count >= Options::splitIntraBlocks())
+                break;
+
         }
         if (metadata) {
             // The original Tmp is spilled, but the cluster Tmps will hopefully
@@ -2294,12 +2311,17 @@ private:
                 insertSplitAroundClobbersFixupCode(metadata);
                 break;
             case SplitMetadata::Type::IntraBlock:
+                if (debugIntraBlock && !m_dodump) {
+                    dataLogLn("IR before insert fixup:\n", m_code);
+                    m_dodump = true;
+                }
                 insertSplitIntraBlockFixupCode(metadata);
                 break;
             }
         }
         for (BasicBlock* block : m_code)
             m_insertionSets[block].execute(block);
+        if (m_dodump) dataLogLn("IR after insert fixup:\n", m_code);
     }
 
     void insertSplitAroundClobbersFixupCode(SplitMetadata& metadata)
@@ -2482,6 +2504,9 @@ private:
     bool m_didSpill { false };
     bool m_foundIntraBlockOpportunities { false };
     Vector<Tmp> m_intraBlockOpportunityTmps; // Track tmps with split opportunities for later reporting
+public:
+    bool m_dodump { false };
+
 };
 
 } // namespace JSC::B3::Air::Greedy
@@ -2489,10 +2514,11 @@ private:
 void allocateRegistersByGreedy(Code& code)
 {
     PhaseScope phaseScope(code, "allocateRegistersByGreedy"_s);
-    dataLogIf(Greedy::verbose(), "Air before greedy register allocation:\n", code);
+    dataLogIf(Greedy::verbose() || debugIntraBlock, "Air before greedy register allocation:\n", code);
     Greedy::GreedyAllocator allocator(code);
     allocator.run();
-    dataLogIf(Greedy::verbose(), "Air after greedy register allocation:\n", code);
+    dataLogIf(Greedy::verbose() || allocator.m_dodump, "Air after greedy register allocation:\n", code);
+    dataLogIf(allocator.m_dodump, "State at end:\n", allocator);
 }
 
 } } } // namespace JSC::B3::Air
