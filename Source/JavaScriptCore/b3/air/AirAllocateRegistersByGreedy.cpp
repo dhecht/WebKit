@@ -1870,15 +1870,15 @@ private:
                         m_splitMetadata.constructAndAppend(SplitMetadata::Type::IntraBlock, tmp);
                         metadata = &m_splitMetadata.last();
                     }
-                    Point entryPre = instStartPosition(cluster.begin());
+                    Point entryStart = instStartPosition(cluster.begin());
                     // If the Tmp is live into the cluster then cluster range may need to be extended to
                     // model the load from the Tmp's spill slot before the first use.
-                    if (interval.contains(entryPre))
-                        cluster |= Interval(entryPre);
+                    if (interval.contains(entryStart))
+                        cluster |= Interval(entryStart + PointOffsets::Early);
                     // Likewise, if the cluster defs Tmp then a store to Tmp's spill slot will be needed
                     // after the final def point.
                     if (lastDefPoint)
-                        cluster |= Interval(instStartPosition(lastDefPoint) + PointOffsets::Post);
+                        cluster |= Interval(instStartPosition(lastDefPoint) + PointOffsets::Late);
 
                     ASSERT(tmpPtrs.size() > 1);
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
