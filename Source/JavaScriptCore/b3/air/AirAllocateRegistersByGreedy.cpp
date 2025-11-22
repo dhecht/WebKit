@@ -1816,8 +1816,7 @@ private:
     template<Bank bank>
     bool trySplitIntraBlock(Tmp tmp, TmpData& tmpData)
     {
-        static unsigned count;
-        if (count >= Options::splitIntraBlocks())
+        if (!Options::splitIntraBlocks())
             return false;
         // XXX revisit
         if (tmpData.splitMetadataIndex)
@@ -1897,10 +1896,6 @@ private:
                     // Move to/from the original Tmp will be inserted as needed during insertFixupCode().
                     metadata->splits.append({ clusterTmp, lastDefPoint });
                     setStageAndEnqueue(clusterTmp, m_map[clusterTmp], Stage::TryAllocate);
-
-                    count++;
-                    if (count >= Options::splitIntraBlocks())
-                        break;
                 }
 
                 if (endPoint == interval.end())
@@ -1908,9 +1903,6 @@ private:
                 // The interval crosses a block boundary, start a new cluster.
                 remaining = { endPoint, remaining.end() };
             };
-            if (count >= Options::splitIntraBlocks())
-                break;
-
         }
         if (metadata) {
             // The original Tmp is spilled, but the cluster Tmps will hopefully
