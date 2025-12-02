@@ -685,6 +685,9 @@ public:
 
         // Dump IR if we found intra-block split opportunities
         if (m_foundIntraBlockOpportunities && Options::airAnalyzeIntraBlockSplitOpportunities()) {
+            dataLogLn("\n=== INTRA-BLOCK SPLIT OUTCOMES ===");
+            reportIntraBlockSplitOutcomes();
+
             dataLogLn("\n=== SPILL SLOT MAPPING FOR OPPORTUNITIES ===");
             for (Tmp tmp : m_intraBlockOpportunityTmps) {
                 StackSlot* slot = m_map[tmp].spillSlot;
@@ -1816,21 +1819,33 @@ private:
     template<Bank bank>
     bool trySplitIntraBlock(Tmp tmp, TmpData& tmpData)
     {
-        if (!Options::splitIntraBlocks())
+        bool shouldLog = Options::airAnalyzeIntraBlockSplitOpportunities();
+
+        if (!Options::splitIntraBlocks()) {
+            dataLogLnIf(shouldLog, "IntraBlockSplit: SKIPPED ", tmp, " - option disabled");
             return false;
+        }
         // XXX revisit
-        if (tmpData.splitMetadataIndex)
+        if (tmpData.splitMetadataIndex) {
+            dataLogLnIf(shouldLog, "IntraBlockSplit: SKIPPED ", tmp, " - already split (splitMetadataIndex=", tmpData.splitMetadataIndex, ")");
             return false;
+        }
 
         // XXX revisit
         unsigned tmpIndex = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
-        if (bank == GP && m_useCounts.isConstDef<bank>(tmpIndex))
+        if (bank == GP && m_useCounts.isConstDef<bank>(tmpIndex)) {
+            dataLogLnIf(shouldLog, "IntraBlockSplit: SKIPPED ", tmp, " - const def");
             return false;
+        }
 
         BasicBlock* startBlock = findBlockContainingPoint(tmpData.liveRange.intervals().first().begin());
         Point last = tmpData.liveRange.intervals().last().end() - 1;
-        if (last <= positionOfTail(startBlock))
+        if (last <= positionOfTail(startBlock)) {
+            dataLogLnIf(shouldLog, "IntraBlockSplit: SKIPPED ", tmp, " - single block only");
             return false;
+        }
+
+        dataLogLnIf(shouldLog, "IntraBlockSplit: ATTEMPTING ", tmp, " (spillCost=", tmpData.spillCost(), ")", " liveRange=", tmpData.liveRange);
 
         SplitMetadata* metadata = nullptr;
         Vector<Tmp*, 8> tmpPtrs;
@@ -1847,14 +1862,14 @@ private:
                 Point positionOfHead = this->positionOfHead(block);
                 auto startIndex = instIndex(positionOfHead, startPoint);
                 Point positionOfTail = this->positionOfTail(block);
-                Point endPoint = std::min(positionOfTail + 1, interval.end());
+                Point endPoint = std::min(positionOfTail, remaining.end());
                 auto endIndex = instIndex(positionOfHead, endPoint);
 
                 Point lastDefPoint = 0;
                 Interval cluster = { };
                 tmpPtrs.shrink(0);
 
-                for (auto instIndex = startIndex; instIndex < endIndex; instIndex++) {
+                for (auto instIndex = startIndex; instIndex <= endIndex; instIndex++) {
                     Inst& inst = block->at(instIndex);
                     Point positionOfEarly = this->positionOfEarly(positionOfHead, instIndex);
 
@@ -1891,25 +1906,35 @@ private:
 
                     ASSERT(tmpPtrs.size() > 1);
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
+                    dataLogLnIf(shouldLog, "IntraBlockSplit:   Created cluster ", clusterTmp, " in BB", *block,
+                               " with ", tmpPtrs.size(), " uses, interval=", cluster);
                     for (auto& ptr : tmpPtrs)
                         *ptr = clusterTmp; // Within this cluster, use clusterTmp rather than Tmp
                     // Move to/from the original Tmp will be inserted as needed during insertFixupCode().
                     metadata->splits.append({ clusterTmp, lastDefPoint });
                     setStageAndEnqueue(clusterTmp, m_map[clusterTmp], Stage::TryAllocate);
                 }
-
-                if (endPoint == interval.end())
+                if (endPoint == remaining.end())
                     break;
                 // The interval crosses a block boundary, start a new cluster.
-                remaining = { endPoint, remaining.end() };
+                remaining = { endPoint + 1, remaining.end() };
             };
         }
         if (metadata) {
             // The original Tmp is spilled, but the cluster Tmps will hopefully
             // carry the value in registers during intra-block regions.
             spill(tmp, m_map[tmp]);
+            dataLogLnIf(shouldLog, "IntraBlockSplit: SUCCESS ", tmp, " - created ", metadata->splits.size(), " cluster tmps");
+
+            // Mark that we performed a split so we dump IR to see the results
+            if (shouldLog) {
+                m_foundIntraBlockOpportunities = true;
+                m_intraBlockOpportunityTmps.append(tmp);
+            }
+
             return true;
         }
+        dataLogLnIf(shouldLog, "IntraBlockSplit: FAILED ", tmp, " - no suitable clusters found");
         return false; // Caller will handle Tmp
     }
 
@@ -1926,6 +1951,7 @@ private:
             unsigned firstUse;
             unsigned lastUse;
             unsigned useCount;
+            unsigned coldUseCount;
 
             unsigned clusterSize() const { return lastUse - firstUse + 1; }
             float useDensity() const { return float(useCount) / clusterSize(); }
@@ -1937,6 +1963,7 @@ private:
             unsigned firstUse = UINT_MAX;
             unsigned lastUse = 0;
             unsigned useCount = 0;
+            unsigned coldUseCount = 0;
 
             for (unsigned instIndex = 0; instIndex < block->size(); ++instIndex) {
                 Inst& inst = block->at(instIndex);
@@ -1946,6 +1973,7 @@ private:
                         firstUse = std::min(firstUse, instIndex);
                         lastUse = std::max(lastUse, instIndex);
                         useCount++;
+                        coldUseCount += Arg::isColdUse(role);
                     }
                 });
             }
@@ -1954,7 +1982,7 @@ private:
             if (useCount >= 2) {
                 unsigned clusterSize = lastUse - firstUse + 1;
                 if (clusterSize >= 2) {
-                    BlockUseCluster cluster { block, firstUse, lastUse, useCount };
+                    BlockUseCluster cluster { block, firstUse, lastUse, useCount, coldUseCount };
                     clusters.append(cluster);
                 }
             }
@@ -1984,10 +2012,12 @@ private:
                 dataLogLn("  ALREADY_TRIED_SPLIT: no");
 
             dataLogLn("Spilled: ", tmp, " with ", clusters.size(), " use clusters (total benefit: ", totalBenefit, ")");
+            if (tmp.bank() == GP && m_useCounts.isConstDef<GP>(AbsoluteTmpMapper<GP>::absoluteIndex(tmp)))
+                dataLogLn("  is const def");
 
             for (auto& cluster : clusters) {
                 dataLogLn("  BB", *cluster.block, " [inst ", cluster.firstUse, "-", cluster.lastUse,
-                         "] ", cluster.useCount, " uses, density=", cluster.useDensity(),
+                         "] ", cluster.useCount, " uses, ", cluster.coldUseCount, " cold, density=", cluster.useDensity(),
                          ", freq=", cluster.block->frequency());
             }
 
@@ -1995,6 +2025,72 @@ private:
             m_foundIntraBlockOpportunities = true;
             dataLogLn("");
         }
+    }
+
+    void reportIntraBlockSplitOutcomes()
+    {
+        // Report what happened to each tmp that had an intra-block split opportunity
+        unsigned totalOpportunities = m_intraBlockOpportunityTmps.size();
+        unsigned splitAttempted = 0;
+        unsigned splitSucceeded = 0;
+        unsigned clustersCreated = 0;
+        unsigned clustersGotRegisters = 0;
+        unsigned clustersSpilled = 0;
+
+        for (Tmp tmp : m_intraBlockOpportunityTmps) {
+            TmpData& tmpData = m_map[tmp];
+
+            if (!tmpData.splitMetadataIndex) {
+                if (tmp.bank() == GP && m_useCounts.isConstDef<GP>(AbsoluteTmpMapper<GP>::absoluteIndex(tmp)))
+                    dataLogLn("  ", tmp, ": NOT SPLIT (const def)");
+                else
+                    dataLogLn("  ", tmp, ": NOT SPLIT (never attempted intra-block split)");
+                continue;
+            }
+
+            auto& metadata = m_splitMetadata[tmpData.splitMetadataIndex];
+            if (metadata.type != SplitMetadata::Type::IntraBlock) {
+                dataLogLn("  ", tmp, ": SPLIT (but not intra-block - type=", static_cast<int>(metadata.type), ")");
+                splitAttempted++;
+                continue;
+            }
+
+            // This tmp was split using intra-block splitting
+            splitAttempted++;
+            splitSucceeded++;
+
+            unsigned numClusters = metadata.splits.size();
+            clustersCreated += numClusters;
+
+            unsigned assigned = 0;
+            unsigned spilled = 0;
+
+            for (auto& split : metadata.splits) {
+                Tmp clusterTmp = split.tmp;
+                TmpData& clusterData = m_map[clusterTmp];
+
+                if (clusterData.stage == Stage::Assigned) {
+                    assigned++;
+                    clustersGotRegisters++;
+                } else if (clusterData.stage == Stage::Spilled) {
+                    spilled++;
+                    clustersSpilled++;
+                }
+            }
+
+            dataLogLn("  ", tmp, ": SPLIT into ", numClusters, " clusters - ",
+                     assigned, " got registers, ", spilled, " spilled");
+        }
+
+        dataLogLn("\nSUMMARY:");
+        dataLogLn("  Total opportunities identified: ", totalOpportunities);
+        dataLogLn("  Tmps that attempted splitting: ", splitAttempted);
+        dataLogLn("  Successful intra-block splits: ", splitSucceeded);
+        dataLogLn("  Total cluster tmps created: ", clustersCreated);
+        dataLogLn("  Cluster tmps assigned to registers: ", clustersGotRegisters,
+                 " (", clustersCreated ? (100.0 * clustersGotRegisters / clustersCreated) : 0, "%)");
+        dataLogLn("  Cluster tmps spilled: ", clustersSpilled,
+                 " (", clustersCreated ? (100.0 * clustersSpilled / clustersCreated) : 0, "%)");
     }
 
     static unsigned stackSlotMinimumWidth(Width width)
