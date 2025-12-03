@@ -1889,6 +1889,7 @@ private:
                 // Or instA def; instB use: also no gap. Should this be split? This does have a gap now with 4 ppi
                 // Worthwhile to have a cluster tmp only if more than one instruction will access it.
                 if (cluster && instIndex(positionOfHead, cluster.begin()) != instIndex(positionOfHead, cluster.end() - 1)) {
+                    ASSERT(tmpPtrs.size() > 1);
                     if (!metadata) {
                         m_map[tmp].splitMetadataIndex = m_splitMetadata.size();
                         m_splitMetadata.constructAndAppend(SplitMetadata::Type::IntraBlock, tmp);
@@ -2451,10 +2452,12 @@ private:
 
         auto intervalIter = liveRange.intervals().begin();
         auto intervalEnd = liveRange.intervals().end();
+        Point lastQuery = 0;
 
         auto isLiveAt = [&](Point point) {
-            // Point queries are monotonicly increasing
-            ASSERT(intervalIter == liveRange.intervals().begin() || intervalIter->begin() <= point);
+            ASSERT(lastQuery <= point);
+            lastQuery = point;
+            //ASSERT(intervalIter == liveRange.intervals().begin() || intervalIter->begin() <= point);
             while (intervalIter != intervalEnd && intervalIter->end() <= point)
                 ++intervalIter;
             return intervalIter != intervalEnd && intervalIter->contains(point);
