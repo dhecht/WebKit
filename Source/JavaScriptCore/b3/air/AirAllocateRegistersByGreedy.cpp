@@ -808,15 +808,15 @@ private:
         return positionOfHead + instIndex * PointOffsets::PointsPerInst + PointOffsets::Late;
     }
 
-    static Point instStartPosition(Point point)
+    static Point pointAtOffset(Point point, PointOffsets offset)
     {
         static_assert(!(PointOffsets::PointsPerInst & (PointOffsets::PointsPerInst - 1)));
-        return (point & ~(PointOffsets::PointsPerInst - 1));
+        return (point & ~(PointOffsets::PointsPerInst - 1)) + offset;
     }
 
     static Point positionOfEarly(Interval interval)
     {
-        return instStartPosition(interval.begin()) + PointOffsets::Early;
+        return pointAtOffset(interval.begin(), PointOffsets::Early);
     }
 
     static Interval earlyInterval(Point positionOfEarly)
@@ -1895,15 +1895,15 @@ private:
                         m_splitMetadata.constructAndAppend(SplitMetadata::Type::IntraBlock, tmp);
                         metadata = &m_splitMetadata.last();
                     }
-                    Point entryStart = instStartPosition(cluster.begin());
+                    Point pre = pointAtOffset(cluster.begin(), PointOffsets::Pre);
                     // If the Tmp is live into the cluster then cluster range may need to be extended to
                     // model the load from the Tmp's spill slot before the first use.
-                    if (interval.contains(entryStart))
-                        cluster |= Interval(entryStart + PointOffsets::Early);
+                    if (interval.contains(pre))
+                        cluster |= Interval(pre);
                     // Likewise, if the cluster defs Tmp then a store to Tmp's spill slot will be needed
                     // after the final def point.
                     if (lastDefPoint)
-                        cluster |= Interval(instStartPosition(lastDefPoint) + PointOffsets::Late);
+                        cluster |= Interval(pointAtOffset(lastDefPoint, PointOffsets::Post));
 
                     ASSERT(tmpPtrs.size() > 1);
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
@@ -2478,8 +2478,14 @@ private:
             LiveRange& clusterRange = m_map[clusterTmp].liveRange;
             ASSERT(clusterRange.intervals().size() == 1);
             const Interval& clusterInterval = clusterRange.intervals().first();
-            bool liveBefore = isLiveAt(clusterInterval.begin() - 1);
-            bool liveAfter = isLiveAt(clusterInterval.end());
+            Point early = pointAtOffset(clusterInterval.begin(), PointOffsets::Early);
+            bool liveBefore = isLiveAt(early - 1);
+            Point pre = pointAtOffset(clusterInterval.begin(), PointOffsets::Pre);
+            bool liveBefore2 = pre == clusterInterval.begin();
+            if (liveBefore != liveBefore2) {
+                dataLogLn("liveBefore=", liveBefore, ":", liveBefore2, " clusterInterval=", clusterInterval, " liveRange=", liveRange);
+            }
+            RELEASE_ASSERT(liveBefore == liveBefore2);
 
             BasicBlock* block = findBlockContainingPoint(clusterInterval.begin());
             Point positionOfHead = this->positionOfHead(block);
@@ -2491,7 +2497,7 @@ private:
                 ASSERT(split.lastDefPoint);
 
             // Need to store back into the spill slot only if the cluster def'ed the Tmp
-            if (liveAfter && split.lastDefPoint) {
+            if (split.lastDefPoint) {
                 unsigned instIndex = this->instIndex(positionOfHead, split.lastDefPoint);
                 m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, block->at(instIndex).origin, clusterTmp, Arg::stack(spilled));
             }
