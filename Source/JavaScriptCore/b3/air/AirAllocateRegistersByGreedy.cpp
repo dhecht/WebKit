@@ -1862,14 +1862,14 @@ private:
                 Point positionOfHead = this->positionOfHead(block);
                 auto startIndex = instIndex(positionOfHead, startPoint);
                 Point positionOfTail = this->positionOfTail(block);
-                Point endPoint = std::min(positionOfTail, remaining.end());
-                auto endIndex = instIndex(positionOfHead, endPoint);
+                Point lastPoint = std::min(positionOfTail, remaining.end() - 1);
+                auto lastIndex = instIndex(positionOfHead, lastPoint);
 
                 Point lastDefPoint = 0;
                 Interval cluster = { };
                 tmpPtrs.shrink(0);
 
-                for (auto instIndex = startIndex; instIndex <= endIndex; instIndex++) {
+                for (auto instIndex = startIndex; instIndex <= lastIndex; instIndex++) {
                     Inst& inst = block->at(instIndex);
                     Point positionOfEarly = this->positionOfEarly(positionOfHead, instIndex);
 
@@ -1877,53 +1877,48 @@ private:
                         // XXX revisit colduse
                         if (t == tmp && !Arg::isColdUse(role)) {
                             tmpPtrs.append(&t);
-                            // Note that the timing is irrelevant, just need to know the instruction that
-                            // performs the def so we know where to insert the store back to the spill slot.
                             if (Arg::isAnyDef(role))
-                                lastDefPoint = positionOfEarly;
+                                lastDefPoint = positionOfEarly; // Remember where the fixup store to spill is needed
                             cluster |= intervalForTiming(positionOfEarly, Arg::timing(role));
                         }
                     });
                 }
                 // XXX what if use is before def? i.e. no gap between in RMW inst.
-                // Or instA def; instB use: also no gap. Should this be split? This does have a gap now with 4 ppi
-                // Worthwhile to have a cluster tmp only if more than one instruction will access it.
-                if (cluster && tmpPtrs.size() > 1 /*instIndex(positionOfHead, cluster.begin()) != instIndex(positionOfHead, cluster.end() - 1)*/) {
-                    ASSERT(tmpPtrs.size() > 1);
+                if (tmpPtrs.size() > 1) {
+                    ASSERT(cluster);
                     if (!metadata) {
                         m_map[tmp].splitMetadataIndex = m_splitMetadata.size();
                         m_splitMetadata.constructAndAppend(SplitMetadata::Type::IntraBlock, tmp);
                         metadata = &m_splitMetadata.last();
                     }
                     Point pre = pointAtOffset(cluster.begin(), PointOffsets::Pre);
-                    // If the Tmp is live into the cluster then cluster range may need to be extended to
-                    // model the load from the Tmp's spill slot before the first use.
+                    // If the Tmp is live into the cluster then cluster range is extended to model the fixup load from
+                    // the Tmp's spill slot before the first use. This also allows insertSplitIntraBlockFixupCode()
+                    // to quickly determine whether the fixup load is needed.
                     if (interval.contains(pre))
                         cluster |= Interval(pre);
-                    // Likewise, if the cluster defs Tmp then a store to Tmp's spill slot will be needed
-                    // after the final def point.
+                    // Likewise, if the cluster defs Tmp then a store to Tmp's spill slot will be needed after the final def point.
                     if (lastDefPoint)
                         cluster |= Interval(pointAtOffset(lastDefPoint, PointOffsets::Post));
 
-                    ASSERT(tmpPtrs.size() > 1);
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
                     dataLogLnIf(shouldLog, "IntraBlockSplit:   Created cluster ", clusterTmp, " in BB", *block,
                                " with ", tmpPtrs.size(), " uses, interval=", cluster);
                     for (auto& ptr : tmpPtrs)
                         *ptr = clusterTmp; // Within this cluster, use clusterTmp rather than Tmp
-                    // Move to/from the original Tmp will be inserted as needed during insertFixupCode().
                     metadata->splits.append({ clusterTmp, lastDefPoint });
                     setStageAndEnqueue(clusterTmp, m_map[clusterTmp], Stage::TryAllocate);
                 }
-                if (endPoint == remaining.end())
-                    break;
-                // The interval crosses a block boundary, start a new cluster.
-                remaining = { endPoint + 1, remaining.end() };
+                if (lastPoint == remaining.end() - 1)
+                    break; // Completely consumed remaining
+                // The interval crosses a block boundary, start a new cluster for the next block.
+                ASSERT(lastPoint == positionOfTail);
+                remaining = { positionOfTail + 1, remaining.end() };
             };
         }
         if (metadata) {
-            // The original Tmp is spilled, but the cluster Tmps will hopefully
-            // carry the value in registers during intra-block regions.
+            // The original Tmp is spilled, but the cluster Tmps will hopefully carry the value in registers
+            // within the cluster intervals.
             spill(tmp, m_map[tmp]);
             dataLogLnIf(shouldLog, "IntraBlockSplit: SUCCESS ", tmp, " - created ", metadata->splits.size(), " cluster tmps");
 
