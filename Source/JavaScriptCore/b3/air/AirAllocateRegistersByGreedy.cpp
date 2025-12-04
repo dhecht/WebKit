@@ -1888,7 +1888,7 @@ private:
                 // XXX what if use is before def? i.e. no gap between in RMW inst.
                 // Or instA def; instB use: also no gap. Should this be split? This does have a gap now with 4 ppi
                 // Worthwhile to have a cluster tmp only if more than one instruction will access it.
-                if (cluster && instIndex(positionOfHead, cluster.begin()) != instIndex(positionOfHead, cluster.end() - 1)) {
+                if (cluster && tmpPtrs.size() > 1 /*instIndex(positionOfHead, cluster.begin()) != instIndex(positionOfHead, cluster.end() - 1)*/) {
                     ASSERT(tmpPtrs.size() > 1);
                     if (!metadata) {
                         m_map[tmp].splitMetadataIndex = m_splitMetadata.size();
@@ -2608,7 +2608,7 @@ void allocateRegistersByGreedy(Code& code)
     dataLogIf(Greedy::verbose() || debugIntraBlock, "Air before greedy register allocation:\n", code);
     Greedy::GreedyAllocator allocator(code);
     allocator.run();
-    dataLogIf(Greedy::verbose() || allocator.m_dodump, "Air after greedy register allocation:\n", code);
+    dataLogIf(Greedy::verbose() || debugIntraBlock || allocator.m_dodump, "Air after greedy register allocation:\n", code);
     dataLogIf(allocator.m_dodump, "State at end:\n", allocator);
 }
 

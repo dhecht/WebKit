@@ -40,6 +40,8 @@ namespace JSC { namespace B3 { namespace Air {
 
 namespace {
 
+static constexpr bool dmhVerbose = false;
+
 namespace AirFixObviousSpillsInternal {
 static constexpr bool verbose = false;
 }
@@ -246,11 +248,13 @@ private:
                     uint64_t delta = myValue - otherValue;
                     
                     if (Arg::isValidImmForm(delta)) {
+                        //dataLogLn("FixObviousSpills: ", *m_block, " Mov->Add before: ", inst);
                         inst.kind = Add64;
                         inst.args.resize(3);
                         inst.args[0] = Arg::imm(delta);
                         inst.args[1] = Tmp(regConst.reg);
                         inst.args[2] = Tmp(myDest);
+                        //dataLogLn("FixObviousSpills: ", *m_block, " Mov->Add after: ", inst);
                         return;
                     }
                 }
@@ -320,12 +324,18 @@ private:
         };
         
         inst.forEachArg(handleArg);
-        if (!didThings || inst.isValidForm())
+        if (!didThings || inst.isValidForm()) {
+            if (dmhVerbose && didThings) {
+                dataLogLn("FixObviousSpills: ", *m_block, " before: ", instCopy);
+                dataLogLn("FixObviousSpills: ", *m_block, " after: ", inst);
+                m_dump = true;
+            }
             return;
-        
+        }
         // We introduced something invalid along the way. Back up and carefully handle each argument.
         inst = instCopy;
         ASSERT(inst.isValidForm());
+        didThings = false;
         inst.forEachArg(
             [&] (Arg& arg, Arg::Role role, Bank bank, Width width) {
                 Arg argCopy = arg;
@@ -333,6 +343,11 @@ private:
                 if (!inst.isValidForm())
                     arg = argCopy;
             });
+        if (dmhVerbose && didThings) {
+            dataLogLn("FixObviousSpills slow: ", *m_block, " before: ", instCopy);
+            dataLogLn("FixObviousSpills slow: ", *m_block, " after: ", inst);
+            m_dump = true;
+        }
     }
     
     static bool isSpillSlot(const Arg& arg)
@@ -655,6 +670,8 @@ private:
     BitVector m_shouldVisit;
     BasicBlock* m_block { nullptr };
     unsigned m_instIndex { 0 };
+public:
+    bool m_dump { false };
 };
 
 } // anonymous namespace
@@ -674,7 +691,8 @@ void fixObviousSpills(Code& code)
         dataLogLn("\n=== AIR AFTER fixObviousSpills ===");
         dataLogLn(code);
         dataLogLn("=== END IR (after fixObviousSpills) ===\n");
-    }
+    } else if (fixObviousSpills.m_dump)
+        dataLogLn("\n=== AIR AFTER fixObviousSpills (no intra-block splits)");
 }
 
 } } } // namespace JSC::B3::Air
