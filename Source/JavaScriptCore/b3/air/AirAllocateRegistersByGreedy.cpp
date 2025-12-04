@@ -685,20 +685,20 @@ public:
 
         // Dump IR if we found intra-block split opportunities
         if (m_foundIntraBlockOpportunities && Options::airAnalyzeIntraBlockSplitOpportunities()) {
-            dataLogLn("\n=== INTRA-BLOCK SPLIT OUTCOMES ===");
+            dataLogLnIf(verboseIntraBlockOpportunity, "\n=== INTRA-BLOCK SPLIT OUTCOMES ===");
             reportIntraBlockSplitOutcomes();
 
-            dataLogLn("\n=== SPILL SLOT MAPPING FOR OPPORTUNITIES ===");
+            dataLogLnIf(verboseIntraBlockOpportunity, "\n=== SPILL SLOT MAPPING FOR OPPORTUNITIES ===");
             for (Tmp tmp : m_intraBlockOpportunityTmps) {
                 StackSlot* slot = m_map[tmp].spillSlot;
-                dataLogLn("  ", tmp, " -> ", pointerDump(slot), " (", slot ? slot->byteSize() : 0, " bytes)");
+                dataLogLnIf(verboseIntraBlockOpportunity, "  ", tmp, " -> ", pointerDump(slot), " (", slot ? slot->byteSize() : 0, " bytes)");
             }
-            dataLogLn("\n=== AIR BEFORE REGISTER ASSIGNMENT (showing Tmps and StackSlots) ===");
-            dataLogLn(m_code);
-            dataLogLn("=== END IR ===\n");
+            dataLogLnIf(verboseIntraBlockOpportunity, "\n=== AIR BEFORE REGISTER ASSIGNMENT (showing Tmps and StackSlots) ===");
+            dataLogLnIf(verboseIntraBlockOpportunity, m_code);
+            dataLogLnIf(verboseIntraBlockOpportunity, "=== END IR ===\n");
 
             // Signal to fixObviousSpills that we found opportunities
-            m_code.setFoundIntraBlockSplitOpportunities(true);
+            m_code.setFoundIntraBlockSplitOpportunities(verboseIntraBlockOpportunity);
         }
 
         assignRegisters();
@@ -1819,7 +1819,7 @@ private:
     template<Bank bank>
     bool trySplitIntraBlock(Tmp tmp, TmpData& tmpData)
     {
-        bool shouldLog = Options::airAnalyzeIntraBlockSplitOpportunities();
+        bool shouldLog = false && Options::airAnalyzeIntraBlockSplitOpportunities();
 
         if (!Options::splitIntraBlocks()) {
             dataLogLnIf(shouldLog, "IntraBlockSplit: SKIPPED ", tmp, " - option disabled");
@@ -1939,6 +1939,8 @@ private:
         return false; // Caller will handle Tmp
     }
 
+    static constexpr bool verboseIntraBlockOpportunity = false;
+
     void analyzeIntraBlockSplitOpportunity(Tmp tmp, TmpData& tmpData)
     {
         if (!Options::airAnalyzeIntraBlockSplitOpportunities())
@@ -2004,27 +2006,27 @@ private:
             // Track this tmp for later spill slot reporting
             m_intraBlockOpportunityTmps.append(tmp);
 
-            dataLogLn("\n=== INTRA-BLOCK SPLIT OPPORTUNITY ===");
+            dataLogLnIf(verboseIntraBlockOpportunity, "\n=== INTRA-BLOCK SPLIT OPPORTUNITY ===");
 
             // Check if a prior split (clobber-based) was already attempted
             if (tmpData.splitMetadataIndex)
-                dataLogLn("  ALREADY_TRIED_SPLIT: yes");
+                dataLogLnIf(verboseIntraBlockOpportunity, "  ALREADY_TRIED_SPLIT: yes");
             else
-                dataLogLn("  ALREADY_TRIED_SPLIT: no");
+                dataLogLnIf(verboseIntraBlockOpportunity, "  ALREADY_TRIED_SPLIT: no");
 
-            dataLogLn("Spilled: ", tmp, " with ", clusters.size(), " use clusters (total benefit: ", totalBenefit, ")");
+            dataLogLnIf(verboseIntraBlockOpportunity, "Spilled: ", tmp, " with ", clusters.size(), " use clusters (total benefit: ", totalBenefit, ")");
             if (tmp.bank() == GP && m_useCounts.isConstDef<GP>(AbsoluteTmpMapper<GP>::absoluteIndex(tmp)))
-                dataLogLn("  is const def");
+                dataLogLnIf(verboseIntraBlockOpportunity, "  is const def");
 
             for (auto& cluster : clusters) {
-                dataLogLn("  BB", *cluster.block, " [inst ", cluster.firstUse, "-", cluster.lastUse,
+                dataLogLnIf(verboseIntraBlockOpportunity, "  BB", *cluster.block, " [inst ", cluster.firstUse, "-", cluster.lastUse,
                          "] ", cluster.useCount, " uses, ", cluster.coldUseCount, " cold, density=", cluster.useDensity(),
                          ", freq=", cluster.block->frequency());
             }
 
             // Mark that we found an opportunity so we can dump IR later
             m_foundIntraBlockOpportunities = true;
-            dataLogLn("");
+            dataLogLnIf(verboseIntraBlockOpportunity, "");
         }
     }
 
@@ -2043,16 +2045,19 @@ private:
 
             if (!tmpData.splitMetadataIndex) {
                 if (tmp.bank() == GP && m_useCounts.isConstDef<GP>(AbsoluteTmpMapper<GP>::absoluteIndex(tmp)))
-                    dataLogLn("  ", tmp, ": NOT SPLIT (const def)");
-                else
-                    dataLogLn("  ", tmp, ": NOT SPLIT (never attempted intra-block split)");
+                    dataLogLnIf(verboseIntraBlockOpportunity, "  ", tmp, ": NOT SPLIT (const def)");
+                else {
+                    dataLogLnIf(verboseIntraBlockOpportunity, "  ", tmp, ": NOT SPLIT (never attempted intra-block split)");
+                    RELEASE_ASSERT_NOT_REACHED();
+                }
                 continue;
             }
 
             auto& metadata = m_splitMetadata[tmpData.splitMetadataIndex];
             if (metadata.type != SplitMetadata::Type::IntraBlock) {
-                dataLogLn("  ", tmp, ": SPLIT (but not intra-block - type=", static_cast<int>(metadata.type), ")");
+                dataLogLnIf(verboseIntraBlockOpportunity, "  ", tmp, ": SPLIT (but not intra-block - type=", static_cast<int>(metadata.type), ")");
                 splitAttempted++;
+                RELEASE_ASSERT_NOT_REACHED();
                 continue;
             }
 
@@ -2079,18 +2084,18 @@ private:
                 }
             }
 
-            dataLogLn("  ", tmp, ": SPLIT into ", numClusters, " clusters - ",
+            dataLogLnIf(verboseIntraBlockOpportunity, "  ", tmp, ": SPLIT into ", numClusters, " clusters - ",
                      assigned, " got registers, ", spilled, " spilled");
         }
 
-        dataLogLn("\nSUMMARY:");
-        dataLogLn("  Total opportunities identified: ", totalOpportunities);
-        dataLogLn("  Tmps that attempted splitting: ", splitAttempted);
-        dataLogLn("  Successful intra-block splits: ", splitSucceeded);
-        dataLogLn("  Total cluster tmps created: ", clustersCreated);
-        dataLogLn("  Cluster tmps assigned to registers: ", clustersGotRegisters,
+        dataLogLnIf(verboseIntraBlockOpportunity, "\nSUMMARY:");
+        dataLogLnIf(verboseIntraBlockOpportunity, "  Total opportunities identified: ", totalOpportunities);
+        dataLogLnIf(verboseIntraBlockOpportunity, "  Tmps that attempted splitting: ", splitAttempted);
+        dataLogLnIf(verboseIntraBlockOpportunity, "  Successful intra-block splits: ", splitSucceeded);
+        dataLogLnIf(verboseIntraBlockOpportunity, "  Total cluster tmps created: ", clustersCreated);
+        dataLogLnIf(verboseIntraBlockOpportunity, "  Cluster tmps assigned to registers: ", clustersGotRegisters,
                  " (", clustersCreated ? (100.0 * clustersGotRegisters / clustersCreated) : 0, "%)");
-        dataLogLn("  Cluster tmps spilled: ", clustersSpilled,
+        dataLogLnIf(verboseIntraBlockOpportunity, "  Cluster tmps spilled: ", clustersSpilled,
                  " (", clustersCreated ? (100.0 * clustersSpilled / clustersCreated) : 0, "%)");
     }
 
