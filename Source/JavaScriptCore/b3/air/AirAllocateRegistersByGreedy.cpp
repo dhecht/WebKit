@@ -2449,54 +2449,32 @@ private:
     void insertSplitIntraBlockFixupCode(SplitMetadata& metadata)
     {
         Tmp originalTmp = metadata.originalTmp;
-        LiveRange& liveRange = m_map[originalTmp].liveRange;
         Opcode move = moveOpcode(originalTmp);
-
         StackSlot* spilled = spillSlot(originalTmp);
         ASSERT(spilled);
-
-        auto intervalIter = liveRange.intervals().begin();
-        auto intervalEnd = liveRange.intervals().end();
-        Point lastQuery = 0;
-
-        auto isLiveAt = [&](Point point) {
-            ASSERT(lastQuery <= point);
-            lastQuery = point;
-            //ASSERT(intervalIter == liveRange.intervals().begin() || intervalIter->begin() <= point);
-            while (intervalIter != intervalEnd && intervalIter->end() <= point)
-                ++intervalIter;
-            return intervalIter != intervalEnd && intervalIter->contains(point);
-        };
 
         for (auto& split : metadata.splits) {
             Tmp clusterTmp = split.tmp;
             if (spillSlot(clusterTmp)) {
                 ASSERT(spillSlot(clusterTmp) == spillSlot(originalTmp));
-                continue; // Nothing to do since the same spill slot was used
+                continue; // No fixup needed since the same spill slot is used
             }
 
             LiveRange& clusterRange = m_map[clusterTmp].liveRange;
             ASSERT(clusterRange.intervals().size() == 1);
             const Interval& clusterInterval = clusterRange.intervals().first();
-            Point early = pointAtOffset(clusterInterval.begin(), PointOffsets::Early);
-            bool liveBefore = isLiveAt(early - 1);
-            Point pre = pointAtOffset(clusterInterval.begin(), PointOffsets::Pre);
-            bool liveBefore2 = pre == clusterInterval.begin();
-            if (liveBefore != liveBefore2) {
-                dataLogLn("liveBefore=", liveBefore, ":", liveBefore2, " clusterInterval=", clusterInterval, " liveRange=", liveRange);
-            }
-            RELEASE_ASSERT(liveBefore == liveBefore2);
 
             BasicBlock* block = findBlockContainingPoint(clusterInterval.begin());
             Point positionOfHead = this->positionOfHead(block);
 
-            if (liveBefore) {
+            // trySplitIntraBlock includes the Pre point in the cluster interval iff the original Tmp is live into the cluster.
+            if (pointAtOffset(clusterInterval.begin(), PointOffsets::Pre) == clusterInterval.begin()) {
                 unsigned instIndex = this->instIndex(positionOfHead, clusterInterval.begin());
                 m_insertionSets[block].insert(instIndex, splitMoveFrom, move, block->at(instIndex).origin, Arg::stack(spilled), clusterTmp);
             } else
                 ASSERT(split.lastDefPoint);
 
-            // Need to store back into the spill slot only if the cluster def'ed the Tmp
+            // Need to store back into the original Tmp's spill slot only if the cluster def'ed the Tmp
             if (split.lastDefPoint) {
                 unsigned instIndex = this->instIndex(positionOfHead, split.lastDefPoint);
                 m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, block->at(instIndex).origin, clusterTmp, Arg::stack(spilled));
