@@ -1813,12 +1813,15 @@ private:
         }
         dataLogLnIf(verbose(), "Split (clobbers): reg = ", bestSplitReg, " spillCost = ", m_map[tmp].spillCost(), " splitCost = ", minSplitCost, " split tmp = ", metadata);
         m_splitMetadata.append(WTFMove(metadata));
+        m_stats[bank].numClobberSplitTmps++;
         return true;
     }
 
     template<Bank bank>
     bool trySplitIntraBlock(Tmp tmp, TmpData& tmpData)
     {
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::trySplitIntraBlock"_s);
+
         bool shouldLog = false && Options::airAnalyzeIntraBlockSplitOpportunities();
 
         if (!Options::splitIntraBlocks()) {
@@ -1884,6 +1887,7 @@ private:
                     });
                 }
                 // XXX what if use is before def? i.e. no gap between in RMW inst.
+                // XXX what if spill slot can be addressed directly? Is it still worthwhile?
                 if (tmpPtrs.size() > 1) {
                     ASSERT(cluster);
                     if (!metadata) {
@@ -1902,6 +1906,7 @@ private:
                         cluster |= Interval(pointAtOffset(lastDefPoint, PointOffsets::Post));
 
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
+                    m_stats[bank].numIntraBlockClusterTmps++;
                     dataLogLnIf(shouldLog, "IntraBlockSplit:   Created cluster ", clusterTmp, " in BB", *block,
                                " with ", tmpPtrs.size(), " uses, interval=", cluster);
                     for (auto& ptr : tmpPtrs)
@@ -1927,10 +1932,11 @@ private:
                 m_foundIntraBlockOpportunities = true;
                 m_intraBlockOpportunityTmps.append(tmp);
             }
-
+            m_stats[bank].numIntraBlockSplitTmps++;
             return true;
         }
         dataLogLnIf(shouldLog, "IntraBlockSplit: FAILED ", tmp, " - no suitable clusters found");
+        m_stats[bank].numIntraBlockSplitFailures++;
         return false; // Caller will handle Tmp
     }
 
@@ -1992,11 +1998,6 @@ private:
             float totalBenefit = 0;
             for (auto& cluster : clusters)
                 totalBenefit += cluster.block->frequency() * cluster.useCount * cluster.useDensity();
-
-            // Update stats
-            Bank bank = tmp.bank();
-            m_stats[bank].numIntraBlockSplitOpportunities++;
-            m_stats[bank].totalIntraBlockSplitBenefit += static_cast<unsigned>(totalBenefit);
 
             // Track this tmp for later spill slot reporting
             m_intraBlockOpportunityTmps.append(tmp);
@@ -2303,6 +2304,7 @@ private:
                             scratchForTmp = arg.tmp();
                         }
                         arg = Arg::stack(spilled);
+                        m_stats[bank].numInPlaceSpill++;
                     });
 
                 if (didSpill && canUseMove32IfDidSpill)
@@ -2415,8 +2417,10 @@ private:
 
     void insertSplitAroundClobbersFixupCode(SplitMetadata& metadata)
     {
-        if (spillSlot(metadata.originalTmp))
+        if (spillSlot(metadata.originalTmp)) {
+            m_stats[metadata.originalTmp.bank()].numClobberSplitSpilled++;
             return; // If spilled, better to not split after all. See spill().
+        }
         ASSERT(assignedReg(metadata.originalTmp));
         // Emit moves to and from the gapTmps (or stack stot) that fill the split holes.
         for (auto& split : metadata.splits) {
@@ -2444,6 +2448,7 @@ private:
     void insertSplitIntraBlockFixupCode(SplitMetadata& metadata)
     {
         Tmp originalTmp = metadata.originalTmp;
+        Bank bank = originalTmp.bank();
         Opcode move = moveOpcode(originalTmp);
         StackSlot* spilled = spillSlot(originalTmp);
         ASSERT(spilled);
@@ -2452,6 +2457,7 @@ private:
             Tmp clusterTmp = split.tmp;
             if (spillSlot(clusterTmp)) {
                 ASSERT(spillSlot(clusterTmp) == spillSlot(originalTmp));
+                m_stats[bank].numIntraBlockClusterTmpsSpilled++;
                 continue; // No fixup needed since the same spill slot is used
             }
 
@@ -2466,6 +2472,7 @@ private:
             if (pointAtOffset(clusterInterval.begin(), PointOffsets::Pre) == clusterInterval.begin()) {
                 unsigned instIndex = this->instIndex(positionOfHead, clusterInterval.begin());
                 m_insertionSets[block].insert(instIndex, splitMoveFrom, move, block->at(instIndex).origin, Arg::stack(spilled), clusterTmp);
+                m_stats[bank].numIntraBlockClusterLoad++;
             } else
                 ASSERT(split.lastDefPoint);
 
@@ -2473,6 +2480,7 @@ private:
             if (split.lastDefPoint) {
                 unsigned instIndex = this->instIndex(positionOfHead, split.lastDefPoint);
                 m_insertionSets[block].insert(instIndex + 1, splitMoveTo, move, block->at(instIndex).origin, clusterTmp, Arg::stack(spilled));
+                m_stats[bank].numIntraBlockClusterStore++;
             }
         }
     }
