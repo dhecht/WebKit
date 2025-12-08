@@ -704,6 +704,8 @@ public:
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
 
+        m_stats[GP].didSpill += m_didSpill[GP];
+        m_stats[FP].didSpill += m_didSpill[FP];
         m_stats[GP].numTmpsOut = m_code.numTmps(GP);
         m_stats[FP].numTmpsOut = m_code.numTmps(FP);
     }
@@ -769,6 +771,7 @@ private:
             m_tailPoints[i] = tailPosition;
             headPosition += block->size() * PointOffsets::PointsPerInst;
         }
+        m_stats[GP].numInsts += (tailPosition + 1) / PointOffsets::PointsPerInst;
     }
 
     BasicBlock* findBlockContainingPoint(Point point)
@@ -1514,9 +1517,10 @@ private:
                 }
                 RELEASE_ASSERT_NOT_REACHED();
             }
-            if (m_didSpill) {
+            if (m_needsEmitSpillCode) {
                 emitSpillCodeAndEnqueueNewTmps<bank>();
-                m_didSpill = false;
+                m_needsEmitSpillCode = false;
+                m_didSpill[bank] = true;
             }
             // Process the spill/fill tmps,
         } while (!m_queue.isEmpty());
@@ -1854,6 +1858,10 @@ private:
         Vector<Tmp*, 8> tmpPtrs;
 
         size_t numIntervals = tmpData.liveRange.intervals().size();
+        BasicBlock* lastBlock = nullptr;
+        unsigned instExaminedInBlock = 0;
+        bool foundCluster = false;
+        bool hasUseDef = false;
         // Note: this loop calls newTmp() which invalidates the tmpData reference.
         for (size_t i = 0; i < numIntervals; i++) {
             Interval interval = *(m_map[tmp].liveRange.intervals().begin() + i);
@@ -1872,6 +1880,21 @@ private:
                 Interval cluster = { };
                 tmpPtrs.shrink(0);
 
+                if (block != lastBlock) {
+                    if (foundCluster) {
+                        m_stats[bank].numIntraBlockGoodBlocks++;
+                        m_stats[bank].numIntraBlockInstGoodBlock += instExaminedInBlock;
+                    } else {
+                        m_stats[bank].numIntraBlockBadBlocks++;
+                        m_stats[bank].numIntraBlockInstBadBlock += instExaminedInBlock;
+                        m_stats[bank].numIntraBlockBadBlocksWithUseDef += hasUseDef;
+                    }
+
+                    instExaminedInBlock = 0;
+                    foundCluster = false;
+                }
+
+                ASSERT(lastIndex >= startIndex);
                 for (auto instIndex = startIndex; instIndex <= lastIndex; instIndex++) {
                     Inst& inst = block->at(instIndex);
                     Point positionOfEarly = this->positionOfEarly(positionOfHead, instIndex);
@@ -1886,9 +1909,15 @@ private:
                         }
                     });
                 }
+                m_stats[bank].numIntraBlockInstExamined += lastIndex - startIndex + 1;
+                instExaminedInBlock += lastIndex - startIndex + 1;
                 // XXX what if use is before def? i.e. no gap between in RMW inst.
                 // XXX what if spill slot can be addressed directly? Is it still worthwhile?
                 if (tmpPtrs.size() > 1) {
+                    m_stats[bank].numIntraBlockInstUseDefsFound += tmpPtrs.size();
+                    m_stats[bank].numIntraBlockInstFoundCluster += lastIndex - startIndex + 1;
+                    foundCluster = true;
+
                     ASSERT(cluster);
                     if (!metadata) {
                         m_map[tmp].splitMetadataIndex = m_splitMetadata.size();
@@ -1913,6 +1942,9 @@ private:
                         *ptr = clusterTmp; // Within this cluster, use clusterTmp rather than Tmp
                     metadata->splits.append({ clusterTmp, lastDefPoint });
                     setStageAndEnqueue(clusterTmp, m_map[clusterTmp], Stage::TryAllocate);
+                } else {
+                    if (tmpPtrs.size()) hasUseDef = true;
+                    m_stats[bank].numIntraBlockInstNoCluster += lastIndex - startIndex + 1;
                 }
                 if (lastPoint == remaining.end() - 1)
                     break; // Completely consumed remaining
@@ -2136,7 +2168,7 @@ private:
         }
         // Batch the generation of spill/fill tmps so that we can limit traversals of the code while
         // not tracking each tmp's use/defs explicitly.
-        m_didSpill = true;
+        m_needsEmitSpillCode = true;
         tmpData.validate();
     }
 
@@ -2584,7 +2616,8 @@ private:
     UseCounts m_useCounts;
     TmpWidth m_tmpWidth;
     std::array<AirAllocateRegistersStats, numBanks> m_stats = { GP, FP };
-    bool m_didSpill { false };
+    std::array<bool, numBanks> m_didSpill { false };
+    bool m_needsEmitSpillCode { false };
     bool m_foundIntraBlockOpportunities { false };
     Vector<Tmp> m_intraBlockOpportunityTmps; // Track tmps with split opportunities for later reporting
 public:
