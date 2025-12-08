@@ -57,15 +57,6 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numIntraBlockClusterTmpsSpilled)      \
     macro(numIntraBlockClusterLoad)             \
     macro(numIntraBlockClusterStore)            \
-    macro(numIntraBlockInstExamined)            \
-    macro(numIntraBlockInstUseDefsFound)        \
-    macro(numIntraBlockInstNoCluster)        \
-    macro(numIntraBlockInstFoundCluster)        \
-    macro(numIntraBlockGoodBlocks)        \
-    macro(numIntraBlockInstGoodBlock)        \
-    macro(numIntraBlockBadBlocks)        \
-    macro(numIntraBlockInstBadBlock)        \
-    macro(numIntraBlockBadBlocksWithUseDef)        \
     macro(numInsts)        \
 
 class AirAllocateRegistersStats {

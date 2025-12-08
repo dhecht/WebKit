@@ -606,6 +606,23 @@ struct TmpData {
     Reg assigned;
 };
 
+class UseDefList {
+public:
+    using List = Vector<Point, 4>;
+
+    void add(Point instPoint) {
+        if (m_instPoints.isEmpty() || m_instPoints.last() != instPoint) {
+            ASSERT(m_instPoints.isEmpty() || m_instPoints.last() < instPoint);
+            m_instPoints.append(instPoint);
+        }
+    }
+
+    const List& useDefs() { return m_instPoints; }
+
+private:
+    List m_instPoints;
+};
+
 // SplitMetadata tracks a Tmp that is split and the new Tmps that are used to carry the value
 // across the "gaps".
 struct SplitMetadata {
@@ -650,6 +667,7 @@ public:
         , m_blockToHeadPoint(code.size())
         , m_tailPoints(code.size())
         , m_map(code)
+        , m_useDefLists()
         , m_splitMetadata(1) // Sacrifice index 0.
         , m_regRanges(Reg::maxIndex() + 1)
         , m_insertionSets(code.size())
@@ -689,7 +707,8 @@ public:
             reportIntraBlockSplitOutcomes();
 
             dataLogLnIf(verboseIntraBlockOpportunity, "\n=== SPILL SLOT MAPPING FOR OPPORTUNITIES ===");
-            for (Tmp tmp : m_intraBlockOpportunityTmps) {
+            for (auto& opportunity : m_intraBlockOpportunityTmps) {
+                Tmp tmp = opportunity.tmp;
                 StackSlot* slot = m_map[tmp].spillSlot;
                 dataLogLnIf(verboseIntraBlockOpportunity, "  ", tmp, " -> ", pointerDump(slot), " (", slot ? slot->byteSize() : 0, " bytes)");
             }
@@ -1821,6 +1840,57 @@ private:
         return true;
     }
 
+    void ensureUseDefLists()
+    {
+        if (m_hasUseDefLists)
+            return;
+
+        m_useDefLists.resize(m_code);
+
+        for (BasicBlock* block : m_code) {
+            Point instPoint = this->positionOfHead(block);
+            for (Inst& inst : block->insts()) {
+                inst.forEachArg([&](Arg& arg, Arg::Role, Bank, Width) {
+                    arg.forEachTmpFast([&](Tmp& tmp) {
+                        m_useDefLists[tmp].add(instPoint);
+                    });
+                });
+                instPoint += PointOffsets::PointsPerInst;
+            }
+        }
+    
+        m_hasUseDefLists = true;
+    }
+
+    template<typename Func>
+    Interval forEachUseDefInRange(Tmp tmp, Interval range, const Func& func)
+    {
+        auto& useDefs = m_useDefLists[tmp].useDefs();
+
+        Point start = pointAtOffset(range.begin(), PointOffsets::Pre);
+        Point end = range.end();
+
+        size_t i = 0;
+        for (; i < useDefs.size(); i++) {
+            if (start <= useDefs[i])
+                break;
+        }
+        if (i == useDefs.size() || end <= useDefs[i])
+            return { }; // No more use/defs in range
+        
+        BasicBlock* block = findBlockContainingPoint(useDefs[i]);
+        Point positionOfHead = this->positionOfHead(block);
+        Point positionOfTail = this->positionOfTail(block);
+        Point last = std::min(positionOfTail, end - 1);
+
+        do {
+            func(useDefs[i], block->at(instIndex(positionOfHead, useDefs[i])));
+            i++;
+        } while (i < useDefs.size() && useDefs[i] <= last);
+
+        return { last + 1, end };
+    }
+
     template<Bank bank>
     bool trySplitIntraBlock(Tmp tmp, TmpData& tmpData)
     {
@@ -1854,70 +1924,38 @@ private:
 
         dataLogLnIf(shouldLog, "IntraBlockSplit: ATTEMPTING ", tmp, " (spillCost=", tmpData.spillCost(), ")", " liveRange=", tmpData.liveRange);
 
+        ensureUseDefLists();
+
         SplitMetadata* metadata = nullptr;
         Vector<Tmp*, 8> tmpPtrs;
 
         size_t numIntervals = tmpData.liveRange.intervals().size();
-        BasicBlock* lastBlock = nullptr;
-        unsigned instExaminedInBlock = 0;
-        bool foundCluster = false;
-        bool hasUseDef = false;
         // Note: this loop calls newTmp() which invalidates the tmpData reference.
         for (size_t i = 0; i < numIntervals; i++) {
             Interval interval = *(m_map[tmp].liveRange.intervals().begin() + i);
             Interval remaining = interval;
 
-            while (true) {
-                Point startPoint = remaining.begin();
-                BasicBlock* block = findBlockContainingPoint(startPoint);
-                Point positionOfHead = this->positionOfHead(block);
-                auto startIndex = instIndex(positionOfHead, startPoint);
-                Point positionOfTail = this->positionOfTail(block);
-                Point lastPoint = std::min(positionOfTail, remaining.end() - 1);
-                auto lastIndex = instIndex(positionOfHead, lastPoint);
-
+            do {
                 Point lastDefPoint = 0;
                 Interval cluster = { };
                 tmpPtrs.shrink(0);
 
-                if (block != lastBlock) {
-                    if (foundCluster) {
-                        m_stats[bank].numIntraBlockGoodBlocks++;
-                        m_stats[bank].numIntraBlockInstGoodBlock += instExaminedInBlock;
-                    } else {
-                        m_stats[bank].numIntraBlockBadBlocks++;
-                        m_stats[bank].numIntraBlockInstBadBlock += instExaminedInBlock;
-                        m_stats[bank].numIntraBlockBadBlocksWithUseDef += hasUseDef;
-                    }
-
-                    instExaminedInBlock = 0;
-                    foundCluster = false;
-                }
-
-                ASSERT(lastIndex >= startIndex);
-                for (auto instIndex = startIndex; instIndex <= lastIndex; instIndex++) {
-                    Inst& inst = block->at(instIndex);
-                    Point positionOfEarly = this->positionOfEarly(positionOfHead, instIndex);
-
+                remaining = forEachUseDefInRange(tmp, remaining, [&](Point point, Inst& inst) {
                     inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
-                        // XXX revisit colduse
-                        if (t == tmp && !Arg::isColdUse(role)) {
-                            tmpPtrs.append(&t);
-                            if (Arg::isAnyDef(role))
-                                lastDefPoint = positionOfEarly; // Remember where the fixup store to spill is needed
-                            cluster |= intervalForTiming(positionOfEarly, Arg::timing(role));
-                        }
+                    // XXX revisit colduse
+                    if (t == tmp && !Arg::isColdUse(role)) {
+                        Point early = point + PointOffsets::Early;
+                        tmpPtrs.append(&t);
+                        if (Arg::isAnyDef(role))
+                            lastDefPoint = early; // Remember where the fixup store to spill is needed
+                        cluster |= intervalForTiming(early, Arg::timing(role));
+                    }
                     });
-                }
-                m_stats[bank].numIntraBlockInstExamined += lastIndex - startIndex + 1;
-                instExaminedInBlock += lastIndex - startIndex + 1;
+                });
+
                 // XXX what if use is before def? i.e. no gap between in RMW inst.
                 // XXX what if spill slot can be addressed directly? Is it still worthwhile?
                 if (tmpPtrs.size() > 1) {
-                    m_stats[bank].numIntraBlockInstUseDefsFound += tmpPtrs.size();
-                    m_stats[bank].numIntraBlockInstFoundCluster += lastIndex - startIndex + 1;
-                    foundCluster = true;
-
                     ASSERT(cluster);
                     if (!metadata) {
                         m_map[tmp].splitMetadataIndex = m_splitMetadata.size();
@@ -1934,6 +1972,7 @@ private:
                     if (lastDefPoint)
                         cluster |= Interval(pointAtOffset(lastDefPoint, PointOffsets::Post));
 
+                    BasicBlock* block = findBlockContainingPoint(cluster.begin());
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
                     m_stats[bank].numIntraBlockClusterTmps++;
                     dataLogLnIf(shouldLog, "IntraBlockSplit:   Created cluster ", clusterTmp, " in BB", *block,
@@ -1942,16 +1981,8 @@ private:
                         *ptr = clusterTmp; // Within this cluster, use clusterTmp rather than Tmp
                     metadata->splits.append({ clusterTmp, lastDefPoint });
                     setStageAndEnqueue(clusterTmp, m_map[clusterTmp], Stage::TryAllocate);
-                } else {
-                    if (tmpPtrs.size()) hasUseDef = true;
-                    m_stats[bank].numIntraBlockInstNoCluster += lastIndex - startIndex + 1;
                 }
-                if (lastPoint == remaining.end() - 1)
-                    break; // Completely consumed remaining
-                // The interval crosses a block boundary, start a new cluster for the next block.
-                ASSERT(lastPoint == positionOfTail);
-                remaining = { positionOfTail + 1, remaining.end() };
-            };
+            } while (remaining);
         }
         if (metadata) {
             // The original Tmp is spilled, but the cluster Tmps will hopefully carry the value in registers
@@ -1962,7 +1993,7 @@ private:
             // Mark that we performed a split so we dump IR to see the results
             if (shouldLog) {
                 m_foundIntraBlockOpportunities = true;
-                m_intraBlockOpportunityTmps.append(tmp);
+                m_intraBlockOpportunityTmps.append({ tmp, static_cast<unsigned>(metadata->splits.size()) });
             }
             m_stats[bank].numIntraBlockSplitTmps++;
             return true;
@@ -2032,7 +2063,7 @@ private:
                 totalBenefit += cluster.block->frequency() * cluster.useCount * cluster.useDensity();
 
             // Track this tmp for later spill slot reporting
-            m_intraBlockOpportunityTmps.append(tmp);
+            m_intraBlockOpportunityTmps.append({ tmp, static_cast<unsigned>(clusters.size()) });
 
             dataLogLnIf(verboseIntraBlockOpportunity, "\n=== INTRA-BLOCK SPLIT OPPORTUNITY ===");
 
@@ -2068,7 +2099,8 @@ private:
         unsigned clustersGotRegisters = 0;
         unsigned clustersSpilled = 0;
 
-        for (Tmp tmp : m_intraBlockOpportunityTmps) {
+        for (auto& opportunity : m_intraBlockOpportunityTmps) {
+            Tmp tmp = opportunity.tmp;
             TmpData& tmpData = m_map[tmp];
 
             if (!tmpData.splitMetadataIndex) {
@@ -2095,6 +2127,13 @@ private:
 
             unsigned numClusters = metadata.splits.size();
             clustersCreated += numClusters;
+
+            // Verify expected vs actual cluster count
+            if (numClusters != opportunity.expectedClusters) {
+                dataLogLnIf(verboseIntraBlockOpportunity, "  ", tmp, ": CLUSTER COUNT MISMATCH - expected ",
+                         opportunity.expectedClusters, " but created ", numClusters);
+                RELEASE_ASSERT_NOT_REACHED();
+            }
 
             unsigned assigned = 0;
             unsigned spilled = 0;
@@ -2608,6 +2647,7 @@ private:
     IndexMap<BasicBlock*, Point> m_blockToHeadPoint;
     Vector<Point> m_tailPoints;
     TmpMap<TmpData> m_map;
+    TmpMap<UseDefList> m_useDefLists;
     Vector<SplitMetadata> m_splitMetadata;
     IndexMap<Reg, RegisterRange> m_regRanges;
     PriorityQueue<TmpPriority, TmpPriority::isHigherPriority> m_queue;
@@ -2618,8 +2658,14 @@ private:
     std::array<AirAllocateRegistersStats, numBanks> m_stats = { GP, FP };
     std::array<bool, numBanks> m_didSpill { false };
     bool m_needsEmitSpillCode { false };
+    bool m_hasUseDefLists { false };
     bool m_foundIntraBlockOpportunities { false };
-    Vector<Tmp> m_intraBlockOpportunityTmps; // Track tmps with split opportunities for later reporting
+
+    struct IntraBlockOpportunity {
+        Tmp tmp;
+        unsigned expectedClusters;
+    };
+    Vector<IntraBlockOpportunity> m_intraBlockOpportunityTmps; // Track tmps with split opportunities for later reporting
 public:
     bool m_dodump { false };
 
