@@ -1863,21 +1863,26 @@ private:
     }
 
     template<typename Func>
-    Interval forEachUseDefInRange(Tmp tmp, Interval range, const Func& func)
+    Interval forEachUseDefInRange(Tmp tmp, Interval range, size_t& cursor, const Func& func)
     {
         auto& useDefs = m_useDefLists[tmp].useDefs();
 
         Point start = pointAtOffset(range.begin(), PointOffsets::Pre);
         Point end = range.end();
 
-        size_t i = 0;
+        // cursor can be used to perform a "sort-merge join" when the caller is making queries over a sorted set of ranges for the same tmp
+        ASSERT(useDefs.isEmpty() || (cursor == useDefs.size() && useDefs[cursor - 1] < start) || useDefs[cursor] <= start);
+
+        size_t i = cursor;
         for (; i < useDefs.size(); i++) {
             if (start <= useDefs[i])
                 break;
         }
-        if (i == useDefs.size() || end <= useDefs[i])
+        if (i == useDefs.size() || end <= useDefs[i]) {
+            cursor = i;
             return { }; // No more use/defs in range
-        
+        }
+
         BasicBlock* block = findBlockContainingPoint(useDefs[i]);
         Point positionOfHead = this->positionOfHead(block);
         Point positionOfTail = this->positionOfTail(block);
@@ -1887,7 +1892,7 @@ private:
             func(useDefs[i], block->at(instIndex(positionOfHead, useDefs[i])));
             i++;
         } while (i < useDefs.size() && useDefs[i] <= last);
-
+        cursor = i - 1;
         return { last + 1, end };
     }
 
@@ -1928,6 +1933,7 @@ private:
 
         SplitMetadata* metadata = nullptr;
         Vector<Tmp*, 8> tmpPtrs;
+        size_t cursor = 0;
 
         size_t numIntervals = tmpData.liveRange.intervals().size();
         // Note: this loop calls newTmp() which invalidates the tmpData reference.
@@ -1940,7 +1946,7 @@ private:
                 Interval cluster = { };
                 tmpPtrs.shrink(0);
 
-                remaining = forEachUseDefInRange(tmp, remaining, [&](Point point, Inst& inst) {
+                remaining = forEachUseDefInRange(tmp, remaining, cursor, [&](Point point, Inst& inst) {
                     inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
                     // XXX revisit colduse
                     if (t == tmp && !Arg::isColdUse(role)) {
