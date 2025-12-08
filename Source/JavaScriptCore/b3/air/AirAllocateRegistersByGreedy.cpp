@@ -1863,14 +1863,14 @@ private:
     }
 
     template<typename Func>
-    Interval forEachUseDefInRange(Tmp tmp, Interval range, size_t& cursor, const Func& func)
+    Interval forEachUseDefWithin(Tmp tmp, Interval interval, size_t& cursor, const Func& func)
     {
         auto& useDefs = m_useDefLists[tmp].useDefs();
 
-        Point start = pointAtOffset(range.begin(), PointOffsets::Pre);
-        Point end = range.end();
+        Point start = pointAtOffset(interval.begin(), PointOffsets::Pre);
+        Point end = interval.end();
 
-        // cursor can be used to perform a "sort-merge join" when the caller is making queries over a sorted set of ranges for the same tmp
+        // cursor can be used to perform a "sort-merge join" when the caller is making queries over a sorted set of intervals for the same tmp
         ASSERT(useDefs.isEmpty() || !cursor || useDefs[cursor - 1] < start);
 
         size_t i = cursor;
@@ -1946,7 +1946,7 @@ private:
                 Interval cluster = { };
                 tmpPtrs.shrink(0);
 
-                remaining = forEachUseDefInRange(tmp, remaining, cursor, [&](Point point, Inst& inst) {
+                remaining = forEachUseDefWithin(tmp, remaining, cursor, [&](Point point, Inst& inst) {
                     inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
                     // XXX revisit colduse
                     if (t == tmp && !Arg::isColdUse(role)) {
