@@ -1871,7 +1871,7 @@ private:
         Point end = range.end();
 
         // cursor can be used to perform a "sort-merge join" when the caller is making queries over a sorted set of ranges for the same tmp
-        ASSERT(useDefs.isEmpty() || (cursor == useDefs.size() && useDefs[cursor - 1] < start) || useDefs[cursor] <= start);
+        ASSERT(useDefs.isEmpty() || !cursor || useDefs[cursor - 1] < start);
 
         size_t i = cursor;
         for (; i < useDefs.size(); i++) {
