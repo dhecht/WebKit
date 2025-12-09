@@ -2043,10 +2043,13 @@ private:
 
                 inst.forEachTmp([&](Tmp t, Arg::Role role, Bank, Width) {
                     if (t == tmp && (Arg::isAnyUse(role) || Arg::isAnyDef(role))) {
-                        firstUse = std::min(firstUse, instIndex);
-                        lastUse = std::max(lastUse, instIndex);
-                        useCount++;
                         coldUseCount += Arg::isColdUse(role);
+                        // Skip cold uses - trySplitIntraBlock doesn't create clusters for them
+                        if (!Arg::isColdUse(role)) {
+                            firstUse = std::min(firstUse, instIndex);
+                            lastUse = std::max(lastUse, instIndex);
+                            useCount++;
+                        }
                     }
                 });
             }
@@ -2054,7 +2057,7 @@ private:
             // Record if we found a dense use cluster
             if (useCount >= 2) {
                 unsigned clusterSize = lastUse - firstUse + 1;
-                if (clusterSize >= 2) {
+                if (clusterSize >= 1) {
                     BlockUseCluster cluster { block, firstUse, lastUse, useCount, coldUseCount };
                     clusters.append(cluster);
                 }
