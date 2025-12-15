@@ -979,7 +979,6 @@ private:
 
     Variable* getPushVariable(B3::Type type)
     {
-        ++m_stackSize;
         if (m_stackSize > m_maxStackSize) {
             m_maxStackSize = m_stackSize;
             Variable* var = m_proc.addVariable(type);
@@ -1004,13 +1003,18 @@ private:
         return var;
     }
 
+    static constexpr bool useLazyMaterialize = true;
+
     ExpressionType push(Value* value)
     {
-        Variable* var = getPushVariable(value->type());
-        set(var, value);
-
         ExpressionType expr(value);
-        expr.materialize(var);
+
+        ++m_stackSize;
+        if (!useLazyMaterialize) {
+            Variable* var = getPushVariable(value->type());
+            set(var, value);
+            expr.materialize(var);
+        }
 
         if constexpr (!WasmOMGIRGeneratorInternal::traceExecution)
             return expr;
@@ -1019,7 +1023,7 @@ private:
         if constexpr (WasmOMGIRGeneratorInternal::traceExecutionIncludesConstructionSite)
             site = Value::generateCompilerConstructionSite();
 #endif
-        TRACE_VALUE(Wasm::Types::Void, get(var), "push to stack height ", m_stackSize.value(), " site: [", site, "] ", expr);
+        TRACE_VALUE(Wasm::Types::Void, get(expr), "push to stack height ", m_stackSize.value(), " site: [", site, "] ", expr);
         return expr;
     }
 
@@ -1104,7 +1108,9 @@ private:
     Vector<Variable*> m_inlinedResults;
 
     Vector<Variable*> m_locals;
+#if 1
     Vector<Variable*> m_stack;
+#endif
     Vector<UnlinkedWasmToWasmCall>& m_unlinkedWasmToWasmCalls; // List each call site and the function index whose address it should be patched with.
     FixedBitVector& m_directCallees; // Note this includes call targets from functions we inline.
     unsigned* m_osrEntryScratchBufferSize;
@@ -1144,6 +1150,7 @@ private:
 
     Checked<unsigned> m_tryCatchDepth { 0 };
     Checked<unsigned> m_callSiteIndex { 0 };
+    // XXX: remove?
     Checked<unsigned> m_stackSize { 0 };
     Checked<unsigned> m_maxStackSize { 0 };
     StackMaps m_stackmaps;
@@ -2151,6 +2158,7 @@ void OMGIRGenerator::traceCF(Args&&... info)
     int i = 0;
     for (auto* val : m_stack) {
         ++i;
+        // XXX: this is meaningless with lazy materialization
         traceValue(Wasm::Types::Void, get(val), " wasm stack[", i, "] = ", *val);
     }
 
@@ -6153,10 +6161,8 @@ InliningNode* OMGIRGenerator::canInline(FunctionSpaceIndex functionIndexSpace, u
 auto OMGIRGenerator::emitInlineDirectCall(InliningNode* inlining, FunctionCodeIndex calleeFunctionIndex, const TypeDefinition& calleeSignature, const ArgumentList& args, ValueResults& results) -> PartialResult
 {
     Vector<Value*> getArgs;
-
-    // XXX: will these be materalized? Do they need to be?
     for (auto& arg : args)
-        getArgs.append(m_currentBlock->appendNew<VariableValue>(m_proc, B3::Get, origin(), arg.value().b3Variable()));
+        getArgs.append(get(arg));
 
     BasicBlock* continuation = m_proc.addBlock();
     // Not all inine frames need to save state, but we still need to make sure that there is at least
