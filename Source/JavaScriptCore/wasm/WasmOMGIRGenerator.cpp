@@ -1004,14 +1004,12 @@ private:
         return var;
     }
 
-    static constexpr bool useLazyMaterialize = true;
-
     ExpressionType push(Value* value)
     {
         ExpressionType expr(value);
 
         ++m_stackSize;
-        if (!useLazyMaterialize) {
+        if (!Options::useLazyVars()) {
             Variable* var = getPushVariable(value->type());
             set(var, value);
             expr.setMaterialized(var);
@@ -1058,11 +1056,6 @@ private:
     Value* set(Variable* dst, Value* src)
     {
         return set(m_currentBlock, dst, src);
-    }
-
-    Value* set(Variable* dst, Variable* src)
-    {
-        return set(dst, get(src));
     }
 
     bool useSignalingMemory() const
@@ -1151,8 +1144,8 @@ private:
 
     Checked<unsigned> m_tryCatchDepth { 0 };
     Checked<unsigned> m_callSiteIndex { 0 };
-    // XXX: remove?
     Checked<unsigned> m_stackSize { 0 };
+    // XXX: remove
     Checked<unsigned> m_maxStackSize { 0 };
     StackMaps m_stackmaps;
     Vector<UnlinkedHandlerInfo> m_exceptionHandlers;
@@ -4941,8 +4934,8 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
         Value* phi = block.phis[i];
         m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), get(value), phi);
         body->append(phi);
-        // Phase 1: extract Variable* from materialized OMGExpression
-        set(body, value.value().b3Variable(), phi);
+        if (!Options::useLazyVars())
+            set(body, value.value().b3Variable(), phi);
         newStack.append(value);
     }
     enclosingStack.shrink(offset);
