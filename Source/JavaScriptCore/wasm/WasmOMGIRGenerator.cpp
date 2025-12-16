@@ -497,7 +497,7 @@ public:
 
     ExpressionType WARN_UNUSED_RETURN addConstant(v128_t value)
     {
-        return push(m_currentBlock->appendNew<Const128Value>(m_proc, origin(), value));
+        return push(constant(B3::V128, value));
     }
 
     // SIMD generated
