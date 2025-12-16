@@ -140,7 +140,7 @@ public:
 
     // Phase 1: Simple state transition from Value* to Variable*
     // Does NOT emit any IR - that's the caller's responsibility
-    void materialize(B3::Variable* var)
+    void setMaterialized(B3::Variable* var)
     {
         ASSERT(!isMaterialized());
         m_storage = var;
@@ -968,6 +968,7 @@ private:
     void restoreWebAssemblyGlobalState(const MemoryInformation&, Value* instance, BasicBlock*);
     void reloadMemoryRegistersFromInstance(const MemoryInformation&, Value* instance, BasicBlock*);
 
+    void materializeExpressionStackIntoVariables();
     Value* loadFromScratchBuffer(unsigned& indexInBuffer, Value* pointer, B3::Type);
     void connectValuesAtEntrypoint(unsigned& indexInBuffer, Value* pointer, Stack& expressionStack);
     Value* emitCatchImpl(CatchKind, ControlType&, unsigned exceptionIndex = 0);
@@ -1013,7 +1014,7 @@ private:
         if (!useLazyMaterialize) {
             Variable* var = getPushVariable(value->type());
             set(var, value);
-            expr.materialize(var);
+            expr.setMaterialized(var);
         }
 
         if constexpr (!WasmOMGIRGeneratorInternal::traceExecution)
@@ -4913,13 +4914,16 @@ Value* OMGIRGenerator::loadFromScratchBuffer(unsigned& indexInBuffer, Value* poi
 void OMGIRGenerator::connectValuesAtEntrypoint(unsigned& indexInBuffer, Value* pointer, Stack& expressionStack)
 {
     TRACE_CF("Connect values at entrypoint");
-    for (unsigned i = 0; i < expressionStack.size(); i++) {
-        TypedExpression expr = expressionStack[i];
+    for (TypedExpression& expr : expressionStack) {
+        if (!expr.value().isMaterialized()) {
+            ASSERT(expr.value().b3Value()->isConstant());
+            indexInBuffer++;
+            continue;
+        }
         ASSERT(expr.value().isMaterialized());
         Variable* var = expr.value().b3Variable();
         Value* load = loadFromScratchBuffer(indexInBuffer, pointer, var->type());
-        // Phase 1: all values are materialized, extract the Variable*
-        m_currentBlock->appendNew<VariableValue>(m_proc, Set, origin(), var, load);
+        set(var, load);
     }
 };
 
@@ -4947,6 +4951,9 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
     if (loopIndex == m_loopIndexForOSREntry) {
         // This must be kept in sync with BBQJIT::makeStackMap.
         dataLogLnIf(WasmOMGIRGeneratorInternal::verbose, "Setting up for OSR entry");
+
+        ASSERT(!m_inlineParent);
+        materializeExpressionStackIntoVariables();
 
         m_currentBlock = m_rootBlocks[0].block;
         Value* pointer = m_rootBlocks[0].block->appendNew<ArgumentRegValue>(m_proc, Origin(), GPRInfo::argumentGPR0);
@@ -5062,6 +5069,7 @@ auto OMGIRGenerator::addTry(BlockSignature signature, Stack& enclosingStack, Con
 
     BasicBlock* continuation = m_proc.addBlock();
     splitStack(signature, enclosingStack, newStack);
+    materializeExpressionStackIntoVariables();
     result = ControlData(m_proc, origin(), signature, BlockType::Try, m_stackSize, continuation, advanceCallSiteIndex(), m_tryCatchDepth);
     return { };
 }
@@ -5084,6 +5092,7 @@ auto OMGIRGenerator::addTryTable(BlockSignature signature, Stack& enclosingStack
 
     BasicBlock* continuation = m_proc.addBlock();
     splitStack(signature, enclosingStack, newStack);
+    materializeExpressionStackIntoVariables();
     result = ControlData(m_proc, origin(), signature, BlockType::TryTable, m_stackSize, continuation, advanceCallSiteIndex(), m_tryCatchDepth);
     result.setTryTableTargets(WTFMove(targetList));
 
@@ -5141,6 +5150,92 @@ RefPtr<PatchpointExceptionHandle> OMGIRGenerator::preparePatchpointForExceptions
     patch->appendVectorWithRep(liveValues, ValueRep::LateColdAny);
 
     return PatchpointExceptionHandle::create(m_hasExceptionHandlers, callSiteIndex(), static_cast<unsigned>(liveValues.size()), firstStackmapParamOffset, firstStackmapChildOffset);
+}
+
+static constexpr bool dmhVerbose = false;
+
+void OMGIRGenerator::materializeExpressionStackIntoVariables()
+{
+    class Materializer {
+    public:
+        Materializer(Procedure& proc)
+        : m_proc(proc)
+        , m_insertionSet(proc) { }
+
+        ~Materializer()
+        {
+            endBlock(nullptr);
+        }
+
+        void convertToVariable(OMGExpression& expr, Variable* variable)
+        {
+            if (expr.isMaterialized() || expr.b3Value()->isConstant())
+                return; // XXX should we track for each control block?
+            ASSERT(!expr.isMaterialized());
+            Value* value = expr.b3Value();
+            BasicBlock* block = value->owner;
+
+            dataLogLnIf(dmhVerbose, "Materializing ", *variable, " = ", *value);
+
+            if (block != m_block)
+                endBlock(block);
+
+            while (m_block->at(m_instIndex++) != value)
+                ASSERT(m_instIndex < m_block->size());
+
+            Value* setVariable = m_proc.add<VariableValue>(B3::Set, value->origin(), variable, value);
+            m_insertionSet.insertValue(m_instIndex, setVariable);
+
+            expr.setMaterialized(variable);
+        }
+
+        void endBlock(BasicBlock* nextBlock)
+        {
+            if (m_block)
+                m_insertionSet.execute(m_block);
+            m_block = nextBlock;
+            m_instIndex = 0;
+        }
+
+    private:
+        Procedure& m_proc;
+        InsertionSet m_insertionSet;
+        BasicBlock* m_block { nullptr };
+        unsigned m_instIndex { 0 };
+    };
+
+    Materializer materializer(m_proc);
+
+    dataLogLnIf(dmhVerbose, "Materializing enclosed stack");
+
+    Vector<OMGIRGenerator*> frames;
+    for (auto* currentFrame = this; currentFrame; currentFrame = currentFrame->m_inlineParent)
+        frames.append(currentFrame);
+    frames.reverse();
+
+    for (auto* currentFrame : frames) {
+        dataLogLnIf(dmhVerbose, "Materializing frame");
+        auto* parser = currentFrame->m_parser;
+
+        for (unsigned controlIndex = 0; controlIndex < parser->controlStack().size(); ++controlIndex) {
+            auto& stack = parser->controlStack()[controlIndex].enclosedExpressionStack;
+            dataLogLnIf(dmhVerbose, "Materializing controlIndex=", controlIndex, " with stack size=", stack.size());
+            for (auto& expr : stack) {
+                dataLogLnIf(dmhVerbose, "  Before materialize: isMaterialized=", expr.value().isMaterialized());
+                materializer.convertToVariable(expr.value(), m_proc.addVariable(expr.value().type()));
+            }
+        }
+        // Also materialize the current expression stack (not just for inline parents)
+        // This is critical for try blocks where materializeStackValuesIntoVariables() is called
+        // before the ControlData is created, so expressions in m_expressionStack need to be
+        // materialized before they get moved into the new ControlEntry's enclosedExpressionStack
+        auto& topExpressionStack = parser->expressionStack();
+        dataLogLnIf(dmhVerbose, "Materializing top expression stack with size=", topExpressionStack.size());
+        for (auto& expr : topExpressionStack) {
+            dataLogLnIf(dmhVerbose, "  Top stack before materialize: isMaterialized=", expr.value().isMaterialized());
+            materializer.convertToVariable(expr.value(), m_proc.addVariable(expr.value().type()));
+        }
+    }
 }
 
 // Must be kept in sync with preparePatchpointForExceptions.
@@ -5280,7 +5375,7 @@ auto OMGIRGenerator::emitCatchTableImpl(ControlData& data, const ControlData::Tr
             set(var, value);
             // XXX: does this even need a variable?
             ExpressionType expr(value);
-            expr.materialize(var);
+            expr.setMaterialized(var);
             resultStack.constructAndAppend(type, expr);
             offset += type.kind == TypeKind::V128 ? 2 : 1;
         }
@@ -5293,7 +5388,7 @@ auto OMGIRGenerator::emitCatchTableImpl(ControlData& data, const ControlData::Tr
         push(exception);
         // XXX: does this need a variable?
         ExpressionType expr(exception);
-        expr.materialize(var);
+        expr.setMaterialized(var);
         resultStack.constructAndAppend(Type { TypeKind::RefNull, static_cast<TypeIndex>(TypeKind::Exnref) }, expr);
     }
 
