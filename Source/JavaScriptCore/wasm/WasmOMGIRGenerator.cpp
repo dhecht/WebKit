@@ -978,32 +978,6 @@ private:
 
     Origin origin();
 
-    Variable* getPushVariable(B3::Type type)
-    {
-        if (m_stackSize > m_maxStackSize) {
-            m_maxStackSize = m_stackSize;
-            Variable* var = m_proc.addVariable(type);
-            if constexpr (WasmOMGIRGeneratorInternal::traceStackValues)
-                set(var, constant(type, 0xBADBEEFEF));
-            m_stack.append(var);
-            return var;
-        }
-
-        if constexpr (WasmOMGIRGeneratorInternal::traceStackValues) {
-            // When we push, everything else *should* be dead
-            for (unsigned i = m_stackSize - 1; i < m_stack.size(); ++i)
-                set(m_stack[i], constant(m_stack[i]->type(), 0xBADBEEFEF));
-        }
-
-        Variable* var = m_stack[m_stackSize - 1];
-        if (var->type() == type)
-            return var;
-
-        var = m_proc.addVariable(type);
-        m_stack[m_stackSize - 1] = var;
-        return var;
-    }
-
     ExpressionType push(Value* value)
     {
         ExpressionType expr(value);
@@ -1140,8 +1114,6 @@ private:
     Checked<unsigned> m_tryCatchDepth { 0 };
     Checked<unsigned> m_callSiteIndex { 0 };
     Checked<unsigned> m_stackSize { 0 };
-    // XXX: remove
-    Checked<unsigned> m_maxStackSize { 0 };
     StackMaps m_stackmaps;
     Vector<UnlinkedHandlerInfo> m_exceptionHandlers;
 
