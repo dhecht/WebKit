@@ -166,12 +166,6 @@ public:
         return b3Value()->type();
     }
 
-    // Comparison method for debug code
-    bool equalsVariable(B3::Variable* var) const
-    {
-        return isMaterialized() && b3Variable() == var;
-    }
-
     void dump(PrintStream& out) const
     {
         if (isMaterialized())
@@ -1071,9 +1065,7 @@ private:
     Vector<Value*> m_inlinedResultPhis;
 
     Vector<Variable*> m_locals;
-#if 1
-    Vector<Variable*> m_stack;
-#endif
+
     Vector<UnlinkedWasmToWasmCall>& m_unlinkedWasmToWasmCalls; // List each call site and the function index whose address it should be patched with.
     FixedBitVector& m_directCallees; // Note this includes call targets from functions we inline.
     unsigned* m_osrEntryScratchBufferSize;
@@ -2117,13 +2109,6 @@ void OMGIRGenerator::traceCF(Args&&... info)
     if (!WasmOMGIRGeneratorInternal::traceStackValues)
         return;
     int i = 0;
-    for (auto* val : m_stack) {
-        ++i;
-        // XXX: this is meaningless with lazy materialization
-        traceValue(Wasm::Types::Void, get(val), " wasm stack[", i, "] = ", *val);
-    }
-
-    i = 0;
     for (auto val : m_parser->expressionStack()) {
         ++i;
         traceValue(Wasm::Types::Void, get(val.value()), " parser stack[", i, "] = ", val.value());
@@ -2138,15 +2123,6 @@ void OMGIRGenerator::traceCF(Args&&... info)
     if (!m_parser->expressionStack().isEmpty() && !m_stackSize) {
         dataLogLn("$$$$$$$$$$$$$$$$$$$");
         return;
-    }
-    for (i = 0; i < (int) m_parser->expressionStack().size(); ++i) {
-        // XXX: revisit
-        auto& typedExpr = m_parser->expressionStack()[m_parser->expressionStack().size() - i - 1];
-        Variable* stackVar = m_stack[m_stackSize.value() - i - 1];
-        if (!typedExpr.value().equalsVariable(stackVar)) {
-            dataLogLn("************************");
-            return;
-        }
     }
 }
 
