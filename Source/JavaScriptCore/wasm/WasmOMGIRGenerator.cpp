@@ -4934,9 +4934,12 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
         Value* phi = block.phis[i];
         m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), get(value), phi);
         body->append(phi);
-        if (value.value().isMaterialized())
+        if (Options::useLazyVars())
+            newStack.constructAndAppend(signature.m_signature->argumentType(i), phi);
+        else {
             set(body, value.value().b3Variable(), phi);
-        newStack.append(value);
+            newStack.append(value);
+        }
     }
     enclosingStack.shrink(offset);
 
