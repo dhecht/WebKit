@@ -143,7 +143,7 @@ public:
     {
         ASSERT(!isMaterialized());
         m_storage = std::bit_cast<uintptr_t>(var) | isMaterializedMask;
-        ASSERT(b3Variable() == var && isMaterialized());
+        ASSERT(isMateralized() && b3Variable() == var);
     }
 
     // Not named value() to disambiguate with TypedExpression::value()
