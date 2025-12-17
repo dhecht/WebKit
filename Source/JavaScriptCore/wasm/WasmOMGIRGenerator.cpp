@@ -956,7 +956,7 @@ private:
     void emitCheckOrBranchForCast(CastKind, Value*, const Generator&, BasicBlock*);
     Value* emitLoadRTTFromObject(Value*);
 
-    void unify(Value* phi, const ExpressionType source);
+    void unify(Value* phi, const ExpressionType& source);
     void unifyValuesWithBlock(const Stack& resultStack, const ControlData& block);
 
     void emitChecksForModOrDiv(B3::Opcode, Value* left, Value* right);
@@ -6769,7 +6769,7 @@ auto OMGIRGenerator::addCallRef(unsigned callProfileIndex, const TypeDefinition&
     return { };
 }
 
-void OMGIRGenerator::unify(Value* phi, const ExpressionType source)
+void OMGIRGenerator::unify(Value* phi, const ExpressionType& source)
 {
     m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), get(source), phi);
 }
