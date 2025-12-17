@@ -1007,16 +1007,11 @@ private:
     ExpressionType push(Value* value)
     {
         ExpressionType expr(value);
-
         ++m_stackSize;
-        if (!Options::useLazyVars()) {
-            Variable* var = getPushVariable(value->type());
-            set(var, value);
-            expr.setMaterialized(var);
-        }
 
         if constexpr (!WasmOMGIRGeneratorInternal::traceExecution)
             return expr;
+
         String site;
 #if ASSERT_ENABLED
         if constexpr (WasmOMGIRGeneratorInternal::traceExecutionIncludesConstructionSite)
@@ -4934,12 +4929,7 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
         Value* phi = block.phis[i];
         m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), get(value), phi);
         body->append(phi);
-        if (Options::useLazyVars())
-            newStack.constructAndAppend(signature.m_signature->argumentType(i), phi);
-        else {
-            set(body, value.value().b3Variable(), phi);
-            newStack.append(value);
-        }
+        newStack.constructAndAppend(signature.m_signature->argumentType(i), phi);
     }
     enclosingStack.shrink(offset);
 
