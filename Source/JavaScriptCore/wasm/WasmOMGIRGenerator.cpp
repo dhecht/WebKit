@@ -119,44 +119,44 @@ static constexpr bool traceExecutionIncludesConstructionSite = false;
 #define TRACE_CF(...) do { if constexpr (WasmOMGIRGeneratorInternal::traceExecution) { traceCF(__VA_ARGS__); } } while (0)
 
 class OMGExpression {
+    static constexpr uintptr_t isMaterializedMask = 0x1;
 public:
     OMGExpression() = default;
 
     OMGExpression(Value* value)
-        : m_storage(value)
+        : m_storage(std::bit_cast<uintptr_t>(value))
     {
-        ASSERT(value);
+        ASSERT(!isEmpty() && !isMaterialized() && b3Value() == value);
     }
 
     bool isEmpty() const
     {
-        return std::holds_alternative<Value*>(m_storage) && std::get<Value*>(m_storage) == nullptr;
+        return !m_storage;
     }
 
     bool isMaterialized() const
     {
-        return std::holds_alternative<B3::Variable*>(m_storage);
+        return m_storage & isMaterializedMask;
     }
 
-    // Phase 1: Simple state transition from Value* to Variable*
-    // Does NOT emit any IR - that's the caller's responsibility
     void setMaterialized(B3::Variable* var)
     {
         ASSERT(!isMaterialized());
-        m_storage = var;
+        m_storage = std::bit_cast<uintptr_t>(var) | isMaterializedMask;
+        ASSERT(b3Variable() == var && isMaterialized());
     }
 
     // Not named value() to disambiguate with TypedExpression::value()
     B3::Value* b3Value() const
     {
         ASSERT(!isMaterialized());
-        return std::get<Value*>(m_storage);
+        return std::bit_cast<B3::Value*>(m_storage);
     }
 
     B3::Variable* b3Variable() const
     {
         ASSERT(isMaterialized());
-        return std::get<B3::Variable*>(m_storage);
+        return std::bit_cast<B3::Variable*>(m_storage & ~isMaterializedMask);
     }
 
     B3::Type type() const
@@ -181,7 +181,7 @@ public:
     }
 
 private:
-    WTF::Variant<Value*, B3::Variable*> m_storage;
+    uintptr_t m_storage;
 };
 
 class OMGIRGenerator {
