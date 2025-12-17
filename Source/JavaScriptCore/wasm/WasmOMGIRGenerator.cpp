@@ -5374,26 +5374,15 @@ auto OMGIRGenerator::emitCatchTableImpl(ControlData& data, const ControlData::Tr
         unsigned offset = 0;
         for (unsigned i = 0; i < signature->template as<FunctionSignature>()->argumentCount(); ++i) {
             Type type = signature->as<FunctionSignature>()->argumentType(i);
-            Variable* var = m_proc.addVariable(toB3Type(type));
             Value* value = m_currentBlock->appendNew<MemoryValue>(m_proc, Load, toB3Type(type), origin(), buffer, safeCast<int32_t>(offset * sizeof(uint64_t)));
-            set(var, value);
-            // XXX: does this even need a variable?
-            ExpressionType expr(value);
-            expr.setMaterialized(var);
-            resultStack.constructAndAppend(type, expr);
+            resultStack.constructAndAppend(type, value);
             offset += type.kind == TypeKind::V128 ? 2 : 1;
         }
     }
 
     if (target.type == CatchKind::CatchRef || target.type == CatchKind::CatchAllRef) {
-        Variable* var = m_proc.addVariable(wasmRefType());
         exception = wasmRefOfCell(exception);
-        set(var, exception);
-        push(exception);
-        // XXX: does this need a variable?
-        ExpressionType expr(exception);
-        expr.setMaterialized(var);
-        resultStack.constructAndAppend(Type { TypeKind::RefNull, static_cast<TypeIndex>(TypeKind::Exnref) }, expr);
+        resultStack.constructAndAppend(Type { TypeKind::RefNull, static_cast<TypeIndex>(TypeKind::Exnref) }, exception);
     }
 
     auto& targetControl = m_parser->resolveControlRef(target.target).controlData;
