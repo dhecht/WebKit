@@ -1068,7 +1068,7 @@ private:
     OMGIRGenerator* m_inlineRoot { nullptr };
     OMGIRGenerator* m_inlineParent { nullptr };
     Vector<Value*> m_inlinedArgs;
-    Vector<Variable*> m_inlinedResults;
+    Vector<Value*> m_inlinedResultPhis;
 
     Vector<Variable*> m_locals;
 #if 1
@@ -5470,16 +5470,11 @@ auto OMGIRGenerator::addInlinedReturn(const auto& returnValues) -> PartialResult
     CallInformation wasmCallInfo = wasmCallingConvention().callInformationFor(m_parser->signature(), CallRole::Callee);
     RELEASE_ASSERT(returnValues.size() >= wasmCallInfo.results.size());
     RELEASE_ASSERT(signature->returnCount() == wasmCallInfo.results.size());
-
-    if (!m_inlinedResults.size() && wasmCallInfo.results.size()) {
-        for (unsigned i = 0; i < wasmCallInfo.results.size(); ++i)
-            m_inlinedResults.append(m_proc.addVariable(toB3Type(signature->returnType(i))));
-    }
-    RELEASE_ASSERT(m_inlinedResults.size() == wasmCallInfo.results.size());
+    RELEASE_ASSERT(m_inlinedResultPhis.size() == wasmCallInfo.results.size());
 
     unsigned offset = returnValues.size() - wasmCallInfo.results.size();
     for (unsigned i = 0; i < wasmCallInfo.results.size(); ++i)
-        m_currentBlock->appendNew<B3::VariableValue>(m_proc, B3::Set, origin(), m_inlinedResults[i], get(returnValues[offset + i]));
+        m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), get(returnValues[offset + i]), m_inlinedResultPhis[i]);
 
     m_currentBlock->appendNewControlValue(m_proc, B3::Jump, origin(), FrequentedBlock(m_returnContinuation));
     return { };
@@ -6225,6 +6220,7 @@ auto OMGIRGenerator::emitInlineDirectCall(InliningNode* inlining, FunctionCodeIn
         getArgs.append(get(arg));
 
     BasicBlock* continuation = m_proc.addBlock();
+
     // Not all inine frames need to save state, but we still need to make sure that there is at least
     // one unique CallSiteIndex per inline frame for stack traces to work.
     advanceCallSiteIndex();
@@ -6234,6 +6230,12 @@ auto OMGIRGenerator::emitInlineDirectCall(InliningNode* inlining, FunctionCodeIn
     Ref<IPIntCallee> profiledCallee = m_calleeGroup.ipintCalleeFromFunctionIndexSpace(m_calleeGroup.toSpaceIndex(calleeFunctionIndex));
     m_protectedInlineeGenerators.append(makeUnique<OMGIRGenerator>(m_heaps, m_context, *this, *m_inlineRoot, m_module, m_calleeGroup, calleeFunctionIndex, profiledCallee.get(), inlining, continuation, WTFMove(getArgs)));
     auto& irGenerator = *m_protectedInlineeGenerators.last();
+
+    for (unsigned i = 0; i < calleeSignature.as<FunctionSignature>()->returnCount(); ++i) {
+        Value* phi = continuation->appendNew<Value>(m_proc, B3::Phi, toB3Type(calleeSignature.as<FunctionSignature>()->returnType(i)), origin());
+        irGenerator.m_inlinedResultPhis.append(phi);
+    }
+
     m_protectedInlineeParsers.append(makeUnique<FunctionParser<OMGIRGenerator>>(irGenerator, function.data, calleeSignature, m_info));
     auto& parser = *m_protectedInlineeParsers.last();
     WASM_FAIL_IF_HELPER_FAILS(parser.parse());
@@ -6258,7 +6260,7 @@ auto OMGIRGenerator::emitInlineDirectCall(InliningNode* inlining, FunctionCodeIn
     m_currentBlock = continuation;
 
     for (unsigned i = 0; i < calleeSignature.as<FunctionSignature>()->returnCount(); ++i)
-        results.append(m_currentBlock->appendNew<VariableValue>(m_proc, B3::Get, origin(), irGenerator.m_inlinedResults[i]));
+        results.append(irGenerator.m_inlinedResultPhis[i]);
 
     auto lastInlineCallSiteIndex = advanceCallSiteIndex();
     advanceCallSiteIndex();
