@@ -5114,17 +5114,35 @@ RefPtr<PatchpointExceptionHandle> OMGIRGenerator::preparePatchpointForExceptions
     Vector<Value*> liveValues;
     Origin origin = this->origin();
 
+    OMGIRGenerator* innerTryFrame = nullptr;
+    unsigned innerTryControlStackIndex = 0;
+
     Vector<OMGIRGenerator*> frames;
-    for (auto* currentFrame = this; currentFrame; currentFrame = currentFrame->m_inlineParent)
+    for (auto* currentFrame = this; currentFrame; currentFrame = currentFrame->m_inlineParent) {
+        if (!innerTryFrame) {
+            for (unsigned i = currentFrame->m_parser->controlStack().size(); i--; ) {
+                ControlData& data = currentFrame->m_parser->controlStack()[i].controlData;
+                if (ControlType::isTry(data) || ControlType::isTryTable(data)) {
+                    innerTryFrame = currentFrame;
+                    innerTryControlStackIndex = i;
+                    break;
+                }
+            }
+        }
         frames.append(currentFrame);
+    }
     frames.reverse();
+
+    if (!innerTryFrame)
+        return nullptr; // We're inside a Catch but not a Try (since m_tryCatchDepth != 0).
 
     for (auto* currentFrame : frames) {
         for (Variable* local : currentFrame->m_locals) {
             Value* result = block->appendNew<VariableValue>(m_proc, B3::Get, origin, local);
             liveValues.append(result);
         }
-        for (unsigned controlIndex = 0; controlIndex < currentFrame->m_parser->controlStack().size(); ++controlIndex) {
+        unsigned end = currentFrame == innerTryFrame ? innerTryControlStackIndex + 1 : currentFrame->m_parser->controlStack().size();
+        for (unsigned controlIndex = 0; controlIndex < end; ++controlIndex) {
             ControlData& data = currentFrame->m_parser->controlStack()[controlIndex].controlData;
             Stack& expressionStack = currentFrame->m_parser->controlStack()[controlIndex].enclosedExpressionStack;
             for (ExpressionType expr : expressionStack)
@@ -5132,11 +5150,11 @@ RefPtr<PatchpointExceptionHandle> OMGIRGenerator::preparePatchpointForExceptions
             if (ControlType::isAnyCatch(data))
                 liveValues.append(get(block, data.exception()));
         }
-        // inlineParent frames only
-        if (currentFrame != this) {
-            for (ExpressionType expr : currentFrame->m_parser->expressionStack())
-                liveValues.append(get(block, expr));
-        }
+        if (currentFrame == innerTryFrame)
+            break;
+        ASSERT(currentFrame != this); // Should have encountered the inner most Try by now.
+        for (ExpressionType expr : currentFrame->m_parser->expressionStack())
+            liveValues.append(get(block, expr));
     }
 
     patch->effects.exitsSideways = true;
