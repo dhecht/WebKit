@@ -192,16 +192,13 @@ public:
     static constexpr bool validateFunctionBodySize = true;
 
     struct ControlData {
-        ControlData(Procedure& proc, Origin origin, BlockSignature signature, BlockType type, unsigned stackSize, BasicBlock* continuation, BasicBlock* special = nullptr)
+        ControlData(Procedure& proc, Origin origin, BlockSignature signature, BlockType type, BasicBlock* continuation, BasicBlock* special = nullptr)
             : controlBlockType(type)
             , m_signature(signature)
-            , m_stackSize(stackSize)
             , continuation(continuation)
             , special(special)
         {
             ASSERT(type != BlockType::Try && type != BlockType::Catch);
-            if (type != BlockType::TopLevel)
-                m_stackSize -= signature.m_signature->argumentCount();
 
             if (type == BlockType::Loop) {
                 for (unsigned i = 0; i < signature.m_signature->argumentCount(); ++i)
@@ -212,17 +209,15 @@ public:
             }
         }
 
-        ControlData(Procedure& proc, Origin origin, BlockSignature signature, BlockType type, unsigned stackSize, BasicBlock* continuation, unsigned tryStart, unsigned tryDepth)
+        ControlData(Procedure& proc, Origin origin, BlockSignature signature, BlockType type, BasicBlock* continuation, unsigned tryStart, unsigned tryDepth)
             : controlBlockType(type)
             , m_signature(signature)
-            , m_stackSize(stackSize)
             , continuation(continuation)
             , special(nullptr)
             , m_tryStart(tryStart)
             , m_tryCatchDepth(tryDepth)
         {
             ASSERT(type == BlockType::Try || type == BlockType::TryTable);
-            m_stackSize -= signature.m_signature->argumentCount();
             for (unsigned i = 0; i < signature.m_signature->returnCount(); ++i)
                 phis.append(proc.add<Value>(Phi, toB3Type(signature.m_signature->returnType(i)), origin));
         }
@@ -383,15 +378,12 @@ public:
             return m_exception;
         }
 
-        unsigned stackSize() const { return m_stackSize; }
-
     private:
         // FIXME: Compress OMGIRGenerator::ControlData fields using an union
         // https://bugs.webkit.org/show_bug.cgi?id=231212
         friend class OMGIRGenerator;
         BlockType controlBlockType;
         BlockSignature m_signature;
-        unsigned m_stackSize;
         BasicBlock* continuation;
         BasicBlock* special;
         Vector<Value*> phis;
@@ -851,8 +843,7 @@ public:
     void didFinishParsingLocals() { }
     void didPopValueFromStack(ExpressionType expr, ASCIILiteral message)
     {
-        --m_stackSize;
-        TRACE_VALUE(Wasm::Types::Void, get(expr), "pop at height: ", m_stackSize.value() + 1, " site: [", message, "], ", expr);
+        TRACE_VALUE(Wasm::Types::Void, get(expr), "pop at height: ", m_parser->expressionStack().size() + 1, " site: [", message, "], ", expr);
     }
     const Ref<TypeDefinition> getTypeDefinition(uint32_t typeIndex) { return m_info.typeSignatures[typeIndex]; }
     const ArrayType* getArrayTypeDefinition(uint32_t);
@@ -975,7 +966,6 @@ private:
     ExpressionType push(Value* value)
     {
         ExpressionType expr(value);
-        ++m_stackSize;
 
         if constexpr (!WasmOMGIRGeneratorInternal::traceExecution)
             return expr;
@@ -985,7 +975,7 @@ private:
         if constexpr (WasmOMGIRGeneratorInternal::traceExecutionIncludesConstructionSite)
             site = Value::generateCompilerConstructionSite();
 #endif
-        TRACE_VALUE(Wasm::Types::Void, get(expr), "push to stack height ", m_stackSize.value(), " site: [", site, "] ", expr);
+        TRACE_VALUE(Wasm::Types::Void, get(expr), "push to stack height ", m_parser->expressionStack().size() + 1, " site: [", site, "] ", expr);
         return expr;
     }
 
@@ -1105,7 +1095,6 @@ private:
 
     Checked<unsigned> m_tryCatchDepth { 0 };
     Checked<unsigned> m_callSiteIndex { 0 };
-    Checked<unsigned> m_stackSize { 0 };
     StackMaps m_stackmaps;
     Vector<UnlinkedHandlerInfo> m_exceptionHandlers;
 
@@ -2052,7 +2041,7 @@ void OMGIRGenerator::traceValue(Type type, Value* value, Args&&... info)
     StringPrintStream sb;
     if (m_parser->unreachableBlocks())
         sb.print("(unreachable) ");
-    sb.print("TRACE OMG EXECUTION fn[", m_functionIndex, "] stack height ", m_stackSize.value(), " type ", type, " ");
+    sb.print("TRACE OMG EXECUTION fn[", m_functionIndex, "] stack height ", m_parser->expressionStack().size(), " type ", type, " ");
     sb.print(info...);
     dataLogLn("static: ", sb.toString());
     patch->setGenerator([infoString = sb.toString(), type] (CCallHelpers& jit, const B3::StackmapGenerationParams& params) {
@@ -2094,7 +2083,7 @@ void OMGIRGenerator::traceCF(Args&&... info)
     patch->effects.reads = HeapRange::top();
     patch->effects.writes = HeapRange::top();
     StringPrintStream sb;
-    sb.print("TRACE OMG EXECUTION fn[", m_functionIndex, " <inlined into ", m_inlineParent ? m_inlineParent->m_functionIndex : -1, ">] stack height ", m_stackSize.value(), " CF ");
+    sb.print("TRACE OMG EXECUTION fn[", m_functionIndex, " <inlined into ", m_inlineParent ? m_inlineParent->m_functionIndex : -1, ">] stack height ", m_parser->expressionStack().size(), " CF ");
     sb.print(info...);
     dataLogLn("static: ", sb.toString());
     patch->setGenerator([infoString = sb.toString()] (CCallHelpers& jit, const B3::StackmapGenerationParams& params) {
@@ -2116,14 +2105,6 @@ void OMGIRGenerator::traceCF(Args&&... info)
 
     if (m_parser->unreachableBlocks())
         return;
-    if (m_parser->expressionStack().isEmpty() && m_stackSize) {
-        dataLogLn("%%%%%%%%%%%%%%%%%%%");
-        return;
-    }
-    if (!m_parser->expressionStack().isEmpty() && !m_stackSize) {
-        dataLogLn("$$$$$$$$$$$$$$$$$$$");
-        return;
-    }
 }
 
 auto OMGIRGenerator::setLocal(uint32_t index, ExpressionType value) -> PartialResult
@@ -4869,7 +4850,7 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
     BasicBlock* body = m_proc.addBlock();
     BasicBlock* continuation = m_proc.addBlock();
 
-    block = ControlData(m_proc, origin(), signature, BlockType::Loop, m_stackSize, continuation, body);
+    block = ControlData(m_proc, origin(), signature, BlockType::Loop, continuation, body);
 
     unsigned offset = enclosingStack.size() - signature.m_signature->argumentCount();
     for (unsigned i = 0; i < signature.m_signature->argumentCount(); ++i) {
@@ -4932,7 +4913,7 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
 OMGIRGenerator::ControlData OMGIRGenerator::addTopLevel(BlockSignature signature)
 {
     TRACE_CF("TopLevel: ", *signature.m_signature);
-    return ControlData(m_proc, Origin(), signature, BlockType::TopLevel, m_stackSize, m_proc.addBlock());
+    return ControlData(m_proc, Origin(), signature, BlockType::TopLevel, m_proc.addBlock());
 }
 
 auto OMGIRGenerator::addBlock(BlockSignature signature, Stack& enclosingStack, ControlType& newBlock, Stack& newStack) -> PartialResult
@@ -4941,7 +4922,7 @@ auto OMGIRGenerator::addBlock(BlockSignature signature, Stack& enclosingStack, C
     BasicBlock* continuation = m_proc.addBlock();
 
     splitStack(signature, enclosingStack, newStack);
-    newBlock = ControlData(m_proc, origin(), signature, BlockType::Block, m_stackSize, continuation);
+    newBlock = ControlData(m_proc, origin(), signature, BlockType::Block, continuation);
     return { };
 }
 
@@ -4975,7 +4956,7 @@ auto OMGIRGenerator::addIf(ExpressionType condition, BlockSignature signature, S
     m_currentBlock = taken;
     TRACE_CF("IF");
     splitStack(signature, enclosingStack, newStack);
-    result = ControlData(m_proc, origin(), signature, BlockType::If, m_stackSize, continuation, notTaken);
+    result = ControlData(m_proc, origin(), signature, BlockType::If, continuation, notTaken);
     return { };
 }
 
@@ -4989,7 +4970,6 @@ auto OMGIRGenerator::addElse(ControlData& data, const Stack& currentStack) -> Pa
 auto OMGIRGenerator::addElseToUnreachable(ControlData& data) -> PartialResult
 {
     ASSERT(data.blockType() == BlockType::If);
-    m_stackSize = data.stackSize() + data.m_signature.m_signature->argumentCount();
     m_currentBlock = data.special;
     data.convertIfToBlock();
     TRACE_CF("ELSE");
@@ -5004,7 +4984,7 @@ auto OMGIRGenerator::addTry(BlockSignature signature, Stack& enclosingStack, Con
     BasicBlock* continuation = m_proc.addBlock();
     splitStack(signature, enclosingStack, newStack);
     materializeExpressionStackIntoVariables();
-    result = ControlData(m_proc, origin(), signature, BlockType::Try, m_stackSize, continuation, advanceCallSiteIndex(), m_tryCatchDepth);
+    result = ControlData(m_proc, origin(), signature, BlockType::Try, continuation, advanceCallSiteIndex(), m_tryCatchDepth);
     return { };
 }
 
@@ -5027,7 +5007,7 @@ auto OMGIRGenerator::addTryTable(BlockSignature signature, Stack& enclosingStack
     BasicBlock* continuation = m_proc.addBlock();
     splitStack(signature, enclosingStack, newStack);
     materializeExpressionStackIntoVariables();
-    result = ControlData(m_proc, origin(), signature, BlockType::TryTable, m_stackSize, continuation, advanceCallSiteIndex(), m_tryCatchDepth);
+    result = ControlData(m_proc, origin(), signature, BlockType::TryTable, continuation, advanceCallSiteIndex(), m_tryCatchDepth);
     result.setTryTableTargets(WTFMove(targetList));
 
     return { };
@@ -5253,7 +5233,6 @@ Value* OMGIRGenerator::emitCatchImpl(CatchKind kind, ControlType& data, unsigned
 {
     m_currentBlock = m_proc.addBlock();
     m_rootBlocks.append({ m_currentBlock, usesSIMD() });
-    m_stackSize = data.stackSize();
 
     if (ControlType::isTry(data)) {
         if (kind == CatchKind::Catch)
@@ -5528,8 +5507,6 @@ auto OMGIRGenerator::addBranch(ControlData& data, ExpressionType condition, cons
 auto OMGIRGenerator::addBranchNull(ControlData& data, ExpressionType reference, const Stack& returnValues, bool shouldNegate, ExpressionType& result) -> PartialResult
 {
     auto condition = push(m_currentBlock->appendNew<Value>(m_proc, shouldNegate ? B3::NotEqual : B3::Equal, origin(), get(reference), m_currentBlock->appendNew<WasmConstRefValue>(m_proc, origin(), JSValue::encode(jsNull()))));
-    // We should pop the condition here to keep stack size consistent.
-    --m_stackSize;
 
     WASM_FAIL_IF_HELPER_FAILS(addBranch(data, condition, returnValues));
 
@@ -5543,8 +5520,6 @@ auto OMGIRGenerator::addBranchCast(ControlData& data, TypedExpression reference,
 {
     ExpressionType condition;
     emitRefTestOrCast(CastKind::Test, reference, allowNull, heapType, shouldNegate, condition);
-    // We should pop the condition here to keep stack size consistent.
-    --m_stackSize;
 
     WASM_FAIL_IF_HELPER_FAILS(addBranch(data, condition, returnValues));
 
@@ -5585,7 +5560,6 @@ auto OMGIRGenerator::addEndToUnreachable(ControlEntry& entry, const Stack& expre
 {
     ControlData& data = entry.controlData;
     m_currentBlock = data.continuation;
-    m_stackSize = data.stackSize();
 
     if (data.blockType() == BlockType::If) {
         data.special->appendNewControlValue(m_proc, Jump, origin(), m_currentBlock);
@@ -5611,7 +5585,6 @@ auto OMGIRGenerator::addEndToUnreachable(ControlEntry& entry, const Stack& expre
     } else {
         for (unsigned i = 0; i < blockSignature.m_signature->returnCount(); ++i) {
             if (i < expressionStack.size()) {
-                ++m_stackSize;
                 entry.enclosedExpressionStack.append(expressionStack[i]);
             } else {
                 Type returnType = blockSignature.m_signature->returnType(i);
