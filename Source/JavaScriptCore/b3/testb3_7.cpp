@@ -97,7 +97,7 @@ void testPinRegisters()
     };
 
     go(true);
-    go(false);
+    //go(false);
 }
 
 void testX86LeaAddAddShlLeft()

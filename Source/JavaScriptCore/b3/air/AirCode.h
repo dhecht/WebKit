@@ -102,7 +102,7 @@ public:
     // regsInPriorityOrder. Any registers not in this set are said to be "pinned".
     RegisterSet mutableRegs() const { return m_mutableRegs.toRegisterSet().includeWholeRegisterWidth(); }
 
-    bool isPinned(Reg reg) const { return !mutableRegs().contains(reg, IgnoreVectors); }
+    bool isPinned(Reg reg) const { return pinnedRegisters().contains(reg, IgnoreVectors); }
     JS_EXPORT_PRIVATE void pinRegister(Reg);
 
     void setOptLevel(unsigned optLevel) { m_optLevel = optLevel; }

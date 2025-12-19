@@ -40,6 +40,7 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numUnspillableTmps)                   \
     macro(numSpillTmps)                         \
     macro(numTmpsOut)                           \
+    macro(numCoalescedPinned)                   \
     macro(numSpilledTmps)                       \
     macro(numSpillStackSlots)                   \
     macro(numLoadSpill)                         \
