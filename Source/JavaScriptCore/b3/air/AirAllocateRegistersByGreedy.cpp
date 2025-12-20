@@ -993,8 +993,6 @@ private:
         }
     }
 
-    static constexpr bool dmhVerbose = false;
-
     void buildLiveRanges()
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::buildLiveRanges"_s);
@@ -1108,27 +1106,27 @@ private:
                     if (inst.args[0].isReg() || inst.args[1].isReg()) {
                         unsigned regIdx = inst.args[0].isReg() ? 0 : 1;
                         Reg reg = inst.args[regIdx].reg();
+                        Tmp other = inst.args[regIdx ^ 1].tmp();
+                        ASSERT(!other.isReg());
                         if (m_allAllowedRegisters.contains(reg, IgnoreVectors)) {
-                            Tmp other = inst.args[regIdx ^ 1].tmp();
                             if (!m_map[other].preferredReg)
                                 m_map[other].preferredReg = inst.args[regIdx].reg();
-                        } else if (m_code.isPinned(reg)) {
-                            ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
-                            addMaybeCoalescable(inst.args[0].tmp(), inst.args[1].tmp(), block);
-                            addMaybeCoalescable(inst.args[1].tmp(), inst.args[0].tmp(), block);
+                            continue;
                         }
-                    } else {
-                        ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
-                        addMaybeCoalescable(inst.args[0].tmp(), inst.args[1].tmp(), block);
-                        addMaybeCoalescable(inst.args[1].tmp(), inst.args[0].tmp(), block);
+                        if (!m_code.isPinned(reg))
+                            continue;
+                        // Pinned registers fall-through
                     }
+                    ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
+                    addMaybeCoalescable(inst.args[0].tmp(), inst.args[1].tmp(), block);
+                    addMaybeCoalescable(inst.args[1].tmp(), inst.args[0].tmp(), block);
                 }
             }
         }
 
         Point endPoint = m_tailPoints[m_code.size() - 1];
         m_code.pinnedRegisters().forEachReg([&](Reg reg) {
-            markUse(Tmp(reg), endPoint);
+            markUse(Tmp(reg), endPoint); // Pinned registers are always live
         });
 
         // Second pass: Run liveness analysis and build the LiveRange for each Tmp. Also,
@@ -1241,12 +1239,11 @@ private:
                 markDef(tmp, firstBlockPositionOfHead);
         }
         assertPinnedRegsAreLive();
+        // Pinned registers are never killed, so markDef never completes their live-range. Do it now.
         m_code.pinnedRegisters().forEachReg([&](Reg reg) {
             Tmp tmp = Tmp(reg);
-            Point& end = activeEnds[tmp];
-            ASSERT(end);
-            m_map[tmp].liveRange.prepend({ 0, end });
-            end = 0;
+            ASSERT(activeEnds[tmp] == endPoint + 1 && !m_map[tmp].liveRange.size());
+            m_map[tmp].liveRange.prepend({ 0, activeEnds[tmp] });
         });
 
 #if ASSERT_ENABLED
@@ -1279,13 +1276,21 @@ private:
 
     void coalesceWithPinnedRegisters()
     {
+        // If a Tmp is in a pinned register's coalescables set, that means the
+        // Tmp's defs are always moves from the pinned register. Since no other
+        // Tmps can be assigned to the pinned register, might as well assign
+        // the coalescable tmps to the pinned register upfront.
+        // Doing this eagerly could be the wrong decision if these Tmps are
+        // coalescable with other Tmps, but that doesn't seem to happen in practice.
         m_code.pinnedRegisters().forEachReg([&](Reg reg) {
             Tmp tmp = Tmp(reg);
             TmpData& data = m_map[tmp];
-            dataLogLnIf(dmhVerbose, "XXX pinned coalescable: reg=", reg, " with=", listDump(data.coalescables));
             for (auto& with : data.coalescables) {
+                ASSERT(!with.tmp.isReg());
                 assign(with.tmp, m_map[with.tmp], reg);
                 m_stats[tmp.bank()].numCoalescedPinned++;
+                // XXX remove
+                ASSERT(m_map[with.tmp].coalescables.size() == 1);
             }
         });
     }
