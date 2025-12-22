@@ -687,7 +687,7 @@ public:
         buildLiveRanges();
         initSpillCosts<GP>();
         initSpillCosts<FP>();
-        coalesceWithPinnedRegisters();
+        //coalesceWithPinnedRegisters();
         finalizeGroups<GP>();
         finalizeGroups<FP>();
 
@@ -1063,7 +1063,7 @@ private:
         // that these pairs are not coalescable.
         auto pruneCoalescable = [&](Inst& inst, Tmp def, Point point) {
             TmpData& defData = m_map[def];
-            if (!defData.coalescables.size())
+            if (defData.coalescables.isEmpty())
                 return;
             Tmp movSrc = coalescableMoveSrc(inst);
             dataLogLnIf(verbose(), "Checking affinity ", inst, " def=", def, " movSrc=", movSrc);
@@ -1102,22 +1102,7 @@ private:
                 continue;
             for (Inst& inst : block->insts()) {
                 if (mayBeCoalescable(inst)) {
-                    ASSERT(inst.args.size() == 2);
-                    if (inst.args[0].isReg() || inst.args[1].isReg()) {
-                        unsigned regIdx = inst.args[0].isReg() ? 0 : 1;
-                        Reg reg = inst.args[regIdx].reg();
-                        Tmp other = inst.args[regIdx ^ 1].tmp();
-                        ASSERT(!other.isReg());
-                        if (m_allAllowedRegisters.contains(reg, IgnoreVectors)) {
-                            if (!m_map[other].preferredReg)
-                                m_map[other].preferredReg = inst.args[regIdx].reg();
-                            continue;
-                        }
-                        if (!m_code.isPinned(reg))
-                            continue;
-                        // Pinned registers fall-through
-                    }
-                    ASSERT(inst.args[0].isTmp() && inst.args[1].isTmp());
+                    ASSERT(inst.args.size() == 2 && inst.args[0].isTmp() && inst.args[1].isTmp());
                     addMaybeCoalescable(inst.args[0].tmp(), inst.args[1].tmp(), block);
                     addMaybeCoalescable(inst.args[1].tmp(), inst.args[0].tmp(), block);
                 }
@@ -1327,10 +1312,10 @@ private:
                     auto bSize = m_map.get<bank>(b.tmp).liveRange.size();
                     if (aSize != bSize)
                         return aSize < bSize;
-                    return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
+                    return AbsoluteTmpMapper<bank>::absoluteIndex(a.tmp) < AbsoluteTmpMapper<bank>::absoluteIndex(b.tmp);
             });
             for (auto& with : m_map[tmp].coalescables) {
-                if (tmp.tmpIndex(bank) < with.tmp.tmpIndex(bank))
+                if (AbsoluteTmpMapper<bank>::absoluteIndex(tmp) < AbsoluteTmpMapper<bank>::absoluteIndex(with.tmp))
                     moves.append({ tmp, with.tmp, with.moveCost });
             }
         });
@@ -1338,13 +1323,22 @@ private:
         std::ranges::sort(moves, [](auto& a, auto& b) {
                 if (a.cost != b.cost)
                     return a.cost > b.cost;
-                if (a.tmp0.tmpIndex(bank) != b.tmp1.tmpIndex(bank))
-                    return a.tmp0.tmpIndex(bank) < a.tmp0.tmpIndex(bank);
-                ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
-                return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
+                auto aTmp0Index = AbsoluteTmpMapper<bank>::absoluteIndex(a.tmp0);
+                auto bTmp0Index = AbsoluteTmpMapper<bank>::absoluteIndex(b.tmp0);
+                if (aTmp0Index != bTmp0Index)
+                    return aTmp0Index < bTmp0Index;
+                auto aTmp1Index = AbsoluteTmpMapper<bank>::absoluteIndex(a.tmp1);
+                auto bTmp1Index = AbsoluteTmpMapper<bank>::absoluteIndex(b.tmp1);
+                ASSERT(aTmp1Index != bTmp1Index);
+                return aTmp1Index < bTmp1Index;
         });
 
         auto hasConflict = [this, &worklist0, &worklist1](Tmp group0, Tmp group1) {
+            Reg reg0 = m_map[group0].preferredReg;
+            Reg reg1 = m_map[group1].preferredReg;
+            if (reg0 && reg1 && reg0 != reg1)
+                return true;
+
             bool conflicts = false;
             forEachTmpInGroup(group0, worklist0, [&](Tmp tmp0) {
                 ASSERT(!conflicts);
@@ -1376,6 +1370,8 @@ private:
             groupData.useDefCost += subGroupData.useDefCost;
             if (!groupData.preferredReg)
                 groupData.preferredReg = subGroupData.preferredReg;
+            else
+                ASSERT(!subGroupData.preferredReg || groupData.preferredReg == subGroupData.preferredReg);
 
             Width defWidth, useWidth;
             defWidth = std::max(m_tmpWidth.defWidth(group), m_tmpWidth.defWidth(subGroup));
@@ -2455,6 +2451,8 @@ private:
             return false;
 
         if (!inst.args[0].isTmp() || !inst.args[1].isTmp())
+            return false;
+        if (inst.args[0].tmp().isReg() && inst.args[1].tmp().isReg() && inst.args[0].tmp().reg() != inst.args[1].tmp().reg())
             return false;
 
         // We can coalesce a Move32 so long as either of the following holds:
