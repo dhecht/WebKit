@@ -124,9 +124,12 @@ static constexpr bool traceExecutionIncludesConstructionSite = false;
 // to determine Phi placement during this single pass parsing. Phi placement for these variables
 // will be handled by fixSSA.
 class OMGExpression {
+    WTF_MAKE_NONCOPYABLE(OMGExpression);
     static constexpr uintptr_t isMaterializedMask = 0x1;
 public:
     OMGExpression() = default;
+    OMGExpression(OMGExpression&&) = default;
+    OMGExpression& operator=(OMGExpression&&) = default;
 
     OMGExpression(Value* value)
         : m_storage(reinterpret_cast<uintptr_t>(value))
@@ -475,17 +478,17 @@ public:
     // SIMD
     bool usesSIMD() { return m_info.usesSIMD(m_functionIndex); }
     void notifyFunctionUsesSIMD() { ASSERT(m_info.usesSIMD(m_functionIndex)); }
-    WARN_UNUSED_RETURN PartialResult addSIMDLoad(ExpressionType pointer, uint32_t offset, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addSIMDStore(ExpressionType value, ExpressionType pointer, uint32_t offset);
-    WARN_UNUSED_RETURN PartialResult addSIMDSplat(SIMDLane, ExpressionType scalar, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addSIMDShuffle(v128_t imm, ExpressionType a, ExpressionType b, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addSIMDShift(SIMDLaneOperation, SIMDInfo, ExpressionType v, ExpressionType shift, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addSIMDExtmul(SIMDLaneOperation, SIMDInfo, ExpressionType lhs, ExpressionType rhs, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addSIMDLoadSplat(SIMDLaneOperation, ExpressionType pointer, uint32_t offset, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addSIMDLoadLane(SIMDLaneOperation, ExpressionType pointer, ExpressionType vector, uint32_t offset, uint8_t laneIndex, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addSIMDStoreLane(SIMDLaneOperation, ExpressionType pointer, ExpressionType vector, uint32_t offset, uint8_t laneIndex);
-    WARN_UNUSED_RETURN PartialResult addSIMDLoadExtend(SIMDLaneOperation, ExpressionType pointer, uint32_t offset, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addSIMDLoadPad(SIMDLaneOperation, ExpressionType pointer, uint32_t offset, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDLoad(const ExpressionType& pointer, uint32_t offset, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDStore(const ExpressionType& value, const ExpressionType& pointer, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult addSIMDSplat(SIMDLane, const ExpressionType& scalar, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDShuffle(v128_t imm, const ExpressionType& a, const ExpressionType& b, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDShift(SIMDLaneOperation, SIMDInfo, const ExpressionType& v, const ExpressionType& shift, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDExtmul(SIMDLaneOperation, SIMDInfo, const ExpressionType& lhs, const ExpressionType& rhs, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDLoadSplat(SIMDLaneOperation, const ExpressionType& pointer, uint32_t offset, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDLoadLane(SIMDLaneOperation, const ExpressionType& pointer, const ExpressionType& vector, uint32_t offset, uint8_t laneIndex, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDStoreLane(SIMDLaneOperation, const ExpressionType& pointer, const ExpressionType& vector, uint32_t offset, uint8_t laneIndex);
+    WARN_UNUSED_RETURN PartialResult addSIMDLoadExtend(SIMDLaneOperation, const ExpressionType& pointer, uint32_t offset, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSIMDLoadPad(SIMDLaneOperation, const ExpressionType& pointer, uint32_t offset, ExpressionType& result);
 
     WARN_UNUSED_RETURN ExpressionType addConstant(v128_t value)
     {
@@ -501,7 +504,7 @@ public:
     B3::Opcode b3Op = B3::Oops; \
     if (false) { }
 
-    auto addExtractLane(SIMDInfo info, uint8_t lane, ExpressionType v, ExpressionType& result) -> PartialResult
+    auto addExtractLane(SIMDInfo info, uint8_t lane, const ExpressionType& v, ExpressionType& result) -> PartialResult
     {
         result = push(m_currentBlock->appendNew<SIMDValue>(m_proc, origin(), B3::VectorExtractLane, toB3Type(simdScalarType(info.lane)), info,
             lane,
@@ -509,7 +512,7 @@ public:
         return { };
     }
 
-    auto addReplaceLane(SIMDInfo info, uint8_t lane, ExpressionType v, ExpressionType s, ExpressionType& result) -> PartialResult
+    auto addReplaceLane(SIMDInfo info, uint8_t lane, const ExpressionType& v, const ExpressionType& s, ExpressionType& result) -> PartialResult
     {
         result = push(m_currentBlock->appendNew<SIMDValue>(m_proc, origin(), B3::VectorReplaceLane, B3::V128, info,
             lane,
@@ -518,7 +521,7 @@ public:
         return { };
     }
 
-    auto addSIMDI_V(SIMDLaneOperation op, SIMDInfo info, ExpressionType v, ExpressionType& result) -> PartialResult
+    auto addSIMDI_V(SIMDLaneOperation op, SIMDInfo info, const ExpressionType& v, ExpressionType& result) -> PartialResult
     {
         B3_OP_CASES()
         B3_OP_CASE(Bitmask)
@@ -529,7 +532,7 @@ public:
         return { };
     }
 
-    auto addSIMDV_V(SIMDLaneOperation op, SIMDInfo info, ExpressionType v, ExpressionType& result) -> PartialResult
+    auto addSIMDV_V(SIMDLaneOperation op, SIMDInfo info, const ExpressionType& v, ExpressionType& result) -> PartialResult
     {
         B3_OP_CASES()
         B3_OP_CASE(Demote)
@@ -556,7 +559,7 @@ public:
         return { };
     }
 
-    auto addSIMDBitwiseSelect(ExpressionType v1, ExpressionType v2, ExpressionType c, ExpressionType& result) -> PartialResult
+    auto addSIMDBitwiseSelect(ExpressionType v1, const ExpressionType& v2, const ExpressionType& c, ExpressionType& result) -> PartialResult
     {
         auto b3Op = B3::VectorBitwiseSelect;
         result = push(m_currentBlock->appendNew<SIMDValue>(m_proc, origin(), b3Op, B3::V128, SIMDInfo { SIMDLane::v128, SIMDSignMode::None },
@@ -564,7 +567,7 @@ public:
         return { };
     }
 
-    auto addSIMDRelOp(SIMDLaneOperation, SIMDInfo info, ExpressionType lhs, ExpressionType rhs, Air::Arg relOp, ExpressionType& result) -> PartialResult
+    auto addSIMDRelOp(SIMDLaneOperation, SIMDInfo info, const ExpressionType& lhs, const ExpressionType& rhs, Air::Arg relOp, ExpressionType& result) -> PartialResult
     {
         B3::Opcode b3Op = Oops;
         if (scalarTypeIsIntegral(info.lane)) {
@@ -648,7 +651,7 @@ public:
         return m_currentBlock->appendNew<SIMDValue>(m_proc, origin(), VectorSwizzle, B3::V128, SIMDLane::i8x16, SIMDSignMode::None, input, saturatedIndexes);
     }
 
-    auto addSIMDV_VV(SIMDLaneOperation op, SIMDInfo info, ExpressionType a, ExpressionType b, ExpressionType& result) -> PartialResult
+    auto addSIMDV_VV(SIMDLaneOperation op, SIMDInfo info, const ExpressionType& a, const ExpressionType& b, ExpressionType& result) -> PartialResult
     {
         B3_OP_CASES()
         B3_OP_CASE(And)
@@ -682,7 +685,7 @@ public:
         return { };
     }
 
-    auto addSIMDRelaxedFMA(SIMDLaneOperation op, SIMDInfo info, ExpressionType m1, ExpressionType m2, ExpressionType add, ExpressionType& result) -> PartialResult
+    auto addSIMDRelaxedFMA(SIMDLaneOperation op, SIMDInfo info, const ExpressionType& m1, const ExpressionType& m2, const ExpressionType& add, ExpressionType& result) -> PartialResult
     {
         B3_OP_CASES()
         B3_OP_CASE(RelaxedMAdd)
@@ -700,95 +703,95 @@ public:
     ExpressionType addConstant(Type, uint64_t);
 
     // References
-    WARN_UNUSED_RETURN PartialResult addRefIsNull(ExpressionType value, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addRefIsNull(const ExpressionType& value, ExpressionType& result);
     WARN_UNUSED_RETURN PartialResult addRefFunc(FunctionSpaceIndex index, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addRefAsNonNull(TypedExpression, ExpressionType&);
-    WARN_UNUSED_RETURN PartialResult addRefEq(ExpressionType, ExpressionType, ExpressionType&);
+    WARN_UNUSED_RETURN PartialResult addRefAsNonNull(const TypedExpression&, ExpressionType&);
+    WARN_UNUSED_RETURN PartialResult addRefEq(const ExpressionType&, const ExpressionType&, ExpressionType&);
 
     // Tables
-    WARN_UNUSED_RETURN PartialResult addTableGet(unsigned, ExpressionType index, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addTableSet(unsigned, ExpressionType index, ExpressionType value);
-    WARN_UNUSED_RETURN PartialResult addTableInit(unsigned, unsigned, ExpressionType dstOffset, ExpressionType srcOffset, ExpressionType length);
+    WARN_UNUSED_RETURN PartialResult addTableGet(unsigned, const ExpressionType& index, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addTableSet(unsigned, const ExpressionType& index, const ExpressionType& value);
+    WARN_UNUSED_RETURN PartialResult addTableInit(unsigned, unsigned, const ExpressionType& dstOffset, const ExpressionType& srcOffset, const ExpressionType& length);
     WARN_UNUSED_RETURN PartialResult addElemDrop(unsigned);
     WARN_UNUSED_RETURN PartialResult addTableSize(unsigned, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addTableGrow(unsigned, ExpressionType fill, ExpressionType delta, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addTableFill(unsigned, ExpressionType offset, ExpressionType fill, ExpressionType count);
-    WARN_UNUSED_RETURN PartialResult addTableCopy(unsigned, unsigned, ExpressionType dstOffset, ExpressionType srcOffset, ExpressionType length);
+    WARN_UNUSED_RETURN PartialResult addTableGrow(unsigned, const ExpressionType& fill, const ExpressionType& delta, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addTableFill(unsigned, const ExpressionType& offset, const ExpressionType& fill, const ExpressionType& count);
+    WARN_UNUSED_RETURN PartialResult addTableCopy(unsigned, unsigned, const ExpressionType& dstOffset, const ExpressionType& srcOffset, const ExpressionType& length);
 
     // Locals
     WARN_UNUSED_RETURN PartialResult getLocal(uint32_t index, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult setLocal(uint32_t index, ExpressionType value);
-    WARN_UNUSED_RETURN PartialResult teeLocal(uint32_t, ExpressionType, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult setLocal(uint32_t index, const ExpressionType& value);
+    WARN_UNUSED_RETURN PartialResult teeLocal(uint32_t, const ExpressionType&, ExpressionType& result);
 
     // Globals
     WARN_UNUSED_RETURN PartialResult getGlobal(uint32_t index, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult setGlobal(uint32_t index, ExpressionType value);
+    WARN_UNUSED_RETURN PartialResult setGlobal(uint32_t index, const ExpressionType& value);
 
     // Memory
-    WARN_UNUSED_RETURN PartialResult load(LoadOpType, ExpressionType pointer, ExpressionType& result, uint32_t offset);
-    WARN_UNUSED_RETURN PartialResult store(StoreOpType, ExpressionType pointer, ExpressionType value, uint32_t offset);
-    WARN_UNUSED_RETURN PartialResult addGrowMemory(ExpressionType delta, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult load(LoadOpType, const ExpressionType& pointer, ExpressionType& result, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult store(StoreOpType, const ExpressionType& pointer, const ExpressionType& value, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult addGrowMemory(const ExpressionType& delta, ExpressionType& result);
     WARN_UNUSED_RETURN PartialResult addCurrentMemory(ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addMemoryFill(ExpressionType dstAddress, ExpressionType targetValue, ExpressionType count);
-    WARN_UNUSED_RETURN PartialResult addMemoryCopy(ExpressionType dstAddress, ExpressionType srcAddress, ExpressionType count);
-    WARN_UNUSED_RETURN PartialResult addMemoryInit(unsigned, ExpressionType dstAddress, ExpressionType srcAddress, ExpressionType length);
+    WARN_UNUSED_RETURN PartialResult addMemoryFill(const ExpressionType& dstAddress, const ExpressionType& targetValue, const ExpressionType& count);
+    WARN_UNUSED_RETURN PartialResult addMemoryCopy(const ExpressionType& dstAddress, const ExpressionType& srcAddress, const ExpressionType& count);
+    WARN_UNUSED_RETURN PartialResult addMemoryInit(unsigned, const ExpressionType& dstAddress, const ExpressionType& srcAddress, const ExpressionType& length);
     WARN_UNUSED_RETURN PartialResult addDataDrop(unsigned);
 
     // Atomics
-    WARN_UNUSED_RETURN PartialResult atomicLoad(ExtAtomicOpType, Type, ExpressionType pointer, ExpressionType& result, uint32_t offset);
-    WARN_UNUSED_RETURN PartialResult atomicStore(ExtAtomicOpType, Type, ExpressionType pointer, ExpressionType value, uint32_t offset);
-    WARN_UNUSED_RETURN PartialResult atomicBinaryRMW(ExtAtomicOpType, Type, ExpressionType pointer, ExpressionType value, ExpressionType& result, uint32_t offset);
-    WARN_UNUSED_RETURN PartialResult atomicCompareExchange(ExtAtomicOpType, Type, ExpressionType pointer, ExpressionType expected, ExpressionType value, ExpressionType& result, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult atomicLoad(ExtAtomicOpType, Type, const ExpressionType& pointer, ExpressionType& result, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult atomicStore(ExtAtomicOpType, Type, const ExpressionType& pointer, const ExpressionType& value, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult atomicBinaryRMW(ExtAtomicOpType, Type, const ExpressionType& pointer, const ExpressionType& value, ExpressionType& result, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult atomicCompareExchange(ExtAtomicOpType, Type, const ExpressionType& pointer, const ExpressionType& expected, const ExpressionType& value, ExpressionType& result, uint32_t offset);
 
-    WARN_UNUSED_RETURN PartialResult atomicWait(ExtAtomicOpType, ExpressionType pointer, ExpressionType value, ExpressionType timeout, ExpressionType& result, uint32_t offset);
-    WARN_UNUSED_RETURN PartialResult atomicNotify(ExtAtomicOpType, ExpressionType pointer, ExpressionType value, ExpressionType& result, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult atomicWait(ExtAtomicOpType, const ExpressionType& pointer, const ExpressionType& value, const ExpressionType& timeout, ExpressionType& result, uint32_t offset);
+    WARN_UNUSED_RETURN PartialResult atomicNotify(ExtAtomicOpType, const ExpressionType& pointer, const ExpressionType& value, ExpressionType& result, uint32_t offset);
     WARN_UNUSED_RETURN PartialResult atomicFence(ExtAtomicOpType, uint8_t flags);
 
     // Saturated truncation.
-    WARN_UNUSED_RETURN PartialResult truncSaturated(Ext1OpType, ExpressionType operand, ExpressionType& result, Type returnType, Type operandType);
+    WARN_UNUSED_RETURN PartialResult truncSaturated(Ext1OpType, const ExpressionType& operand, ExpressionType& result, Type returnType, Type operandType);
 
     // GC
-    WARN_UNUSED_RETURN PartialResult addRefI31(ExpressionType value, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addI31GetS(TypedExpression ref, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addI31GetU(TypedExpression ref, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addArrayNew(uint32_t index, ExpressionType size, ExpressionType value, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addArrayNewDefault(uint32_t index, ExpressionType size, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addRefI31(const ExpressionType& value, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addI31GetS(const TypedExpression& ref, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addI31GetU(const TypedExpression& ref, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addArrayNew(uint32_t index, const ExpressionType& size, const ExpressionType& value, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addArrayNewDefault(uint32_t index, const ExpressionType& size, ExpressionType& result);
     WARN_UNUSED_RETURN PartialResult addArrayNewFixed(uint32_t typeIndex, ArgumentList& args, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addArrayGet(ExtGCOpType arrayGetKind, uint32_t typeIndex, TypedExpression arrayref, ExpressionType index, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addArrayNewData(uint32_t typeIndex, uint32_t dataIndex, ExpressionType size, ExpressionType offset, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addArrayNewElem(uint32_t typeIndex, uint32_t elemSegmentIndex, ExpressionType size, ExpressionType offset, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addArraySet(uint32_t typeIndex, TypedExpression arrayref, ExpressionType index, ExpressionType value);
-    WARN_UNUSED_RETURN PartialResult addArrayLen(TypedExpression arrayref, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addArrayFill(uint32_t, TypedExpression, ExpressionType, ExpressionType, ExpressionType);
-    WARN_UNUSED_RETURN PartialResult addArrayCopy(uint32_t, TypedExpression, ExpressionType, uint32_t, TypedExpression, ExpressionType, ExpressionType);
-    WARN_UNUSED_RETURN PartialResult addArrayInitElem(uint32_t, TypedExpression, ExpressionType, uint32_t, ExpressionType, ExpressionType);
-    WARN_UNUSED_RETURN PartialResult addArrayInitData(uint32_t, TypedExpression, ExpressionType, uint32_t, ExpressionType, ExpressionType);
+    WARN_UNUSED_RETURN PartialResult addArrayGet(ExtGCOpType arrayGetKind, uint32_t typeIndex, const TypedExpression& arrayref, const ExpressionType& index, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addArrayNewData(uint32_t typeIndex, uint32_t dataIndex, const ExpressionType& size, const ExpressionType& offset, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addArrayNewElem(uint32_t typeIndex, uint32_t elemSegmentIndex, const ExpressionType& size, const ExpressionType& offset, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addArraySet(uint32_t typeIndex, const TypedExpression& arrayref, const ExpressionType& index, const ExpressionType& value);
+    WARN_UNUSED_RETURN PartialResult addArrayLen(const TypedExpression& arrayref, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addArrayFill(uint32_t, const TypedExpression&, const ExpressionType&, const ExpressionType&, const ExpressionType&);
+    WARN_UNUSED_RETURN PartialResult addArrayCopy(uint32_t, const TypedExpression&, const ExpressionType&, uint32_t, const TypedExpression&, const ExpressionType&, const ExpressionType&);
+    WARN_UNUSED_RETURN PartialResult addArrayInitElem(uint32_t, const TypedExpression&, const ExpressionType&, uint32_t, const ExpressionType&, const ExpressionType&);
+    WARN_UNUSED_RETURN PartialResult addArrayInitData(uint32_t, const TypedExpression&, const ExpressionType&, uint32_t, const ExpressionType&, const ExpressionType&);
     WARN_UNUSED_RETURN PartialResult addStructNew(uint32_t typeIndex, ArgumentList& args, ExpressionType& result);
     WARN_UNUSED_RETURN PartialResult addStructNewDefault(uint32_t index, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addStructGet(ExtGCOpType structGetKind, TypedExpression structReference, const StructType&, uint32_t fieldIndex, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addStructSet(TypedExpression structReference, const StructType&, uint32_t fieldIndex, ExpressionType value);
-    WARN_UNUSED_RETURN PartialResult addRefTest(TypedExpression reference, bool allowNull, int32_t heapType, bool shouldNegate, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addRefCast(TypedExpression reference, bool allowNull, int32_t heapType, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addAnyConvertExtern(ExpressionType reference, ExpressionType& result);
-    WARN_UNUSED_RETURN PartialResult addExternConvertAny(ExpressionType reference, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addStructGet(ExtGCOpType structGetKind, const TypedExpression& structReference, const StructType&, uint32_t fieldIndex, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addStructSet(const TypedExpression& structReference, const StructType&, uint32_t fieldIndex, const ExpressionType& value);
+    WARN_UNUSED_RETURN PartialResult addRefTest(const TypedExpression& reference, bool allowNull, int32_t heapType, bool shouldNegate, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addRefCast(const TypedExpression& reference, bool allowNull, int32_t heapType, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addAnyConvertExtern(const ExpressionType& reference, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addExternConvertAny(const ExpressionType& reference, ExpressionType& result);
 
     // Basic operators
 #define X(name, opcode, short, idx, ...) \
-    WARN_UNUSED_RETURN PartialResult add##name(ExpressionType arg, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult add##name(const ExpressionType& arg, ExpressionType& result);
     FOR_EACH_WASM_UNARY_OP(X)
 #undef X
 #define X(name, opcode, short, idx, ...) \
-    WARN_UNUSED_RETURN PartialResult add##name(ExpressionType left, ExpressionType right, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult add##name(const ExpressionType& left, const ExpressionType& right, ExpressionType& result);
     FOR_EACH_WASM_BINARY_OP(X)
 #undef X
 
-    WARN_UNUSED_RETURN PartialResult addSelect(ExpressionType condition, ExpressionType nonZero, ExpressionType zero, ExpressionType& result);
+    WARN_UNUSED_RETURN PartialResult addSelect(const ExpressionType& condition, const ExpressionType& nonZero, const ExpressionType& zero, ExpressionType& result);
 
     // Control flow
     WARN_UNUSED_RETURN ControlData addTopLevel(BlockSignature);
     WARN_UNUSED_RETURN PartialResult addBlock(BlockSignature, Stack& enclosingStack, ControlType& newBlock, Stack& newStack);
     WARN_UNUSED_RETURN PartialResult addLoop(BlockSignature, Stack& enclosingStack, ControlType& block, Stack& newStack, uint32_t loopIndex);
-    WARN_UNUSED_RETURN PartialResult addIf(ExpressionType condition, BlockSignature, Stack& enclosingStack, ControlType& result, Stack& newStack);
+    WARN_UNUSED_RETURN PartialResult addIf(const ExpressionType& condition, BlockSignature, Stack& enclosingStack, ControlType& result, Stack& newStack);
     WARN_UNUSED_RETURN PartialResult addElse(ControlData&, const Stack&);
     WARN_UNUSED_RETURN PartialResult addElseToUnreachable(ControlData&);
 
@@ -802,15 +805,15 @@ public:
     WARN_UNUSED_RETURN PartialResult addDelegateToUnreachable(ControlType&, ControlType&);
     WARN_UNUSED_RETURN PartialResult addThrow(unsigned exceptionIndex, ArgumentList& args, Stack&);
     WARN_UNUSED_RETURN PartialResult addRethrow(unsigned, ControlType&);
-    WARN_UNUSED_RETURN PartialResult addThrowRef(TypedExpression exception, Stack&);
+    WARN_UNUSED_RETURN PartialResult addThrowRef(const TypedExpression& exception, Stack&);
 
     WARN_UNUSED_RETURN PartialResult addInlinedReturn(const auto& returnValues);
 
     WARN_UNUSED_RETURN PartialResult addReturn(const ControlData&, const Stack& returnValues);
-    WARN_UNUSED_RETURN PartialResult addBranch(ControlData&, ExpressionType condition, const Stack& returnValues);
-    WARN_UNUSED_RETURN PartialResult addBranchNull(ControlType&, ExpressionType, const Stack&, bool, ExpressionType&);
-    WARN_UNUSED_RETURN PartialResult addBranchCast(ControlType&, TypedExpression, const Stack&, bool, int32_t, bool);
-    WARN_UNUSED_RETURN PartialResult addSwitch(ExpressionType condition, const Vector<ControlData*>& targets, ControlData& defaultTargets, const Stack& expressionStack);
+    WARN_UNUSED_RETURN PartialResult addBranch(ControlData&, const ExpressionType& condition, const Stack& returnValues);
+    WARN_UNUSED_RETURN PartialResult addBranchNull(ControlType&, const ExpressionType&, const Stack&, bool, ExpressionType&);
+    WARN_UNUSED_RETURN PartialResult addBranchCast(ControlType&, const TypedExpression&, const Stack&, bool, int32_t, bool);
+    WARN_UNUSED_RETURN PartialResult addSwitch(const ExpressionType& condition, const Vector<ControlData*>& targets, ControlData& defaultTargets, const Stack& expressionStack);
     WARN_UNUSED_RETURN PartialResult endBlock(ControlEntry&, Stack& expressionStack);
     WARN_UNUSED_RETURN PartialResult addEndToUnreachable(ControlEntry&, const Stack& = { });
 
@@ -847,7 +850,7 @@ public:
     ALWAYS_INLINE void willParseExtendedOpcode() { }
     ALWAYS_INLINE void didParseOpcode() { }
     void didFinishParsingLocals() { }
-    void didPopValueFromStack(ExpressionType expr, ASCIILiteral message)
+    void didPopValueFromStack(const ExpressionType& expr, ASCIILiteral message)
     {
         TRACE_VALUE(Wasm::Types::Void, get(expr), "pop at height: ", m_parser->expressionStack().size() + 1, " site: [", message, "], ", expr);
     }
@@ -941,8 +944,8 @@ private:
     WARN_UNUSED_RETURN bool emitStructSet(bool canTrap, Value*, uint32_t, const StructType&, Value*);
     WARN_UNUSED_RETURN Value* allocateWasmGCArray(uint32_t typeIndex, Value* initValue, Value* size);
     using ArraySegmentOperation = EncodedJSValue SYSV_ABI (&)(JSC::JSWebAssemblyInstance*, uint32_t, uint32_t, uint32_t, uint32_t);
-    WARN_UNUSED_RETURN ExpressionType pushArrayNewFromSegment(ArraySegmentOperation, uint32_t typeIndex, uint32_t segmentIndex, ExpressionType arraySize, ExpressionType offset, ExceptionType);
-    void emitRefTestOrCast(CastKind, TypedExpression, bool, int32_t, bool, ExpressionType&);
+    WARN_UNUSED_RETURN ExpressionType pushArrayNewFromSegment(ArraySegmentOperation, uint32_t typeIndex, uint32_t segmentIndex, const ExpressionType& arraySize, const ExpressionType& offset, ExceptionType);
+    void emitRefTestOrCast(CastKind, const TypedExpression&, bool, int32_t, bool, ExpressionType&);
     template <typename Generator>
     void emitCheckOrBranchForCast(CastKind, Value*, const Generator&, BasicBlock*);
     Value* emitLoadRTTFromObject(Value*);
@@ -1617,13 +1620,13 @@ auto OMGIRGenerator::addArguments(const TypeDefinition& signature) -> PartialRes
     return { };
 }
 
-auto OMGIRGenerator::addRefIsNull(ExpressionType value, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addRefIsNull(const ExpressionType& value, ExpressionType& result) -> PartialResult
 {
     result = push(m_currentBlock->appendNew<Value>(m_proc, B3::Equal, origin(), get(value), m_currentBlock->appendNew<WasmConstRefValue>(m_proc, origin(), JSValue::encode(jsNull()))));
     return { };
 }
 
-auto OMGIRGenerator::addTableGet(unsigned tableIndex, ExpressionType index, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addTableGet(unsigned tableIndex, const ExpressionType& index, ExpressionType& result) -> PartialResult
 {
     // FIXME: Emit this inline <https://bugs.webkit.org/show_bug.cgi?id=198506>.
     Value* resultValue = callWasmOperation(m_currentBlock, toB3Type(Types::Externref), operationGetWasmTableElement,
@@ -1641,7 +1644,7 @@ auto OMGIRGenerator::addTableGet(unsigned tableIndex, ExpressionType index, Expr
     return { };
 }
 
-auto OMGIRGenerator::addTableSet(unsigned tableIndex, ExpressionType index, ExpressionType value) -> PartialResult
+auto OMGIRGenerator::addTableSet(unsigned tableIndex, const ExpressionType& index, const ExpressionType& value) -> PartialResult
 {
     // FIXME: Emit this inline <https://bugs.webkit.org/show_bug.cgi?id=198506>.
     auto shouldThrow = callWasmOperation(m_currentBlock, B3::Int32, operationSetWasmTableElement,
@@ -1667,7 +1670,7 @@ auto OMGIRGenerator::addRefFunc(FunctionSpaceIndex index, ExpressionType& result
     return { };
 }
 
-auto OMGIRGenerator::addRefAsNonNull(TypedExpression reference, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addRefAsNonNull(const TypedExpression& reference, ExpressionType& result) -> PartialResult
 {
     auto value = get(reference);
     result = push(value);
@@ -1676,12 +1679,12 @@ auto OMGIRGenerator::addRefAsNonNull(TypedExpression reference, ExpressionType& 
     return { };
 }
 
-auto OMGIRGenerator::addRefEq(ExpressionType ref0, ExpressionType ref1, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addRefEq(const ExpressionType& ref0, const ExpressionType& ref1, ExpressionType& result) -> PartialResult
 {
     return addI64Eq(ref0, ref1, result);
 }
 
-auto OMGIRGenerator::addTableInit(unsigned elementIndex, unsigned tableIndex, ExpressionType dstOffset, ExpressionType srcOffset, ExpressionType length) -> PartialResult
+auto OMGIRGenerator::addTableInit(unsigned elementIndex, unsigned tableIndex, const ExpressionType& dstOffset, const ExpressionType& srcOffset, const ExpressionType& length) -> PartialResult
 {
     Value* resultValue = callWasmOperation(m_currentBlock, toB3Type(Types::I32), operationWasmTableInit,
         instanceValue(),
@@ -1719,7 +1722,7 @@ auto OMGIRGenerator::addTableSize(unsigned tableIndex, ExpressionType& result) -
     return { };
 }
 
-auto OMGIRGenerator::addTableGrow(unsigned tableIndex, ExpressionType fill, ExpressionType delta, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addTableGrow(unsigned tableIndex, const ExpressionType& fill, const ExpressionType& delta, ExpressionType& result) -> PartialResult
 {
     result = push(callWasmOperation(m_currentBlock, toB3Type(Types::I32), operationWasmTableGrow,
         instanceValue(), constant(Int32, tableIndex), get(fill), get(delta)));
@@ -1727,7 +1730,7 @@ auto OMGIRGenerator::addTableGrow(unsigned tableIndex, ExpressionType fill, Expr
     return { };
 }
 
-auto OMGIRGenerator::addTableFill(unsigned tableIndex, ExpressionType offset, ExpressionType fill, ExpressionType count) -> PartialResult
+auto OMGIRGenerator::addTableFill(unsigned tableIndex, const ExpressionType& offset, const ExpressionType& fill, const ExpressionType& count) -> PartialResult
 {
     Value* resultValue = callWasmOperation(m_currentBlock, toB3Type(Types::I32), operationWasmTableFill,
         instanceValue(), constant(Int32, tableIndex), get(offset), get(fill), get(count));
@@ -1744,7 +1747,7 @@ auto OMGIRGenerator::addTableFill(unsigned tableIndex, ExpressionType offset, Ex
     return { };
 }
 
-auto OMGIRGenerator::addTableCopy(unsigned dstTableIndex, unsigned srcTableIndex, ExpressionType dstOffset, ExpressionType srcOffset, ExpressionType length) -> PartialResult
+auto OMGIRGenerator::addTableCopy(unsigned dstTableIndex, unsigned srcTableIndex, const ExpressionType& dstOffset, const ExpressionType& srcOffset, const ExpressionType& length) -> PartialResult
 {
     Value* resultValue = callWasmOperation(
         m_currentBlock, toB3Type(Types::I32), operationWasmTableCopy,
@@ -1921,7 +1924,7 @@ auto OMGIRGenerator::emitIndirectCall(Value* calleeInstance, Value* calleeCode, 
     return { };
 }
 
-auto OMGIRGenerator::addGrowMemory(ExpressionType delta, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addGrowMemory(const ExpressionType& delta, ExpressionType& result) -> PartialResult
 {
     result = push(callWasmOperation(m_currentBlock, Int32, operationGrowMemory,
         instanceValue(), get(delta)));
@@ -1947,7 +1950,7 @@ auto OMGIRGenerator::addCurrentMemory(ExpressionType& result) -> PartialResult
     return { };
 }
 
-auto OMGIRGenerator::addMemoryFill(ExpressionType dstAddress, ExpressionType target, ExpressionType count) -> PartialResult
+auto OMGIRGenerator::addMemoryFill(const ExpressionType& dstAddress, const ExpressionType& target, const ExpressionType& count) -> PartialResult
 {
     auto* memorySize = m_currentBlock->appendNew<MemoryValue>(m_proc, Load, pointerType(), origin(), instanceValue(), safeCast<int32_t>(JSWebAssemblyInstance::offsetOfCachedMemorySize()));
     m_heaps.decorateMemory(&m_heaps.JSWebAssemblyInstance_cachedMemorySize, memorySize);
@@ -1970,7 +1973,7 @@ auto OMGIRGenerator::addMemoryFill(ExpressionType dstAddress, ExpressionType tar
     return { };
 }
 
-auto OMGIRGenerator::addMemoryInit(unsigned dataSegmentIndex, ExpressionType dstAddress, ExpressionType srcAddress, ExpressionType length) -> PartialResult
+auto OMGIRGenerator::addMemoryInit(unsigned dataSegmentIndex, const ExpressionType& dstAddress, const ExpressionType& srcAddress, const ExpressionType& length) -> PartialResult
 {
     Value* resultValue = callWasmOperation(m_currentBlock, toB3Type(Types::I32), operationWasmMemoryInit,
         instanceValue(),
@@ -1989,7 +1992,7 @@ auto OMGIRGenerator::addMemoryInit(unsigned dataSegmentIndex, ExpressionType dst
     return { };
 }
 
-auto OMGIRGenerator::addMemoryCopy(ExpressionType dstAddress, ExpressionType srcAddress, ExpressionType count) -> PartialResult
+auto OMGIRGenerator::addMemoryCopy(const ExpressionType& dstAddress, const ExpressionType& srcAddress, const ExpressionType& count) -> PartialResult
 {
     auto* memorySize = m_currentBlock->appendNew<MemoryValue>(m_proc, Load, pointerType(), origin(), instanceValue(), safeCast<int32_t>(JSWebAssemblyInstance::offsetOfCachedMemorySize()));
     m_heaps.decorateMemory(&m_heaps.JSWebAssemblyInstance_cachedMemorySize, memorySize);
@@ -2101,7 +2104,7 @@ void OMGIRGenerator::traceCF(Args&&... info)
     if (!WasmOMGIRGeneratorInternal::traceStackValues)
         return;
     int i = 0;
-    for (auto val : m_parser->expressionStack()) {
+    for (const auto& val : m_parser->expressionStack()) {
         ++i;
         traceValue(Wasm::Types::Void, get(val.value()), " parser stack[", i, "] = ", val.value());
     }
@@ -2110,7 +2113,7 @@ void OMGIRGenerator::traceCF(Args&&... info)
         return;
 }
 
-auto OMGIRGenerator::setLocal(uint32_t index, ExpressionType value) -> PartialResult
+auto OMGIRGenerator::setLocal(uint32_t index, const ExpressionType& value) -> PartialResult
 {
     ASSERT(m_locals[index]);
     m_currentBlock->appendNew<VariableValue>(m_proc, B3::Set, origin(), m_locals[index], get(value));
@@ -2118,7 +2121,7 @@ auto OMGIRGenerator::setLocal(uint32_t index, ExpressionType value) -> PartialRe
     return { };
 }
 
-auto OMGIRGenerator::teeLocal(uint32_t index, ExpressionType value, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::teeLocal(uint32_t index, const ExpressionType& value, ExpressionType& result) -> PartialResult
 {
     ASSERT(m_locals[index]);
     Value* input = get(value);
@@ -2180,7 +2183,7 @@ auto OMGIRGenerator::getGlobal(uint32_t index, ExpressionType& result) -> Partia
     return { };
 }
 
-auto OMGIRGenerator::setGlobal(uint32_t index, ExpressionType value) -> PartialResult
+auto OMGIRGenerator::setGlobal(uint32_t index, const ExpressionType& value) -> PartialResult
 {
     const Wasm::GlobalInformation& global = m_info.globals[index];
     ASSERT(toB3Type(global.type) == value.type());
@@ -2513,7 +2516,7 @@ inline Value* OMGIRGenerator::emitLoadOp(LoadOpType op, Value* pointer, uint32_t
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-auto OMGIRGenerator::load(LoadOpType op, ExpressionType pointerVar, ExpressionType& result, uint32_t offset) -> PartialResult
+auto OMGIRGenerator::load(LoadOpType op, const ExpressionType& pointerVar, ExpressionType& result, uint32_t offset) -> PartialResult
 {
     Value* pointer = get(pointerVar);
     ASSERT(pointer->type() == Int32);
@@ -2619,7 +2622,7 @@ inline void OMGIRGenerator::emitStoreOp(StoreOpType op, Value* pointer, Value* v
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-auto OMGIRGenerator::store(StoreOpType op, ExpressionType pointerVar, ExpressionType valueVar, uint32_t offset) -> PartialResult
+auto OMGIRGenerator::store(StoreOpType op, const ExpressionType& pointerVar, const ExpressionType& valueVar, uint32_t offset) -> PartialResult
 {
     Value* pointer = get(pointerVar);
     Value* value = get(valueVar);
@@ -2713,7 +2716,7 @@ inline Value* OMGIRGenerator::emitAtomicLoadOp(ExtAtomicOpType op, Type valueTyp
     return sanitizeAtomicResult(op, valueType, atomic);
 }
 
-auto OMGIRGenerator::atomicLoad(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType& result, uint32_t offset) -> PartialResult
+auto OMGIRGenerator::atomicLoad(ExtAtomicOpType op, Type valueType, const ExpressionType& pointer, ExpressionType& result, uint32_t offset) -> PartialResult
 {
     ASSERT(pointer.type() == Int32);
 
@@ -2753,7 +2756,7 @@ inline void OMGIRGenerator::emitAtomicStoreOp(ExtAtomicOpType op, Type valueType
     m_heaps.decorateFencedAccess(&m_heaps.WebAssemblyMemory, atomic);
 }
 
-auto OMGIRGenerator::atomicStore(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType value, uint32_t offset) -> PartialResult
+auto OMGIRGenerator::atomicStore(ExtAtomicOpType op, Type valueType, const ExpressionType& pointer, const ExpressionType& value, uint32_t offset) -> PartialResult
 {
     ASSERT(pointer.type() == Int32);
 
@@ -2844,7 +2847,7 @@ inline Value* OMGIRGenerator::emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type val
     return sanitizeAtomicResult(op, valueType, atomic);
 }
 
-auto OMGIRGenerator::atomicBinaryRMW(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType value, ExpressionType& result, uint32_t offset) -> PartialResult
+auto OMGIRGenerator::atomicBinaryRMW(ExtAtomicOpType op, Type valueType, const ExpressionType& pointer, const ExpressionType& value, ExpressionType& result, uint32_t offset) -> PartialResult
 {
     ASSERT(pointer.type() == Int32);
 
@@ -2994,7 +2997,7 @@ WARN_UNUSED_RETURN bool OMGIRGenerator::emitStructSet(bool canTrap, Value* struc
     return isRefType(resultType);
 }
 
-auto OMGIRGenerator::atomicCompareExchange(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType expected, ExpressionType value, ExpressionType& result, uint32_t offset) -> PartialResult
+auto OMGIRGenerator::atomicCompareExchange(ExtAtomicOpType op, Type valueType, const ExpressionType& pointer, const ExpressionType& expected, const ExpressionType& value, ExpressionType& result, uint32_t offset) -> PartialResult
 {
     ASSERT(pointer.type() == Int32);
 
@@ -3023,7 +3026,7 @@ auto OMGIRGenerator::atomicCompareExchange(ExtAtomicOpType op, Type valueType, E
     return { };
 }
 
-auto OMGIRGenerator::atomicWait(ExtAtomicOpType op, ExpressionType pointerVar, ExpressionType valueVar, ExpressionType timeoutVar, ExpressionType& result, uint32_t offset) -> PartialResult
+auto OMGIRGenerator::atomicWait(ExtAtomicOpType op, const ExpressionType& pointerVar, const ExpressionType& valueVar, const ExpressionType& timeoutVar, ExpressionType& result, uint32_t offset) -> PartialResult
 {
     Value* pointer = get(pointerVar);
     Value* value = get(valueVar);
@@ -3050,7 +3053,7 @@ auto OMGIRGenerator::atomicWait(ExtAtomicOpType op, ExpressionType pointerVar, E
     return { };
 }
 
-auto OMGIRGenerator::atomicNotify(ExtAtomicOpType, ExpressionType pointer, ExpressionType count, ExpressionType& result, uint32_t offset) -> PartialResult
+auto OMGIRGenerator::atomicNotify(ExtAtomicOpType, const ExpressionType& pointer, const ExpressionType& count, ExpressionType& result, uint32_t offset) -> PartialResult
 {
     Value* resultValue = callWasmOperation(m_currentBlock, Int32, operationMemoryAtomicNotify,
         instanceValue(), get(pointer), constant(Int32, offset), get(count));
@@ -3073,7 +3076,7 @@ auto OMGIRGenerator::atomicFence(ExtAtomicOpType, uint8_t) -> PartialResult
     return { };
 }
 
-auto OMGIRGenerator::truncSaturated(Ext1OpType op, ExpressionType argVar, ExpressionType& result, Type returnType, Type) -> PartialResult
+auto OMGIRGenerator::truncSaturated(Ext1OpType op, const ExpressionType& argVar, ExpressionType& result, Type returnType, Type) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* maxFloat = nullptr;
@@ -3235,7 +3238,7 @@ auto OMGIRGenerator::truncSaturated(Ext1OpType op, ExpressionType argVar, Expres
     return { };
 }
 
-auto OMGIRGenerator::addRefI31(ExpressionType value, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addRefI31(const ExpressionType& value, ExpressionType& result) -> PartialResult
 {
     ASSERT(value.type() == Int32);
     Value* shiftLeft = m_currentBlock->appendNew<Value>(m_proc, B3::Shl, origin(), get(value), constant(Int32, 0x1));
@@ -3246,7 +3249,7 @@ auto OMGIRGenerator::addRefI31(ExpressionType value, ExpressionType& result) -> 
     return { };
 }
 
-auto OMGIRGenerator::addI31GetS(TypedExpression reference, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI31GetS(const TypedExpression& reference, ExpressionType& result) -> PartialResult
 {
     // Trap on null reference.
     Value* value = get(reference);
@@ -3258,7 +3261,7 @@ auto OMGIRGenerator::addI31GetS(TypedExpression reference, ExpressionType& resul
     return { };
 }
 
-auto OMGIRGenerator::addI31GetU(TypedExpression reference, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI31GetU(const TypedExpression& reference, ExpressionType& result) -> PartialResult
 {
     // Trap on null reference.
     Value* value = get(reference);
@@ -3374,7 +3377,7 @@ void OMGIRGenerator::getArrayRefType(uint32_t typeIndex, Type& result)
     result = Type { TypeKind::Ref, typeDef->index() };
 }
 
-auto OMGIRGenerator::addArrayNew(uint32_t typeIndex, ExpressionType size, ExpressionType value, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addArrayNew(uint32_t typeIndex, const ExpressionType& size, const ExpressionType& value, ExpressionType& result) -> PartialResult
 {
 #if ASSERT_ENABLED
     StorageType elementType;
@@ -3389,7 +3392,7 @@ auto OMGIRGenerator::addArrayNew(uint32_t typeIndex, ExpressionType size, Expres
     return { };
 }
 
-auto OMGIRGenerator::pushArrayNewFromSegment(ArraySegmentOperation operation, uint32_t typeIndex, uint32_t segmentIndex, ExpressionType arraySize, ExpressionType offset, ExceptionType exceptionType) -> ExpressionType
+auto OMGIRGenerator::pushArrayNewFromSegment(ArraySegmentOperation operation, uint32_t typeIndex, uint32_t segmentIndex, const ExpressionType& arraySize, const ExpressionType& offset, ExceptionType exceptionType) -> ExpressionType
 {
     Value* resultValue = callWasmOperation(m_currentBlock, toB3Type(Types::Arrayref), operation,
         instanceValue(), constant(Int32, typeIndex),
@@ -3402,7 +3405,7 @@ auto OMGIRGenerator::pushArrayNewFromSegment(ArraySegmentOperation operation, ui
     return push(resultValue);
 }
 
-auto OMGIRGenerator::addArrayNewDefault(uint32_t typeIndex, ExpressionType size, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addArrayNewDefault(uint32_t typeIndex, const ExpressionType& size, ExpressionType& result) -> PartialResult
 {
     StorageType elementType;
     getArrayElementType(typeIndex, elementType);
@@ -3423,14 +3426,14 @@ auto OMGIRGenerator::addArrayNewDefault(uint32_t typeIndex, ExpressionType size,
     return { };
 }
 
-auto OMGIRGenerator::addArrayNewData(uint32_t typeIndex, uint32_t dataIndex, ExpressionType arraySize, ExpressionType offset, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addArrayNewData(uint32_t typeIndex, uint32_t dataIndex, const ExpressionType& arraySize, const ExpressionType& offset, ExpressionType& result) -> PartialResult
 {
     result = pushArrayNewFromSegment(operationWasmArrayNewData, typeIndex, dataIndex, arraySize, offset, ExceptionType::BadArrayNewInitData);
 
     return { };
 }
 
-auto OMGIRGenerator::addArrayNewElem(uint32_t typeIndex, uint32_t elemSegmentIndex, ExpressionType arraySize, ExpressionType offset, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addArrayNewElem(uint32_t typeIndex, uint32_t elemSegmentIndex, const ExpressionType& arraySize, const ExpressionType& offset, ExpressionType& result) -> PartialResult
 {
     result = pushArrayNewFromSegment(operationWasmArrayNewElem, typeIndex, elemSegmentIndex, arraySize, offset, ExceptionType::BadArrayNewInitElem);
     return { };
@@ -3470,7 +3473,7 @@ Value* OMGIRGenerator::emitGetArraySizeWithNullCheck(Type arrayType, Value* arra
     return arraySize;
 }
 
-auto OMGIRGenerator::addArrayGet(ExtGCOpType arrayGetKind, uint32_t typeIndex, TypedExpression arrayref, ExpressionType index, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addArrayGet(ExtGCOpType arrayGetKind, uint32_t typeIndex, const TypedExpression& arrayref, const ExpressionType& index, ExpressionType& result) -> PartialResult
 {
     auto arrayValue = get(arrayref);
     auto indexValue = get(index);
@@ -3684,7 +3687,7 @@ void OMGIRGenerator::emitArraySetUnchecked(uint32_t typeIndex, Value* arrayref, 
 }
 
 
-auto OMGIRGenerator::addArraySet(uint32_t typeIndex, TypedExpression arrayref, ExpressionType index, ExpressionType value) -> PartialResult
+auto OMGIRGenerator::addArraySet(uint32_t typeIndex, const TypedExpression& arrayref, const ExpressionType& index, const ExpressionType& value) -> PartialResult
 {
 #if ASSERT_ENABLED
     const ArrayType* arrayType = getArrayTypeDefinition(typeIndex);
@@ -3710,7 +3713,7 @@ auto OMGIRGenerator::addArraySet(uint32_t typeIndex, TypedExpression arrayref, E
     return { };
 }
 
-auto OMGIRGenerator::addArrayLen(TypedExpression arrayref, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addArrayLen(const TypedExpression& arrayref, ExpressionType& result) -> PartialResult
 {
     auto arrayValue = get(arrayref);
 
@@ -3721,7 +3724,7 @@ auto OMGIRGenerator::addArrayLen(TypedExpression arrayref, ExpressionType& resul
     return { };
 }
 
-auto OMGIRGenerator::addArrayFill(uint32_t typeIndex, TypedExpression arrayref, ExpressionType offset, ExpressionType value, ExpressionType size) -> PartialResult
+auto OMGIRGenerator::addArrayFill(uint32_t typeIndex, const TypedExpression& arrayref, const ExpressionType& offset, const ExpressionType& value, const ExpressionType& size) -> PartialResult
 {
     StorageType elementType;
     getArrayElementType(typeIndex, elementType);
@@ -3760,7 +3763,7 @@ auto OMGIRGenerator::addArrayFill(uint32_t typeIndex, TypedExpression arrayref, 
     return { };
 }
 
-auto OMGIRGenerator::addArrayCopy(uint32_t, TypedExpression dst, ExpressionType dstOffset, uint32_t, TypedExpression src, ExpressionType srcOffset, ExpressionType size) -> PartialResult
+auto OMGIRGenerator::addArrayCopy(uint32_t, const TypedExpression& dst, const ExpressionType& dstOffset, uint32_t, const TypedExpression& src, const ExpressionType& srcOffset, const ExpressionType& size) -> PartialResult
 {
     auto dstValue = get(dst);
     auto dstOffsetValue = get(dstOffset);
@@ -3791,7 +3794,7 @@ auto OMGIRGenerator::addArrayCopy(uint32_t, TypedExpression dst, ExpressionType 
     return { };
 }
 
-auto OMGIRGenerator::addArrayInitElem(uint32_t, TypedExpression dst, ExpressionType dstOffset, uint32_t srcElementIndex, ExpressionType srcOffset, ExpressionType size) -> PartialResult
+auto OMGIRGenerator::addArrayInitElem(uint32_t, const TypedExpression& dst, const ExpressionType& dstOffset, uint32_t srcElementIndex, const ExpressionType& srcOffset, const ExpressionType& size) -> PartialResult
 {
     auto dstValue = get(dst);
     auto dstOffsetValue = get(dstOffset);
@@ -3819,7 +3822,7 @@ auto OMGIRGenerator::addArrayInitElem(uint32_t, TypedExpression dst, ExpressionT
     return { };
 }
 
-auto OMGIRGenerator::addArrayInitData(uint32_t, TypedExpression dst, ExpressionType dstOffset, uint32_t srcDataIndex, ExpressionType srcOffset, ExpressionType size) -> PartialResult
+auto OMGIRGenerator::addArrayInitData(uint32_t, const TypedExpression& dst, const ExpressionType& dstOffset, uint32_t srcDataIndex, const ExpressionType& srcOffset, const ExpressionType& size) -> PartialResult
 {
     auto dstValue = get(dst);
     auto dstOffsetValue = get(dstOffset);
@@ -3881,7 +3884,7 @@ auto OMGIRGenerator::addStructNewDefault(uint32_t typeIndex, ExpressionType& res
     return { };
 }
 
-auto OMGIRGenerator::addStructGet(ExtGCOpType structGetKind, TypedExpression structReference, const StructType& structType, uint32_t fieldIndex, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addStructGet(ExtGCOpType structGetKind, const TypedExpression& structReference, const StructType& structType, uint32_t fieldIndex, ExpressionType& result) -> PartialResult
 {
     auto fieldType = structType.field(fieldIndex).type;
     auto mutability = structType.field(fieldIndex).mutability;
@@ -3961,7 +3964,7 @@ auto OMGIRGenerator::addStructGet(ExtGCOpType structGetKind, TypedExpression str
     return { };
 }
 
-auto OMGIRGenerator::addStructSet(TypedExpression structReference, const StructType& structType, uint32_t fieldIndex, ExpressionType value) -> PartialResult
+auto OMGIRGenerator::addStructSet(const TypedExpression& structReference, const StructType& structType, uint32_t fieldIndex, const ExpressionType& value) -> PartialResult
 {
     Value* structValue = get(structReference);
     Value* valueValue = get(value);
@@ -3977,19 +3980,19 @@ auto OMGIRGenerator::addStructSet(TypedExpression structReference, const StructT
     return { };
 }
 
-auto OMGIRGenerator::addRefTest(TypedExpression reference, bool allowNull, int32_t heapType, bool shouldNegate, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addRefTest(const TypedExpression& reference, bool allowNull, int32_t heapType, bool shouldNegate, ExpressionType& result) -> PartialResult
 {
     emitRefTestOrCast(CastKind::Test, reference, allowNull, heapType, shouldNegate, result);
     return { };
 }
 
-auto OMGIRGenerator::addRefCast(TypedExpression reference, bool allowNull, int32_t heapType, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addRefCast(const TypedExpression& reference, bool allowNull, int32_t heapType, ExpressionType& result) -> PartialResult
 {
     emitRefTestOrCast(CastKind::Cast, reference, allowNull, heapType, false, result);
     return { };
 }
 
-void OMGIRGenerator::emitRefTestOrCast(CastKind castKind, TypedExpression reference, bool allowNull, int32_t toHeapType, bool shouldNegate, ExpressionType& result)
+void OMGIRGenerator::emitRefTestOrCast(CastKind castKind, const TypedExpression& reference, bool allowNull, int32_t toHeapType, bool shouldNegate, ExpressionType& result)
 {
     Value* value = get(reference);
     if (castKind == CastKind::Cast)
@@ -4496,19 +4499,19 @@ Value* OMGIRGenerator::emitLoadRTTFromObject(Value* reference)
     return rtt;
 }
 
-auto OMGIRGenerator::addAnyConvertExtern(ExpressionType reference, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addAnyConvertExtern(const ExpressionType& reference, ExpressionType& result) -> PartialResult
 {
     result = push(callWasmOperation(m_currentBlock, toB3Type(anyrefType()), operationWasmAnyConvertExtern, get(reference)));
     return { };
 }
 
-auto OMGIRGenerator::addExternConvertAny(ExpressionType reference, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addExternConvertAny(const ExpressionType& reference, ExpressionType& result) -> PartialResult
 {
     result = push(get(reference));
     return { };
 }
 
-auto OMGIRGenerator::addSelect(ExpressionType condition, ExpressionType nonZero, ExpressionType zero, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addSelect(const ExpressionType& condition, const ExpressionType& nonZero, const ExpressionType& zero, ExpressionType& result) -> PartialResult
 {
     result = push(m_currentBlock->appendNew<Value>(m_proc, B3::Select, origin(), get(condition), get(nonZero), get(zero)));
     return { };
@@ -4519,28 +4522,28 @@ OMGIRGenerator::ExpressionType OMGIRGenerator::addConstant(Type type, uint64_t v
     return push(constant(toB3Type(type), value));
 }
 
-auto OMGIRGenerator::addSIMDSplat(SIMDLane lane, ExpressionType scalar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addSIMDSplat(SIMDLane lane, const ExpressionType& scalar, ExpressionType& result) -> PartialResult
 {
     Value* toSplat = get(scalar);
     result = push(m_currentBlock->appendNew<SIMDValue>(m_proc, origin(), B3::VectorSplat, B3::V128, lane, SIMDSignMode::None, toSplat));
     return { };
 }
 
-auto OMGIRGenerator::addSIMDShift(SIMDLaneOperation op, SIMDInfo info, ExpressionType v, ExpressionType shift, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addSIMDShift(SIMDLaneOperation op, SIMDInfo info, const ExpressionType& v, const ExpressionType& shift, ExpressionType& result) -> PartialResult
 {
     result = push(m_currentBlock->appendNew<SIMDValue>(m_proc, origin(),
         op == SIMDLaneOperation::Shr ? B3::VectorShr : B3::VectorShl, B3::V128, info, get(v), get(shift)));
     return { };
 }
 
-auto OMGIRGenerator::addSIMDExtmul(SIMDLaneOperation op, SIMDInfo info, ExpressionType lhs, ExpressionType rhs, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addSIMDExtmul(SIMDLaneOperation op, SIMDInfo info, const ExpressionType& lhs, const ExpressionType& rhs, ExpressionType& result) -> PartialResult
 {
     ASSERT(info.signMode != SIMDSignMode::None);
     result = push(m_currentBlock->appendNew<SIMDValue>(m_proc, origin(), op == SIMDLaneOperation::ExtmulLow ? VectorMulLow : VectorMulHigh, B3::V128, info, get(lhs), get(rhs)));
     return { };
 }
 
-auto OMGIRGenerator::addSIMDShuffle(v128_t imm, ExpressionType a, ExpressionType b, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addSIMDShuffle(v128_t imm, const ExpressionType& a, const ExpressionType& b, ExpressionType& result) -> PartialResult
 {
     if constexpr (isX86()) {
         v128_t leftImm = imm;
@@ -4579,7 +4582,7 @@ auto OMGIRGenerator::addSIMDShuffle(v128_t imm, ExpressionType a, ExpressionType
     return { };
 }
 
-auto OMGIRGenerator::addSIMDLoad(ExpressionType pointerVariable, uint32_t uoffset, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addSIMDLoad(const ExpressionType& pointerVariable, uint32_t uoffset, ExpressionType& result) -> PartialResult
 {
     Value* ptr = emitCheckAndPreparePointer(get(pointerVariable), uoffset, 16);
     int32_t offset = fixupPointerPlusOffset(ptr, uoffset);
@@ -4590,7 +4593,7 @@ auto OMGIRGenerator::addSIMDLoad(ExpressionType pointerVariable, uint32_t uoffse
     return { };
 }
 
-auto OMGIRGenerator::addSIMDStore(ExpressionType value, ExpressionType pointerVariable, uint32_t uoffset) -> PartialResult
+auto OMGIRGenerator::addSIMDStore(const ExpressionType& value, const ExpressionType& pointerVariable, uint32_t uoffset) -> PartialResult
 {
     Value* ptr = emitCheckAndPreparePointer(get(pointerVariable), uoffset, 16);
     int32_t offset = fixupPointerPlusOffset(ptr, uoffset);
@@ -4600,7 +4603,7 @@ auto OMGIRGenerator::addSIMDStore(ExpressionType value, ExpressionType pointerVa
     return { };
 }
 
-auto OMGIRGenerator::addSIMDLoadSplat(SIMDLaneOperation op, ExpressionType pointerVariable, uint32_t uoffset, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addSIMDLoadSplat(SIMDLaneOperation op, const ExpressionType& pointerVariable, uint32_t uoffset, ExpressionType& result) -> PartialResult
 {
     size_t byteSize;
 
@@ -4645,7 +4648,7 @@ auto OMGIRGenerator::addSIMDLoadSplat(SIMDLaneOperation op, ExpressionType point
     return { };
 }
 
-auto OMGIRGenerator::addSIMDLoadLane(SIMDLaneOperation op, ExpressionType pointerVariable, ExpressionType vectorVariable, uint32_t uoffset, uint8_t laneIndex, ExpressionType& result) -> PartialResult 
+auto OMGIRGenerator::addSIMDLoadLane(SIMDLaneOperation op, const ExpressionType& pointerVariable, const ExpressionType& vectorVariable, uint32_t uoffset, uint8_t laneIndex, ExpressionType& result) -> PartialResult 
 {
     size_t byteSize;
     B3::Opcode loadOp;
@@ -4689,7 +4692,7 @@ auto OMGIRGenerator::addSIMDLoadLane(SIMDLaneOperation op, ExpressionType pointe
     return { };
 }
 
-auto OMGIRGenerator::addSIMDStoreLane(SIMDLaneOperation op, ExpressionType pointerVariable, ExpressionType vectorVariable, uint32_t uoffset, uint8_t laneIndex) -> PartialResult 
+auto OMGIRGenerator::addSIMDStoreLane(SIMDLaneOperation op, const ExpressionType& pointerVariable, const ExpressionType& vectorVariable, uint32_t uoffset, uint8_t laneIndex) -> PartialResult 
 {
     size_t byteSize;
     B3::Opcode storeOp;
@@ -4733,7 +4736,7 @@ auto OMGIRGenerator::addSIMDStoreLane(SIMDLaneOperation op, ExpressionType point
     return { };
 }
 
-auto OMGIRGenerator::addSIMDLoadExtend(SIMDLaneOperation op, ExpressionType pointerVariable, uint32_t uoffset, ExpressionType& result) -> PartialResult 
+auto OMGIRGenerator::addSIMDLoadExtend(SIMDLaneOperation op, const ExpressionType& pointerVariable, uint32_t uoffset, ExpressionType& result) -> PartialResult 
 {
     B3::Opcode loadOp = Load;
     size_t byteSize = 8;
@@ -4777,7 +4780,7 @@ auto OMGIRGenerator::addSIMDLoadExtend(SIMDLaneOperation op, ExpressionType poin
     return { };
 }
 
-auto OMGIRGenerator::addSIMDLoadPad(SIMDLaneOperation op, ExpressionType pointerVariable, uint32_t uoffset, ExpressionType& result) -> PartialResult 
+auto OMGIRGenerator::addSIMDLoadPad(SIMDLaneOperation op, const ExpressionType& pointerVariable, uint32_t uoffset, ExpressionType& result) -> PartialResult 
 {
     B3::Type loadType;
     unsigned byteSize;
@@ -4842,7 +4845,7 @@ auto OMGIRGenerator::addLoop(BlockSignature signature, Stack& enclosingStack, Co
 
     unsigned offset = enclosingStack.size() - signature.m_signature->argumentCount();
     for (unsigned i = 0; i < signature.m_signature->argumentCount(); ++i) {
-        TypedExpression value = enclosingStack.at(offset + i);
+        const TypedExpression& value = enclosingStack.at(offset + i);
         Value* phi = block.phis[i];
         m_currentBlock->appendNew<UpsilonValue>(m_proc, origin(), get(value), phi);
         body->append(phi);
@@ -4914,7 +4917,7 @@ auto OMGIRGenerator::addBlock(BlockSignature signature, Stack& enclosingStack, C
     return { };
 }
 
-auto OMGIRGenerator::addIf(ExpressionType condition, BlockSignature signature, Stack& enclosingStack, ControlType& result, Stack& newStack) -> PartialResult
+auto OMGIRGenerator::addIf(const ExpressionType& condition, BlockSignature signature, Stack& enclosingStack, ControlType& result, Stack& newStack) -> PartialResult
 {
     // FIXME: This needs to do some kind of stack passing.
 
@@ -5056,7 +5059,7 @@ RefPtr<PatchpointExceptionHandle> OMGIRGenerator::preparePatchpointForExceptions
         for (unsigned controlIndex = 0; controlIndex < end; ++controlIndex) {
             ControlData& data = currentFrame->m_parser->controlStack()[controlIndex].controlData;
             Stack& expressionStack = currentFrame->m_parser->controlStack()[controlIndex].enclosedExpressionStack;
-            for (ExpressionType expr : expressionStack)
+            for (auto& expr : expressionStack)
                 liveValues.append(get(block, expr));
             if (ControlType::isAnyCatch(data))
                 liveValues.append(get(block, data.exception()));
@@ -5064,7 +5067,7 @@ RefPtr<PatchpointExceptionHandle> OMGIRGenerator::preparePatchpointForExceptions
         if (currentFrame == innerTryFrame)
             break;
         ASSERT(currentFrame != this); // Should have encountered the inner most Try by now.
-        for (ExpressionType expr : currentFrame->m_parser->expressionStack())
+        for (auto& expr : currentFrame->m_parser->expressionStack())
             liveValues.append(get(block, expr));
     }
 
@@ -5322,7 +5325,7 @@ auto OMGIRGenerator::addThrow(unsigned exceptionIndex, ArgumentList& args, Stack
     patch->effects.terminal = true;
     patch->append(instanceValue(), ValueRep::reg(GPRInfo::argumentGPR0));
     unsigned offset = 0;
-    for (auto arg : args) {
+    for (const auto& arg : args) {
         patch->append(get(arg), ValueRep::stackArgument(safeCast<int32_t>(offset * sizeof(EncodedJSValue))));
         offset += arg.value().type().isVector() ?  2 : 1;
     }
@@ -5341,7 +5344,7 @@ auto OMGIRGenerator::addThrow(unsigned exceptionIndex, ArgumentList& args, Stack
     return { };
 }
 
-WARN_UNUSED_RETURN auto OMGIRGenerator::addThrowRef(TypedExpression exnref, Stack&) -> PartialResult
+WARN_UNUSED_RETURN auto OMGIRGenerator::addThrowRef(const TypedExpression& exnref, Stack&) -> PartialResult
 {
     TRACE_CF("THROW_REF");
 
@@ -5440,7 +5443,7 @@ auto OMGIRGenerator::addReturn(const ControlData&, const Stack& returnValues) ->
     return { };
 }
 
-auto OMGIRGenerator::addBranch(ControlData& data, ExpressionType condition, const Stack& returnValues) -> PartialResult
+auto OMGIRGenerator::addBranch(ControlData& data, const ExpressionType& condition, const Stack& returnValues) -> PartialResult
 {
     unifyValuesWithBlock(returnValues, data);
 
@@ -5477,7 +5480,7 @@ auto OMGIRGenerator::addBranch(ControlData& data, ExpressionType condition, cons
     return { };
 }
 
-auto OMGIRGenerator::addBranchNull(ControlData& data, ExpressionType reference, const Stack& returnValues, bool shouldNegate, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addBranchNull(ControlData& data, const ExpressionType& reference, const Stack& returnValues, bool shouldNegate, ExpressionType& result) -> PartialResult
 {
     auto condition = push(m_currentBlock->appendNew<Value>(m_proc, shouldNegate ? B3::NotEqual : B3::Equal, origin(), get(reference), m_currentBlock->appendNew<WasmConstRefValue>(m_proc, origin(), JSValue::encode(jsNull()))));
 
@@ -5489,7 +5492,7 @@ auto OMGIRGenerator::addBranchNull(ControlData& data, ExpressionType reference, 
     return { };
 }
 
-auto OMGIRGenerator::addBranchCast(ControlData& data, TypedExpression reference, const Stack& returnValues, bool allowNull, int32_t heapType, bool shouldNegate) -> PartialResult
+auto OMGIRGenerator::addBranchCast(ControlData& data, const TypedExpression& reference, const Stack& returnValues, bool allowNull, int32_t heapType, bool shouldNegate) -> PartialResult
 {
     ExpressionType condition;
     emitRefTestOrCast(CastKind::Test, reference, allowNull, heapType, shouldNegate, condition);
@@ -5499,7 +5502,7 @@ auto OMGIRGenerator::addBranchCast(ControlData& data, TypedExpression reference,
     return { };
 }
 
-auto OMGIRGenerator::addSwitch(ExpressionType condition, const Vector<ControlData*>& targets, ControlData& defaultTarget, const Stack& expressionStack) -> PartialResult
+auto OMGIRGenerator::addSwitch(const ExpressionType& condition, const Vector<ControlData*>& targets, ControlData& defaultTarget, const Stack& expressionStack) -> PartialResult
 {
     TRACE_CF("SWITCH");
     UNUSED_PARAM(expressionStack);
@@ -5558,7 +5561,7 @@ auto OMGIRGenerator::addEndToUnreachable(ControlEntry& entry, const Stack& expre
     } else {
         for (unsigned i = 0; i < blockSignature.m_signature->returnCount(); ++i) {
             if (i < expressionStack.size()) {
-                entry.enclosedExpressionStack.append(expressionStack[i]);
+                entry.enclosedExpressionStack.constructAndAppend(expressionStack[i].type(), WTFMove(expressionStack[i].value()));
             } else {
                 Type returnType = blockSignature.m_signature->returnType(i);
                 entry.enclosedExpressionStack.constructAndAppend(returnType, push(constant(toB3Type(returnType), 0xbbadbeef)));
@@ -6883,7 +6886,7 @@ void OMGIRGenerator::emitChecksForModOrDiv(B3::Opcode operation, Value* left, Va
     }
 }
 
-auto OMGIRGenerator::addI32DivS(ExpressionType leftVar, ExpressionType rightVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32DivS(const ExpressionType& leftVar, const ExpressionType& rightVar, ExpressionType& result) -> PartialResult
 {
     const B3::Opcode op = Div;
     Value* left = get(leftVar);
@@ -6893,7 +6896,7 @@ auto OMGIRGenerator::addI32DivS(ExpressionType leftVar, ExpressionType rightVar,
     return { };
 }
 
-auto OMGIRGenerator::addI32RemS(ExpressionType leftVar, ExpressionType rightVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32RemS(const ExpressionType& leftVar, const ExpressionType& rightVar, ExpressionType& result) -> PartialResult
 {
     const B3::Opcode op = Mod;
     Value* left = get(leftVar);
@@ -6903,7 +6906,7 @@ auto OMGIRGenerator::addI32RemS(ExpressionType leftVar, ExpressionType rightVar,
     return { };
 }
 
-auto OMGIRGenerator::addI32DivU(ExpressionType leftVar, ExpressionType rightVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32DivU(const ExpressionType& leftVar, const ExpressionType& rightVar, ExpressionType& result) -> PartialResult
 {
     const B3::Opcode op = UDiv;
     Value* left = get(leftVar);
@@ -6913,7 +6916,7 @@ auto OMGIRGenerator::addI32DivU(ExpressionType leftVar, ExpressionType rightVar,
     return { };
 }
 
-auto OMGIRGenerator::addI32RemU(ExpressionType leftVar, ExpressionType rightVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32RemU(const ExpressionType& leftVar, const ExpressionType& rightVar, ExpressionType& result) -> PartialResult
 {
     const B3::Opcode op = UMod;
     Value* left = get(leftVar);
@@ -6923,7 +6926,7 @@ auto OMGIRGenerator::addI32RemU(ExpressionType leftVar, ExpressionType rightVar,
     return { };
 }
 
-auto OMGIRGenerator::addI64DivS(ExpressionType leftVar, ExpressionType rightVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64DivS(const ExpressionType& leftVar, const ExpressionType& rightVar, ExpressionType& result) -> PartialResult
 {
     const B3::Opcode op = Div;
     Value* left = get(leftVar);
@@ -6933,7 +6936,7 @@ auto OMGIRGenerator::addI64DivS(ExpressionType leftVar, ExpressionType rightVar,
     return { };
 }
 
-auto OMGIRGenerator::addI64RemS(ExpressionType leftVar, ExpressionType rightVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64RemS(const ExpressionType& leftVar, const ExpressionType& rightVar, ExpressionType& result) -> PartialResult
 {
     const B3::Opcode op = Mod;
     Value* left = get(leftVar);
@@ -6943,7 +6946,7 @@ auto OMGIRGenerator::addI64RemS(ExpressionType leftVar, ExpressionType rightVar,
     return { };
 }
 
-auto OMGIRGenerator::addI64DivU(ExpressionType leftVar, ExpressionType rightVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64DivU(const ExpressionType& leftVar, const ExpressionType& rightVar, ExpressionType& result) -> PartialResult
 {
     const B3::Opcode op = UDiv;
     Value* left = get(leftVar);
@@ -6953,7 +6956,7 @@ auto OMGIRGenerator::addI64DivU(ExpressionType leftVar, ExpressionType rightVar,
     return { };
 }
 
-auto OMGIRGenerator::addI64RemU(ExpressionType leftVar, ExpressionType rightVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64RemU(const ExpressionType& leftVar, const ExpressionType& rightVar, ExpressionType& result) -> PartialResult
 {
     const B3::Opcode op = UMod;
     Value* left = get(leftVar);
@@ -6963,7 +6966,7 @@ auto OMGIRGenerator::addI64RemU(ExpressionType leftVar, ExpressionType rightVar,
     return { };
 }
 
-auto OMGIRGenerator::addI32Ctz(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32Ctz(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     PatchpointValue* patchpoint = m_currentBlock->appendNew<PatchpointValue>(m_proc, Int32, origin());
@@ -6976,7 +6979,7 @@ auto OMGIRGenerator::addI32Ctz(ExpressionType argVar, ExpressionType& result) ->
     return { };
 }
 
-auto OMGIRGenerator::addI64Ctz(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64Ctz(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     PatchpointValue* patchpoint = m_currentBlock->appendNew<PatchpointValue>(m_proc, Int64, origin());
@@ -6989,7 +6992,7 @@ auto OMGIRGenerator::addI64Ctz(ExpressionType argVar, ExpressionType& result) ->
     return { };
 }
 
-auto OMGIRGenerator::addI32Popcnt(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32Popcnt(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     if (MacroAssembler::supportsCountPopulation()) {
@@ -7016,7 +7019,7 @@ auto OMGIRGenerator::addI32Popcnt(ExpressionType argVar, ExpressionType& result)
     return { };
 }
 
-auto OMGIRGenerator::addI64Popcnt(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64Popcnt(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     if (MacroAssembler::supportsCountPopulation()) {
@@ -7043,7 +7046,7 @@ auto OMGIRGenerator::addI64Popcnt(ExpressionType argVar, ExpressionType& result)
     return { };
 }
 
-auto OMGIRGenerator::addF64ConvertUI64(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addF64ConvertUI64(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     PatchpointValue* patchpoint = m_currentBlock->appendNew<PatchpointValue>(m_proc, Double, origin());
@@ -7064,7 +7067,7 @@ auto OMGIRGenerator::addF64ConvertUI64(ExpressionType argVar, ExpressionType& re
     return { };
 }
 
-auto OMGIRGenerator::addF32ConvertUI64(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addF32ConvertUI64(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     PatchpointValue* patchpoint = m_currentBlock->appendNew<PatchpointValue>(m_proc, Float, origin());
@@ -7085,7 +7088,7 @@ auto OMGIRGenerator::addF32ConvertUI64(ExpressionType argVar, ExpressionType& re
     return { };
 }
 
-auto OMGIRGenerator::addF64Nearest(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addF64Nearest(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     PatchpointValue* patchpoint = m_currentBlock->appendNew<PatchpointValue>(m_proc, Double, origin());
@@ -7098,7 +7101,7 @@ auto OMGIRGenerator::addF64Nearest(ExpressionType argVar, ExpressionType& result
     return { };
 }
 
-auto OMGIRGenerator::addF32Nearest(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addF32Nearest(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     PatchpointValue* patchpoint = m_currentBlock->appendNew<PatchpointValue>(m_proc, Float, origin());
@@ -7111,7 +7114,7 @@ auto OMGIRGenerator::addF32Nearest(ExpressionType argVar, ExpressionType& result
     return { };
 }
 
-auto OMGIRGenerator::addI32TruncSF64(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32TruncSF64(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* max = constant(Double, std::bit_cast<uint64_t>(-static_cast<double>(std::numeric_limits<int32_t>::min())));
@@ -7134,7 +7137,7 @@ auto OMGIRGenerator::addI32TruncSF64(ExpressionType argVar, ExpressionType& resu
     return { };
 }
 
-auto OMGIRGenerator::addI32TruncSF32(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32TruncSF32(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* max = constant(Float, std::bit_cast<uint32_t>(-static_cast<float>(std::numeric_limits<int32_t>::min())));
@@ -7158,7 +7161,7 @@ auto OMGIRGenerator::addI32TruncSF32(ExpressionType argVar, ExpressionType& resu
 }
 
 
-auto OMGIRGenerator::addI32TruncUF64(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32TruncUF64(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* max = constant(Double, std::bit_cast<uint64_t>(static_cast<double>(std::numeric_limits<int32_t>::min()) * -2.0));
@@ -7181,7 +7184,7 @@ auto OMGIRGenerator::addI32TruncUF64(ExpressionType argVar, ExpressionType& resu
     return { };
 }
 
-auto OMGIRGenerator::addI32TruncUF32(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI32TruncUF32(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* max = constant(Float, std::bit_cast<uint32_t>(static_cast<float>(std::numeric_limits<int32_t>::min()) * static_cast<float>(-2.0)));
@@ -7204,7 +7207,7 @@ auto OMGIRGenerator::addI32TruncUF32(ExpressionType argVar, ExpressionType& resu
     return { };
 }
 
-auto OMGIRGenerator::addI64TruncSF64(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64TruncSF64(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* max = constant(Double, std::bit_cast<uint64_t>(-static_cast<double>(std::numeric_limits<int64_t>::min())));
@@ -7227,7 +7230,7 @@ auto OMGIRGenerator::addI64TruncSF64(ExpressionType argVar, ExpressionType& resu
     return { };
 }
 
-auto OMGIRGenerator::addI64TruncUF64(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64TruncUF64(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* max = constant(Double, std::bit_cast<uint64_t>(static_cast<double>(std::numeric_limits<int64_t>::min()) * -2.0));
@@ -7270,7 +7273,7 @@ auto OMGIRGenerator::addI64TruncUF64(ExpressionType argVar, ExpressionType& resu
     return { };
 }
 
-auto OMGIRGenerator::addI64TruncSF32(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64TruncSF32(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* max = constant(Float, std::bit_cast<uint32_t>(-static_cast<float>(std::numeric_limits<int64_t>::min())));
@@ -7293,7 +7296,7 @@ auto OMGIRGenerator::addI64TruncSF32(ExpressionType argVar, ExpressionType& resu
     return { };
 }
 
-auto OMGIRGenerator::addI64TruncUF32(ExpressionType argVar, ExpressionType& result) -> PartialResult
+auto OMGIRGenerator::addI64TruncUF32(const ExpressionType& argVar, ExpressionType& result) -> PartialResult
 {
     Value* arg = get(argVar);
     Value* max = constant(Float, std::bit_cast<uint32_t>(static_cast<float>(std::numeric_limits<int64_t>::min()) * static_cast<float>(-2.0)));

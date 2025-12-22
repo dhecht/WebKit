@@ -3791,7 +3791,7 @@ WARN_UNUSED_RETURN PartialResult BBQJIT::addThrow(unsigned exceptionIndex, Argum
     LOG_INSTRUCTION("Throw", arguments);
 
     unsigned offset = 0;
-    for (auto arg : arguments) {
+    for (auto& arg : arguments) {
         Location stackLocation = Location::fromStackArgument(offset * sizeof(uint64_t));
         emitMove(arg, stackLocation);
         consume(arg);

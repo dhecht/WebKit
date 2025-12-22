@@ -68,7 +68,7 @@ void splitStack(BlockSignature signature, EnclosingStack& enclosingStack, NewSta
 
     unsigned offset = enclosingStack.size() - signature.m_signature->argumentCount();
     newStack = NewStack(signature.m_signature->argumentCount(), [&](size_t i) {
-        return enclosingStack.at(i + offset);
+        return WTFMove(enclosingStack.at(i + offset));
     });
     enclosingStack.shrink(offset);
 }
@@ -90,20 +90,23 @@ struct FunctionParserTypes {
         {
         }
 
-        TypedExpression(Type type, ExpressionType value)
+        TypedExpression(Type type, ExpressionType&& value)
             : m_type(type)
-            , m_value(value)
+            , m_value(WTFMove(value))
         {
         }
+
+        TypedExpression(TypedExpression&&) = default;
+        TypedExpression& operator=(TypedExpression&&) = default;
 
         Type type() const { return m_type; }
         void setType(Type type) { m_type = type; }
 
         ExpressionType& value() { return m_value; }
-        ExpressionType value() const { return m_value; }
-        operator ExpressionType() const { return m_value; }
+        const ExpressionType& value() const { return m_value; }
+        operator const ExpressionType&() const { return m_value; }
 
-        ExpressionType operator->() const { return m_value; }
+        const ExpressionType* operator->() const { return &m_value; }
 
         void dump(PrintStream& out) const
         {
@@ -232,10 +235,10 @@ private:
         m_context.didPopValueFromStack(result, "WasmFunctionParser.h " STRINGIZE_VALUE_OF(__LINE__) ""_s); \
     } while (0)
 
-    using UnaryOperationHandler = PartialResult (Context::*)(ExpressionType, ExpressionType&);
+    using UnaryOperationHandler = PartialResult (Context::*)(const ExpressionType&, ExpressionType&);
     WARN_UNUSED_RETURN PartialResult unaryCase(OpType, UnaryOperationHandler, Type returnType, Type operandType);
     WARN_UNUSED_RETURN PartialResult unaryCompareCase(OpType, UnaryOperationHandler, Type returnType, Type operandType);
-    using BinaryOperationHandler = PartialResult (Context::*)(ExpressionType, ExpressionType, ExpressionType&);
+    using BinaryOperationHandler = PartialResult (Context::*)(const ExpressionType&, const ExpressionType&, ExpressionType&);
     WARN_UNUSED_RETURN PartialResult binaryCase(OpType, BinaryOperationHandler, Type returnType, Type lhsType, Type rhsType);
     WARN_UNUSED_RETURN PartialResult binaryCompareCase(OpType, BinaryOperationHandler, Type returnType, Type lhsType, Type rhsType);
 
@@ -568,7 +571,7 @@ auto FunctionParser<Context>::binaryCase(OpType op, BinaryOperationHandler handl
 
     ExpressionType result;
     WASM_FAIL_IF_HELPER_FAILS((m_context.*handler)(left, right, result));
-    m_expressionStack.constructAndAppend(returnType, result);
+    m_expressionStack.constructAndAppend(returnType, WTFMove(result));
     return { };
 }
 
@@ -633,7 +636,7 @@ auto FunctionParser<Context>::binaryCompareCase(OpType op, BinaryOperationHandle
 
     ExpressionType result;
     WASM_FAIL_IF_HELPER_FAILS((m_context.*handler)(left, right, result));
-    m_expressionStack.constructAndAppend(returnType, result);
+    m_expressionStack.constructAndAppend(returnType, WTFMove(result));
     return { };
 }
 
@@ -647,7 +650,7 @@ auto FunctionParser<Context>::unaryCase(OpType op, UnaryOperationHandler handler
 
     ExpressionType result;
     WASM_FAIL_IF_HELPER_FAILS((m_context.*handler)(value, result));
-    m_expressionStack.constructAndAppend(returnType, result);
+    m_expressionStack.constructAndAppend(returnType, WTFMove(result));
     return { };
 }
 
@@ -700,7 +703,7 @@ auto FunctionParser<Context>::unaryCompareCase(OpType op, UnaryOperationHandler 
 
     ExpressionType result;
     WASM_FAIL_IF_HELPER_FAILS((m_context.*handler)(value, result));
-    m_expressionStack.constructAndAppend(returnType, result);
+    m_expressionStack.constructAndAppend(returnType, WTFMove(result));
     return { };
 }
 
@@ -731,7 +734,7 @@ auto FunctionParser<Context>::load(Type memoryType) -> PartialResult
 
     ExpressionType result;
     WASM_TRY_ADD_TO_CONTEXT(load(static_cast<LoadOpType>(m_currentOpcode), pointer, result, offset));
-    m_expressionStack.constructAndAppend(memoryType, result);
+    m_expressionStack.constructAndAppend(memoryType, WTFMove(result));
     return { };
 }
 
@@ -777,7 +780,7 @@ auto FunctionParser<Context>::truncSaturated(Ext1OpType op, Type returnType, Typ
 
     ExpressionType result;
     WASM_TRY_ADD_TO_CONTEXT(truncSaturated(op, value, result, returnType, operandType));
-    m_expressionStack.constructAndAppend(returnType, result);
+    m_expressionStack.constructAndAppend(returnType, WTFMove(result));
     return { };
 }
 
@@ -798,7 +801,7 @@ auto FunctionParser<Context>::atomicLoad(ExtAtomicOpType op, Type memoryType) ->
 
     ExpressionType result;
     WASM_TRY_ADD_TO_CONTEXT(atomicLoad(op, memoryType, pointer, result, offset));
-    m_expressionStack.constructAndAppend(memoryType, result);
+    m_expressionStack.constructAndAppend(memoryType, WTFMove(result));
     return { };
 }
 
@@ -844,7 +847,7 @@ auto FunctionParser<Context>::atomicBinaryRMW(ExtAtomicOpType op, Type memoryTyp
 
     ExpressionType result;
     WASM_TRY_ADD_TO_CONTEXT(atomicBinaryRMW(op, memoryType, pointer, value, result, offset));
-    m_expressionStack.constructAndAppend(memoryType, result);
+    m_expressionStack.constructAndAppend(memoryType, WTFMove(result));
     return { };
 }
 
@@ -871,7 +874,7 @@ auto FunctionParser<Context>::atomicCompareExchange(ExtAtomicOpType op, Type mem
 
     ExpressionType result;
     WASM_TRY_ADD_TO_CONTEXT(atomicCompareExchange(op, memoryType, pointer, expected, value, result, offset));
-    m_expressionStack.constructAndAppend(memoryType, result);
+    m_expressionStack.constructAndAppend(memoryType, WTFMove(result));
     return { };
 }
 
@@ -898,7 +901,7 @@ auto FunctionParser<Context>::atomicWait(ExtAtomicOpType op, Type memoryType) ->
 
     ExpressionType result;
     WASM_TRY_ADD_TO_CONTEXT(atomicWait(op, pointer, value, timeout, result, offset));
-    m_expressionStack.constructAndAppend(Types::I32, result);
+    m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
     return { };
 }
 
@@ -922,7 +925,7 @@ auto FunctionParser<Context>::atomicNotify(ExtAtomicOpType op) -> PartialResult
 
     ExpressionType result;
     WASM_TRY_ADD_TO_CONTEXT(atomicNotify(op, pointer, count, result, offset));
-    m_expressionStack.constructAndAppend(Types::I32, result);
+    m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
     return { };
 }
 
@@ -947,7 +950,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
     auto pushUnreachable = [&](auto type) -> PartialResult {
         ASSERT(isReachable);
         // Appease generators without SIMD support.
-        m_expressionStack.constructAndAppend(type, m_context.addConstant(Types::F64, 0));
+        m_expressionStack.constructAndAppend(type, WTFMove(m_context.addConstant(Types::F64, 0)));
         return { };
     };
 
@@ -1024,7 +1027,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
             return { };
 
         if (Context::tierSupportsSIMD()) {
-            m_expressionStack.constructAndAppend(Types::V128, m_context.addConstant(constant));
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(m_context.addConstant(constant)));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1061,7 +1064,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDSplat(lane, scalar, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1081,7 +1084,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDShift(op, SIMDInfo { lane, signMode }, vector, shift, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1102,7 +1105,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDExtmul(op, SIMDInfo { lane, signMode }, lhs, rhs, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1125,7 +1128,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
                 WASM_TRY_ADD_TO_CONTEXT(addSIMDLoad(pointer, offset, result));
             else
                 WASM_TRY_ADD_TO_CONTEXT(addSIMDLoadSplat(op, pointer, offset, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1186,7 +1189,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDLoadLane(op, pointer, vector, offset, laneIndex, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1246,7 +1249,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDLoadExtend(op, pointer, offset, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1264,7 +1267,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDLoadPad(op, pointer, offset, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1289,7 +1292,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDShuffle(imm, a, b, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1308,7 +1311,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addExtractLane(SIMDInfo { lane, signMode }, laneIdx, v, result));
-            m_expressionStack.constructAndAppend(simdScalarType(lane), result);
+            m_expressionStack.constructAndAppend(simdScalarType(lane), WTFMove(result));
             return { };
         }
         return pushUnreachable(simdScalarType(lane));
@@ -1330,7 +1333,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addReplaceLane(SIMDInfo { lane, signMode }, laneIdx, v, s, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1348,7 +1351,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDI_V(op, SIMDInfo { lane, signMode }, v, result));
-            m_expressionStack.constructAndAppend(Types::I32, result);
+            m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::I32);
@@ -1381,7 +1384,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDV_V(op, SIMDInfo { lane, signMode }, v, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1404,7 +1407,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDBitwiseSelect(v1, v2, c, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1426,7 +1429,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDRelOp(op, SIMDInfo { lane, signMode }, lhs, rhs, optionalRelation, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1446,7 +1449,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDRelOp(op, SIMDInfo { lane, signMode }, lhs, rhs, optionalRelation, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1484,7 +1487,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDV_VV(op, SIMDInfo { lane, signMode }, a, b, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -1506,7 +1509,7 @@ auto FunctionParser<Context>::simd(SIMDLaneOperation op, SIMDLane lane, SIMDSign
         if (Context::tierSupportsSIMD()) {
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addSIMDRelaxedFMA(op, SIMDInfo { lane, signMode }, a, b, c, result));
-            m_expressionStack.constructAndAppend(Types::V128, result);
+            m_expressionStack.constructAndAppend(Types::V128, WTFMove(result));
             return { };
         }
         return pushUnreachable(Types::V128);
@@ -2001,7 +2004,7 @@ auto FunctionParser<Context>::parseExpression() -> PartialResult
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addSelect(condition, nonZero, zero, result));
 
-        m_expressionStack.constructAndAppend(zero.type(), result);
+        m_expressionStack.constructAndAppend(zero.type(), WTFMove(result));
         return { };
     }
 
@@ -2024,7 +2027,7 @@ auto FunctionParser<Context>::parseExpression() -> PartialResult
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addSelect(condition, nonZero, zero, result));
 
-        m_expressionStack.constructAndAppend(immediates.targetType, result);
+        m_expressionStack.constructAndAppend(immediates.targetType, WTFMove(result));
         return { };
     }
 
@@ -2039,28 +2042,28 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
     case F32Const: {
         uint32_t constant;
         WASM_PARSER_FAIL_IF(!parseUInt32(constant), "can't parse 32-bit floating-point constant"_s);
-        m_expressionStack.constructAndAppend(Types::F32, m_context.addConstant(Types::F32, constant));
+        m_expressionStack.constructAndAppend(Types::F32, WTFMove(m_context.addConstant(Types::F32, constant)));
         return { };
     }
 
     case I32Const: {
         int32_t constant;
         WASM_PARSER_FAIL_IF(!parseVarInt32(constant), "can't parse 32-bit constant"_s);
-        m_expressionStack.constructAndAppend(Types::I32, m_context.addConstant(Types::I32, constant));
+        m_expressionStack.constructAndAppend(Types::I32, WTFMove(m_context.addConstant(Types::I32, constant)));
         return { };
     }
 
     case F64Const: {
         uint64_t constant;
         WASM_PARSER_FAIL_IF(!parseUInt64(constant), "can't parse 64-bit floating-point constant"_s);
-        m_expressionStack.constructAndAppend(Types::F64, m_context.addConstant(Types::F64, constant));
+        m_expressionStack.constructAndAppend(Types::F64, WTFMove(m_context.addConstant(Types::F64, constant)));
         return { };
     }
 
     case I64Const: {
         int64_t constant;
         WASM_PARSER_FAIL_IF(!parseVarInt64(constant), "can't parse 64-bit constant"_s);
-        m_expressionStack.constructAndAppend(Types::I64, m_context.addConstant(Types::I64, constant));
+        m_expressionStack.constructAndAppend(Types::I64, WTFMove(m_context.addConstant(Types::I64, constant)));
         return { };
     }
 
@@ -2076,7 +2079,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addTableGet(tableIndex, index, result));
         Type resultType = m_info.tables[tableIndex].wasmType();
-        m_expressionStack.constructAndAppend(resultType, result);
+        m_expressionStack.constructAndAppend(resultType, WTFMove(result));
         return { };
     }
 
@@ -2134,7 +2137,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addTableSize(tableIndex, result));
-            m_expressionStack.constructAndAppend(Types::I32, result);
+            m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
             break;
         }
         case Ext1OpType::TableGrow: {
@@ -2152,7 +2155,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addTableGrow(tableIndex, fill, delta, result));
-            m_expressionStack.constructAndAppend(Types::I32, result);
+            m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
             break;
         }
         case Ext1OpType::TableFill: {
@@ -2312,7 +2315,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addI31GetS(ref, result));
 
-            m_expressionStack.constructAndAppend(Types::I32, result);
+            m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
             break;
         }
         case ExtGCOpType::I31GetU: {
@@ -2323,7 +2326,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addI31GetU(ref, result));
 
-            m_expressionStack.constructAndAppend(Types::I32, result);
+            m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
             break;
         }
         case ExtGCOpType::ArrayNew: {
@@ -2345,7 +2348,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayNew(typeIndex, size, value, result));
 
-            m_expressionStack.constructAndAppend(arrayRefType, result);
+            m_expressionStack.constructAndAppend(arrayRefType, WTFMove(result));
 
             break;
         }
@@ -2363,7 +2366,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayNewDefault(typeIndex, size, result));
 
-            m_expressionStack.constructAndAppend(arrayRefType, result);
+            m_expressionStack.constructAndAppend(arrayRefType, WTFMove(result));
             break;
         }
         case ExtGCOpType::ArrayNewFixed: {
@@ -2405,7 +2408,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayNewFixed(typeIndex, args, result));
-            m_expressionStack.constructAndAppend(arrayRefType, result);
+            m_expressionStack.constructAndAppend(arrayRefType, WTFMove(result));
             break;
         }
         case ExtGCOpType::ArrayNewData: {
@@ -2435,7 +2438,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayNewData(typeIndex, dataIndex, size, offset, result));
-            m_expressionStack.constructAndAppend(arrayRefType, result);
+            m_expressionStack.constructAndAppend(arrayRefType, WTFMove(result));
             break;
         }
         case ExtGCOpType::ArrayNewElem: {
@@ -2477,7 +2480,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayNewElem(typeIndex, elemSegmentIndex, size, offset, result));
-            m_expressionStack.constructAndAppend(arrayRefType, result);
+            m_expressionStack.constructAndAppend(arrayRefType, WTFMove(result));
             break;
         }
         case ExtGCOpType::ArrayGet:
@@ -2513,7 +2516,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayGet(op, typeIndex, arrayref, index, result));
 
-            m_expressionStack.constructAndAppend(resultType, result);
+            m_expressionStack.constructAndAppend(resultType, WTFMove(result));
             break;
         }
         case ExtGCOpType::ArraySet: {
@@ -2550,7 +2553,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addArrayLen(arrayref, result));
 
-            m_expressionStack.constructAndAppend(Types::I32, result);
+            m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
             break;
         }
         case ExtGCOpType::ArrayFill: {
@@ -2732,7 +2735,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             const auto& structType = *m_info.typeSignatures[structGetInput.indices.structTypeIndex]->expand().template as<StructType>();
             WASM_TRY_ADD_TO_CONTEXT(addStructGet(op, structGetInput.structReference, structType, structGetInput.indices.fieldIndex, result));
 
-            m_expressionStack.constructAndAppend(structGetInput.field.type.unpacked(), result);
+            m_expressionStack.constructAndAppend(structGetInput.field.type.unpacked(), WTFMove(result));
             break;
         }
         case ExtGCOpType::StructSet: {
@@ -2807,7 +2810,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
                 m_expressionStack.constructAndAppend(Type { allowNull ? TypeKind::RefNull : TypeKind::Ref, resultTypeIndex }, result);
             } else {
                 WASM_TRY_ADD_TO_CONTEXT(addRefTest(ref, allowNull, heapType, false, result));
-                m_expressionStack.constructAndAppend(Types::I32, result);
+                m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
             }
 
             break;
@@ -2838,10 +2841,9 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             else
                 typeIndex2 = static_cast<TypeIndex>(heapType2);
 
-            // Manually pop the stack in order to avoid decreasing the stack size, as we will immediately put it back.
-            TypedExpression ref;
+            // Modify the top of the stack in place to avoid decreasing the stack size, as we will immediately put it back.
             WASM_PARSER_FAIL_IF(m_expressionStack.isEmpty(), "can't pop empty stack in "_s, opName);
-            ref = m_expressionStack.takeLast();
+            ExpressionType& ref = m_expressionStack.last();
 
             WASM_VALIDATOR_FAIL_IF(!isSubtype(ref.type(), Type { hasNull1 ? TypeKind::RefNull : TypeKind::Ref, typeIndex1 }), opName, " to type "_s, ref.type(), " expected a reference type with source heaptype"_s);
             WASM_VALIDATOR_FAIL_IF(!isSubtype(Type { hasNull2 ? TypeKind::RefNull : TypeKind::Ref, typeIndex2 }, Type { hasNull1 ? TypeKind::RefNull : TypeKind::Ref, typeIndex1 }), "target heaptype was not a subtype of source heaptype for "_s, opName);
@@ -2857,14 +2859,13 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
                 nonTakenType = Type { hasNull2 ? TypeKind::RefNull : TypeKind::Ref, typeIndex2 };
             }
 
-            // Put the ref back on the stack to check the branch type.
-            m_expressionStack.constructAndAppend(branchTargetType, ref.value());
+            // Adjust the ref type to check the branch type.
+            ref.setType(branchTargetType);
             ControlType& data = m_controlStack[m_controlStack.size() - 1 - target].controlData;
             WASM_FAIL_IF_HELPER_FAILS(checkBranchTarget(data, Conditional));
 
-            m_expressionStack.takeLast();
-            m_expressionStack.constructAndAppend(nonTakenType, ref.value());
-
+            // Change the type for the non-taken branch path
+            ref.setType(nonTakenType);
             WASM_TRY_ADD_TO_CONTEXT(addBranchCast(data, ref, m_expressionStack, hasNull2, heapType2, op == ExtGCOpType::BrOnCastFail));
 
             break;
@@ -2876,7 +2877,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addAnyConvertExtern(reference, result));
-            m_expressionStack.constructAndAppend(anyrefType(reference.type().isNullable()), result);
+            m_expressionStack.constructAndAppend(anyrefType(reference.type().isNullable()), WTFMove(result));
             break;
         }
         case ExtGCOpType::ExternConvertAny: {
@@ -2886,7 +2887,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
             ExpressionType result;
             WASM_TRY_ADD_TO_CONTEXT(addExternConvertAny(reference, result));
-            m_expressionStack.constructAndAppend(externrefType(reference.type().isNullable()), result);
+            m_expressionStack.constructAndAppend(externrefType(reference.type().isNullable()), WTFMove(result));
             break;
         }
         default:
@@ -2950,7 +2951,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             typeOfNull = Type { TypeKind::RefNull, typeIndex };
         } else
             typeOfNull = Type { TypeKind::RefNull, static_cast<TypeIndex>(heapType) };
-        m_expressionStack.constructAndAppend(typeOfNull, m_context.addConstant(typeOfNull, JSValue::encode(jsNull())));
+        m_expressionStack.constructAndAppend(typeOfNull, WTFMove(m_context.addConstant(typeOfNull, JSValue::encode(jsNull()))));
         return { };
     }
 
@@ -2960,7 +2961,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         WASM_VALIDATOR_FAIL_IF(!isRefType(value.type()), "ref.is_null to type "_s, value.type(), " expected a reference type"_s);
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addRefIsNull(value, result));
-        m_expressionStack.constructAndAppend(Types::I32, result);
+        m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
         return { };
     }
 
@@ -2976,7 +2977,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         WASM_TRY_ADD_TO_CONTEXT(addRefFunc(index, result));
 
         TypeIndex typeIndex = m_info.typeIndexFromFunctionIndexSpace(index);
-        m_expressionStack.constructAndAppend(Type { TypeKind::Ref, typeIndex }, result);
+        m_expressionStack.constructAndAppend(Type { TypeKind::Ref, typeIndex }, WTFMove(result));
         return { };
     }
 
@@ -2988,7 +2989,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addRefAsNonNull(ref, result));
 
-        m_expressionStack.constructAndAppend(Type { TypeKind::Ref, ref.type().index }, result);
+        m_expressionStack.constructAndAppend(Type { TypeKind::Ref, WTFMove(ref.type()).index }, WTFMove(result));
         return { };
     }
 
@@ -3006,7 +3007,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addBranchNull(data, ref, m_expressionStack, false, result));
-        m_expressionStack.constructAndAppend(Type { TypeKind::Ref, ref.type().index }, result);
+        m_expressionStack.constructAndAppend(Type { TypeKind::Ref, ref.type().index }, WTFMove(result));
 
         return { };
     }
@@ -3015,10 +3016,9 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         uint32_t target;
         WASM_FAIL_IF_HELPER_FAILS(parseBranchTarget(target));
 
-        TypedExpression ref;
         // Pop the stack manually to avoid changing the stack size, because the branch needs the value with a different type.
         WASM_PARSER_FAIL_IF(m_expressionStack.isEmpty(), "can't pop empty stack in br_on_non_null"_s);
-        ref = m_expressionStack.takeLast();
+        TypedExpression ref = WTFMove(m_expressionStack.takeLast());
         m_expressionStack.constructAndAppend(Type { TypeKind::Ref, ref.type().index }, ref.value());
         WASM_VALIDATOR_FAIL_IF(!isRefType(ref.type()), "br_on_non_null ref to type "_s, ref.type(), " expected a reference type"_s);
 
@@ -3048,7 +3048,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addRefEq(ref0, ref1, result));
 
-        m_expressionStack.constructAndAppend(Types::I32, result);
+        m_expressionStack.constructAndAppend(Types::I32, WTFMove(result));
         return { };
     }
 
@@ -3059,7 +3059,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(getLocal(index, result));
-        m_expressionStack.constructAndAppend(m_locals[index], result);
+        m_expressionStack.constructAndAppend(m_locals[index], WTFMove(result));
         return { };
     }
 
@@ -3088,7 +3088,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
         WASM_VALIDATOR_FAIL_IF(!isSubtype(value.type(), m_locals[index]), "set_local to type "_s, value.type(), " expected "_s, m_locals[index]);
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(teeLocal(index, value, result));
-        m_expressionStack.constructAndAppend(m_locals[index], result);
+        m_expressionStack.constructAndAppend(m_locals[index], WTFMove(result));
         return { };
     }
 
@@ -3103,7 +3103,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(getGlobal(index, result));
-        m_expressionStack.constructAndAppend(resultType, result);
+        m_expressionStack.constructAndAppend(resultType, WTFMove(result));
         return { };
     }
 
@@ -3182,7 +3182,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
             }
-            m_expressionStack.constructAndAppend(returnType, results[i]);
+            m_expressionStack.constructAndAppend(returnType, WTFMove(results[i]));
         }
 
         return { };
@@ -3249,7 +3249,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
             }
-            m_expressionStack.constructAndAppend(returnType, results[i]);
+            m_expressionStack.constructAndAppend(returnType, WTFMove(results[i]));
         }
 
         return { };
@@ -3314,7 +3314,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
                 // We care SIMD only when it is not a tail-call: in tail-call case, return values are not visible to this function.
                 m_context.notifyFunctionUsesSIMD();
             }
-            m_expressionStack.constructAndAppend(returnType, results[i]);
+            m_expressionStack.constructAndAppend(returnType, WTFMove(results[i]));
         }
 
         return { };
@@ -3453,7 +3453,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             Type argumentType = exceptionSignature.argumentType(i);
             if (argumentType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-            m_expressionStack.constructAndAppend(argumentType, results[i]);
+            m_expressionStack.constructAndAppend(argumentType, WTFMove(results[i]));
         }
         resetLocalInitStackToHeight(controlEntry.localInitStackHeight);
 
@@ -3542,12 +3542,12 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
             if (catchTarget.type == CatchKind::Catch || catchTarget.type == CatchKind::CatchRef) {
                 for (unsigned arg = 0; arg < catchTarget.exceptionSignature->template as<FunctionSignature>()->argumentCount(); ++arg) {
                     ExpressionType exp;
-                    results.constructAndAppend(catchTarget.exceptionSignature->template as<FunctionSignature>()->argumentType(arg), exp);
+                    results.constructAndAppend(catchTarget.exceptionSignature->template as<FunctionSignature>()->argumentType(arg), WTFMove(exp));
                 }
             }
             if (catchTarget.type == CatchKind::CatchRef || catchTarget.type == CatchKind::CatchAllRef) {
                 ExpressionType exp;
-                results.constructAndAppend(Type { TypeKind::Ref, static_cast<TypeIndex>(TypeKind::Exnref) }, exp);
+                results.constructAndAppend(Type { TypeKind::Ref, static_cast<TypeIndex>(TypeKind::Exnref) }, WTFMove(exp));
             }
 
             WASM_VALIDATOR_FAIL_IF(results.size() != target.branchTargetArity());
@@ -3765,7 +3765,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addGrowMemory(delta, result));
-        m_expressionStack.constructAndAppend(isMemory64 ? Types::I64 : Types::I32, result);
+        m_expressionStack.constructAndAppend(isMemory64 ? Types::I64 : Types::I32, WTFMove(result));
 
         return { };
     }
@@ -3779,7 +3779,7 @@ FOR_EACH_WASM_MEMORY_STORE_OP(CREATE_CASE)
 
         ExpressionType result;
         WASM_TRY_ADD_TO_CONTEXT(addCurrentMemory(result));
-        m_expressionStack.constructAndAppend(m_info.memory.isMemory64() ? Types::I64 : Types::I32, result);
+        m_expressionStack.constructAndAppend(m_info.memory.isMemory64() ? Types::I64 : Types::I32, WTFMove(result));
 
         return { };
     }
@@ -3862,7 +3862,7 @@ auto FunctionParser<Context>::parseUnreachableExpression() -> PartialResult
             Type argumentType = exceptionSignature.argumentType(i);
             if (argumentType.isV128())
                 m_context.notifyFunctionUsesSIMD();
-            m_expressionStack.constructAndAppend(argumentType, results[i]);
+            m_expressionStack.constructAndAppend(argumentType, WTFMove(results[i]));
         }
         return { };
     }

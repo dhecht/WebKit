@@ -192,7 +192,7 @@ def generateB3Code(wasmOp, source):
 def generateSimpleCode(op):
     opcode = op["opcode"]
     b3op = opcode["b3op"]
-    args = ["ExpressionType arg" + str(param) for param in range(len(opcode["parameter"]))]
+    args = ["const ExpressionType& arg" + str(param) for param in range(len(opcode["parameter"]))]
     args.append("ExpressionType& result")
     return """
 auto OMGIRGenerator::add""" + wasm.toCpp(op["name"]) + "(" + ", ".join(args) + """) -> PartialResult
