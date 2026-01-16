@@ -3203,18 +3203,26 @@ JSC_DEFINE_JIT_OPERATION(operationTryOSREnterAtCatchAndValueProfile, UGPRPair, (
 
     CodeBlock* codeBlock = callFrame->codeBlock();
     CodeBlock* optimizedReplacement = codeBlock->replacement();
-    if (!optimizedReplacement) [[unlikely]]
+
+    dataLogLnIf(Options::verboseOSR(), "operationTryOSREnterAtCatchAndValueProfile: ", *codeBlock, "->", *optimizedReplacement);
+
+    if (!optimizedReplacement) [[unlikely]] {
+        dataLogLnIf(Options::verboseOSR(), "   !optmizedReplacement");
         OPERATION_RETURN(scope, encodeResult(nullptr, nullptr));
+    }
 
     switch (optimizedReplacement->jitType()) {
     case JITType::DFGJIT:
     case JITType::FTLJIT: {
+        dataLogLnIf(Options::verboseOSR(), "   jitType=", optimizedReplacement->jitType());
         CodePtr<ExceptionHandlerPtrTag> entry = DFG::prepareCatchOSREntry(vm, callFrame, codeBlock, optimizedReplacement, bytecodeIndex);
         OPERATION_RETURN(scope, encodeResult(entry.taggedPtr<char*>(), optimizedReplacement));
     }
     default:
         break;
     }
+
+    dataLogLnIf(Options::verboseOSR(), "   break jitType=", optimizedReplacement->jitType());
 
     codeBlock->ensureCatchLivenessIsComputedForBytecodeIndex(bytecodeIndex);
     auto bytecode = codeBlock->instructions().at(bytecodeIndex)->as<OpCatch>();

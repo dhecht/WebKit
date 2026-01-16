@@ -649,7 +649,7 @@ static void compileStub(VM& vm, unsigned exitID, JITCode* jitCode, OSRExit& exit
 
 JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationCompileFTLOSRExit, void*, (CallFrame* callFrame, unsigned exitID))
 {
-    dataLogLnIf(shouldDumpDisassembly() || Options::verboseOSR() || Options::verboseFTLOSRExit(), "Compiling OSR exit with exitID = ", exitID);
+    dataLogLnIf(shouldDumpDisassembly() || Options::verboseOSR() || Options::verboseFTLOSRExit(), "Compiling FTL OSR exit with exitID = ", exitID);
 
     VM& vm = callFrame->deprecatedVM();
     // Don't need an ActiveScratchBufferScope here because we DeferGCForAWhile below.
@@ -687,6 +687,8 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationCompileFTLOSRExit, void*, (CallFrame*
             "    Is unwind handler: ", exit.isGenericUnwindHandler(), "\n",
             "    Exit values: ", exit.m_descriptor->m_values, "\n",
             "    Value reps: ", listDump(exit.m_valueReps));
+        dataLogLn(
+            "    m_kind=",  exit.m_kind);
         if (!exit.m_descriptor->m_materializations.isEmpty()) {
             dataLogLn("    Materializations:");
             for (ExitTimeObjectMaterialization* materialization : exit.m_descriptor->m_materializations)

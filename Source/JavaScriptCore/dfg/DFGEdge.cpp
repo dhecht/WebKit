@@ -34,7 +34,7 @@ namespace JSC { namespace DFG {
 
 void Edge::dump(PrintStream& out) const
 {
-    if (!isProved())
+    if (willHaveCheck())
         out.print("Check:");
     out.print(useKind(), ":");
     if (DFG::doesKill(killStatusUnchecked()))

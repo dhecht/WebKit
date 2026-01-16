@@ -148,6 +148,8 @@ void* prepareOSREntry(VM& vm, CallFrame* callFrame, CodeBlock* codeBlock, Byteco
     
     ASSERT(entry->m_bytecodeIndex == bytecodeIndex);
     
+    dataLogLnIf(Options::verboseOSR(), "   OSREntryData: ", *entry);
+
     // The code below checks if it is safe to perform OSR entry. It may find
     // that it is unsafe to do so, for any number of reasons, which are documented
     // below. If the code decides not to OSR then it returns 0, and it's the caller's
@@ -354,6 +356,8 @@ CodePtr<ExceptionHandlerPtrTag> prepareCatchOSREntry(VM& vm, CallFrame* callFram
     ASSERT(optimizedCodeBlock->jitType() == JITType::DFGJIT || optimizedCodeBlock->jitType() == JITType::FTLJIT);
     ASSERT(optimizedCodeBlock->jitCode()->dfgCommon()->isStillValid());
     ASSERT(!optimizedCodeBlock->isJettisoned());
+
+    dataLogLnIf(Options::verboseOSR(), optimizedCodeBlock->jitType() == JITType::FTLJIT ? "FTL" : "DFG", " catch OSR");
 
     if (!Options::useOSREntryToDFG() && optimizedCodeBlock->jitCode()->jitType() == JITType::DFGJIT)
         return nullptr;

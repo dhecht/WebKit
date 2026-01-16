@@ -2091,6 +2091,8 @@ DisposableCallSiteIndex CodeBlock::newExceptionHandlingCallSiteIndex(CallSiteInd
 
 void CodeBlock::ensureCatchLivenessIsComputedForBytecodeIndex(BytecodeIndex bytecodeIndex)
 {
+    dataLogLnIf(Options::verboseCompilation(), "ensureCatchLivenessIsComputedForBytecodeIndex bytecodeIndex=", bytecodeIndex);
+
     ASSERT(JITCode::isBaselineCode(jitType()));
     auto& instruction = instructions().at(bytecodeIndex);
     OpCatch op = instruction->as<OpCatch>();
@@ -2103,6 +2105,8 @@ void CodeBlock::ensureCatchLivenessIsComputedForBytecodeIndex(BytecodeIndex byte
 
 void CodeBlock::ensureCatchLivenessIsComputedForBytecodeIndexSlow(const OpCatch& op, BytecodeIndex bytecodeIndex)
 {
+    dataLogLnIf(Options::verboseCompilation(), "ensureCatchLivenessIsComputedForBytecodeIndexSlow bytecodeIndex=", bytecodeIndex);
+
     BytecodeLivenessAnalysis& bytecodeLiveness = livenessAnalysis();
 
     // We get the live-out set of variables at op_catch, not the live-in. This

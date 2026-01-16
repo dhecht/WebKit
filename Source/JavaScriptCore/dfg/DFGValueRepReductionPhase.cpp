@@ -83,6 +83,7 @@ private:
                     case GetGlobalLexicalVariable:
                     case MultiGetByOffset:
                     case GetByOffset: {
+                        // XXX
                         if (node->child1().useKind() == RealNumberUse || node->child1().useKind() == NumberUse) {
                             if (node->child1()->origin.exitOK)
                                 candidates.add(node->child1().node());

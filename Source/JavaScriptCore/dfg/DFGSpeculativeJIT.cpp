@@ -648,6 +648,7 @@ void SpeculativeJIT::terminateSpeculativeExecution(ExitKind kind, JSValueRegs js
 
 void SpeculativeJIT::typeCheck(JSValueSource source, Edge edge, SpeculatedType typesPassedThrough, Jump jumpToFail, ExitKind exitKind)
 {
+    dataLogLnIf(Options::verboseCompilation(), "SpeculativeJIT::typeCheck");
     ASSERT(needsTypeCheck(edge, typesPassedThrough));
     m_interpreter.filter(edge, typesPassedThrough);
     speculationCheck(exitKind, source, edge.node(), jumpToFail);
@@ -655,6 +656,7 @@ void SpeculativeJIT::typeCheck(JSValueSource source, Edge edge, SpeculatedType t
 
 void SpeculativeJIT::typeCheck(JSValueSource source, Edge edge, SpeculatedType typesPassedThrough, JumpList jumpListToFail, ExitKind exitKind)
 {
+    dataLogLnIf(Options::verboseCompilation(), "SpeculativeJIT::typeCheck JumpList");
     ASSERT(needsTypeCheck(edge, typesPassedThrough));
     m_interpreter.filter(edge, typesPassedThrough);
     speculationCheck(exitKind, source, edge.node(), jumpListToFail);
@@ -3014,6 +3016,7 @@ void SpeculativeJIT::compileDoubleAsInt32(Node* node)
 
 void SpeculativeJIT::compileDoubleRep(Node* node)
 {
+    dataLogIf(Options::verboseCompilation(), "Compile DoubleRep useKind: ", node->child1().useKind(), " ");
     switch (node->child1().useKind()) {
     case RealNumberUse: {
         JSValueOperand op1(this, node->child1(), ManualOperandSpeculation);
@@ -3064,6 +3067,7 @@ void SpeculativeJIT::compileDoubleRep(Node* node)
             doubleResult(result.fpr(), node);
             return;
         }
+        dataLogIf(Options::verboseCompilation(), "not Int32Speculation ");
 
         JSValueOperand op1(this, node->child1(), ManualOperandSpeculation);
         FPRTemporary result(this);
@@ -3101,6 +3105,7 @@ void SpeculativeJIT::compileDoubleRep(Node* node)
 
             isNumber.link(this);
         } else if (needsTypeCheck(node->child1(), SpecBytecodeNumber)) {
+            dataLogLnIf(Options::verboseCompilation(), "needsTypeCheck");
             typeCheck(
                 JSValueRegs(op1GPR), node->child1(), SpecBytecodeNumber,
                 branchIfNotNumber(op1GPR));
@@ -17581,6 +17586,7 @@ unsigned SpeculativeJIT::appendExceptionHandlingOSRExit(ExitKind kind, unsigned 
 
 unsigned SpeculativeJIT::appendOSRExit(OSRExit&& exit, bool isExceptionHandler)
 {
+    dataLogLnIf(Options::verboseCompilation(), "SpeculativeJIT::appendOSRExit D@", exit.m_dfgNodeIndex);
     if (Options::validateDFGMayExit()) [[unlikely]] {
         if (m_compileOkay) {
             if (m_currentNode) {

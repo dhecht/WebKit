@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+
+# Copyright (C) 2024 Apple Inc. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#
+#     * Redistributions of source code must retain the above copyright
+# notice, this list of conditions and the following disclaimer.
+
+import argparse
+import json
+
+parser = argparse.ArgumentParser(
+    description='Rewrite compile_commands.json to prefer Source tree headers over WebKitBuild copies'
+)
+parser.add_argument('input_file', help='Input compile_commands.json')
+parser.add_argument('output_file', help='Output compile_commands.json')
+parser.add_argument('source_root', help='WebKit source root directory')
+
+args = parser.parse_args()
+
+with open(args.input_file) as f:
+    compile_commands = json.load(f)
+
+def rewrite_include_paths(arguments, source_root):
+    """
+    Rewrite include paths to:
+    1. Keep header maps in their original position (they have special mappings)
+    2. Insert Source tree includes AFTER header maps but BEFORE WebKitBuild/usr/local/include
+    3. Move WebKitBuild/*/usr/local/include to the end (lowest priority)
+
+    This way header maps work correctly, but Source headers are preferred over
+    the WebKitBuild copies in usr/local/include.
+    """
+    compiler = arguments[0] if len(arguments) > 0 else None
+    before_insertion = []  # Everything up to and including header maps
+    after_insertion = []   # Everything after header maps (except usr/local/include)
+    webkitbuild_includes = []  # usr/local/include paths (moved to end)
+
+    insertion_point_found = False
+    skip_next = False
+
+    for i in range(1, len(arguments)):
+        if skip_next:
+            skip_next = False
+            continue
+
+        arg = arguments[i]
+
+        # Check if this is a WebKitBuild/usr/local/include path (move to end)
+        if 'WebKitBuild' in arg and '/usr/local/include' in arg:
+            if not insertion_point_found and before_insertion and before_insertion[-1] == '-I':
+                before_insertion.pop()
+            elif insertion_point_found and after_insertion and after_insertion[-1] == '-I':
+                after_insertion.pop()
+            webkitbuild_includes.extend(['-I', arg])
+            continue
+
+        if arg == '-I' and i + 1 < len(arguments):
+            next_arg = arguments[i+1]
+            if 'WebKitBuild' in next_arg and '/usr/local/include' in next_arg:
+                webkitbuild_includes.extend(['-I', next_arg])
+                skip_next = True
+                continue
+
+        # Find insertion point: after the last .hmap file
+        if '.hmap' in arg:
+            insertion_point_found = True
+            before_insertion.append(arg)
+        elif not insertion_point_found:
+            before_insertion.append(arg)
+        else:
+            after_insertion.append(arg)
+
+    # Build final argument list:
+    # 1. Compiler
+    # 2. Everything up to and including header maps
+    # 3. Source tree includes (inserted here)
+    # 4. Everything else
+    # 5. WebKitBuild/usr/local/include (lowest priority)
+    source_includes = [
+        '-I', f'{source_root}/Source/WTF',
+        '-I', f'{source_root}/Source/bmalloc',
+        '-I', f'{source_root}/Source/JavaScriptCore',
+        '-I', f'{source_root}/Source/WebCore',
+        '-I', f'{source_root}/Source/WebKit',
+    ]
+
+    result = []
+    if compiler:
+        result.append(compiler)
+    result.extend(before_insertion)
+    result.extend(source_includes)
+    result.extend(after_insertion)
+    result.extend(webkitbuild_includes)
+
+    return result
+
+for entry in compile_commands:
+    if 'arguments' in entry:
+        entry['arguments'] = rewrite_include_paths(entry['arguments'], args.source_root)
+    elif 'command' in entry:
+        # For command strings, we'd need to parse and rebuild them
+        # For now, skip these entries
+        pass
+
+with open(args.output_file, 'w') as f:
+    json.dump(compile_commands, f, indent=2)
+
+print(f"Rewrote {len(compile_commands)} entries")
+print(f"Output written to: {args.output_file}")

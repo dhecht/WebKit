@@ -167,6 +167,20 @@ JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationCompileOSRExit, void, (CallFrame* cal
     uint32_t exitIndex = vm.osrExitIndex;
     OSRExit& exit = codeBlock->jitCode()->dfg()->m_osrExit[exitIndex];
 
+    dataLogLnIf(shouldDumpDisassembly() || Options::verboseOSR() || Options::verboseDFGOSRExit(), "Compiling DFG OSR exit with exitIndex = ", exitIndex);
+    if (shouldDumpDisassembly() || Options::verboseOSR() || Options::verboseFTLOSRExit()) {
+        dataLogLn(
+            "    Owning block: ", pointerDump(codeBlock), "\n",
+            "    Origin: ", exit.m_codeOrigin);
+        if (exit.m_codeOriginForExitProfile != exit.m_codeOrigin)
+            dataLogLn("    Origin for exit profile: ", exit.m_codeOriginForExitProfile);
+        dataLogLn(
+            "    Current call site index: ", callFrame->callSiteIndex().bits(), "\n",
+            "    Exit is exception handler: ", exit.isExceptionHandler(), "\n",
+            "    Is unwind handler: ", exit.isGenericUnwindHandler());
+        dataLogLn(
+            "    m_kind=",  exit.m_kind);
+    }
     ASSERT(!vm.callFrameForCatch || exit.m_kind == GenericUnwind);
     EXCEPTION_ASSERT_UNUSED(scope, !!scope.exception() || !exit.isOSRExitDueToException());
     

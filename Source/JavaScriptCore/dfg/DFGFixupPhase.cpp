@@ -135,7 +135,8 @@ private:
         fixDoubleOrBooleanEdge(leftChild);
         fixDoubleOrBooleanEdge(rightChild);
         node->setResult(NodeResultDouble);
-        node->clearFlags(NodeMustGenerate);
+        if (Options::clearMustGenerate())
+            node->clearFlags(NodeMustGenerate);
     }
     
     void fixupArithMul(Node* node, Edge& leftChild, Edge& rightChild)
@@ -165,7 +166,8 @@ private:
         fixDoubleOrBooleanEdge(leftChild);
         fixDoubleOrBooleanEdge(rightChild);
         node->setResult(NodeResultDouble);
-        node->clearFlags(NodeMustGenerate);
+        if (Options::clearMustGenerate())
+            node->clearFlags(NodeMustGenerate);
     }
 
     void fixupBlock(BasicBlock* block)
@@ -309,7 +311,8 @@ private:
             fixDoubleOrBooleanEdge(node->child2());
             node->setOp(ArithSub);
             node->setResult(NodeResultDouble);
-            node->clearFlags(NodeMustGenerate);
+            if (Options::clearMustGenerate())
+                node->clearFlags(NodeMustGenerate);
             break;
         }
 
@@ -592,7 +595,8 @@ private:
             fixDoubleOrBooleanEdge(node->child1());
             fixDoubleOrBooleanEdge(node->child2());
             node->setResult(NodeResultDouble);
-            node->clearFlags(NodeMustGenerate);
+            if (Options::clearMustGenerate())
+                node->clearFlags(NodeMustGenerate);
             break;
         }
             
@@ -697,7 +701,8 @@ private:
                     convertToDouble(rightChild);
                     node->setOp(ArithMul);
                     node->setResult(NodeResultDouble);
-                    node->clearFlags(NodeMustGenerate);
+                    if (Options::clearMustGenerate())
+                        node->clearFlags(NodeMustGenerate);
                     break;
                 }
 
@@ -706,7 +711,8 @@ private:
                     convertToDouble(leftChild);
                     node->setOp(ArithMul);
                     node->setResult(NodeResultDouble);
-                    node->clearFlags(NodeMustGenerate);
+                    if (Options::clearMustGenerate())
+                        node->clearFlags(NodeMustGenerate);
                     break;
                 }
             }
@@ -798,7 +804,8 @@ private:
                 fixDoubleOrBooleanEdge(child);
             });
             node->setResult(NodeResultDouble);
-            node->clearFlags(NodeMustGenerate);
+            if (Options::clearMustGenerate())
+                node->clearFlags(NodeMustGenerate);
             break;
         }
             
