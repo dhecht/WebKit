@@ -34,7 +34,8 @@ namespace JSC { namespace B3 { namespace Air {
 class Code;
 class StackSlot;
 
-// This is a collection of utilities shared by stack allocators.
+// This is a collection of utilities shared by both stack allocators
+// (allocateStackByGraphColoring and allocateRegistersAndStackByLinearScan).
 
 // Attempt to put the given stack slot at the given offset. Returns false if this would cause
 // the slot to overlap with any of the given slots.

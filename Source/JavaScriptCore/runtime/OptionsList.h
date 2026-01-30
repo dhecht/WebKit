@@ -494,6 +494,9 @@ bool hasCapacityToUseLargeGigacage();
     \
     v(Bool, logPhaseTimes, false, Normal, nullptr) \
     v(Double, rareBlockPenalty, 0.001, Normal, nullptr) \
+    v(Unsigned, maximumTmpsForGraphColoring, 60000, Normal, "The maximum number of tmps an Air program can have before always register allocating with Linear Scan"_s) \
+    v(Bool, airLinearScanVerbose, false, Normal, nullptr) \
+    v(Bool, airLinearScanSpillsEverything, false, Normal, nullptr) \
     v(Bool, airForceBriggsAllocator, false, Normal, nullptr) \
     v(Bool, airForceIRCAllocator, false, Normal, nullptr) \
     v(Bool, airGreedyRegAllocVerbose, false, Normal, nullptr) \
