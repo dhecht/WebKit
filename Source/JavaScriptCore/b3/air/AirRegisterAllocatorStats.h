@@ -56,7 +56,7 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numSplitIntraBlockClusterTmpsSpilled) \
     macro(numSplitIntraBlockLoad)               \
     macro(numSplitIntraBlockStore)              \
-    macro(numInsts)        \
+    macro(numInsts)                             \
 
 class AirAllocateRegistersStats {
 public:

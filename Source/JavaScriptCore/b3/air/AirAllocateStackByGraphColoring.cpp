@@ -34,7 +34,10 @@
 #include "AirInstInlines.h"
 #include "AirLiveness.h"
 #include "AirPhaseScope.h"
+#include "AirRegisterAllocatorStats.h"
 #include "AirStackAllocation.h"
+#include "AirStackAllocatorStats.h"
+#include <wtf/HashSet.h>
 #include <wtf/InterferenceGraph.h>
 #include <wtf/ListDump.h>
 
@@ -44,7 +47,7 @@ namespace {
 
 namespace AirAllocateStackByGraphColoringInternal {
 static constexpr bool verbose = false;
-static constexpr bool reportLargeMemoryUses = false;
+static constexpr bool reportLargeMemoryUses = true;
 }
 
 class StackAllocatorBase {
@@ -171,8 +174,10 @@ private:
 
                     for (StackSlot* otherSlot : localCalc.live()) {
                         unsigned otherSlotIndex = otherSlot->index();
-                        if (otherSlotIndex != move.src)
+                        if (otherSlotIndex != move.src) {
                             addEdge(move.dst, otherSlotIndex);
+                            m_stats.addEdgeBuild++;
+                        }
                     }
 
                     prevInst = nullptr;
@@ -186,8 +191,10 @@ private:
                         if (slot->kind() != StackSlotKind::Spill)
                             return;
 
-                        for (StackSlot* otherSlot : localCalc.live())
+                        for (StackSlot* otherSlot : localCalc.live()) {
                             addEdge(slot, otherSlot);
+                            m_stats.addEdgeBuild++;
+                        }
                     });
             };
 
@@ -260,6 +267,41 @@ private:
     {
         CompilerTimingScope timingScope("Air"_s, "StackAllocator::coalesce"_s);
 
+        if (Options::airDumpRegAllocStats()) {
+            m_stats.numStackSlots = m_code.stackSlots().size();
+            for (StackSlot* slot : m_code.stackSlots()) {
+                if (!slot->offsetFromFP())
+                    m_stats.numStackSlotsNeedAlloc++;
+                switch (slot->byteSize()) {
+                case 1:
+                    m_stats.numStackSlots1Byte++;
+                    break;
+                case 2:
+                    m_stats.numStackSlots2Byte++;
+                    break;
+                case 4:
+                    m_stats.numStackSlots4Byte++;
+                    break;
+                case 8:
+                    m_stats.numStackSlots8Byte++;
+                    break;
+                case 16:
+                    m_stats.numStackSlots16Byte++;
+                    if (!m_code.usesSIMD())
+                        dataLogLn("Does not use SIMD but size is 16: ", *slot);
+                    RELEASE_ASSERT(m_code.usesSIMD());
+                    break;
+                default:
+                    dataLogLn("Unknown slot size: ", slot);
+                    RELEASE_ASSERT(slot->byteSize() > 16);
+                    m_stats.numStackSlotsOver16Byte++;
+                    break;
+                }
+            }
+            m_stats.stackSlotInterferenceSizeBytes = m_interference.memoryUse();
+            m_stats.numStackSlotsCoalesceableMoves = m_coalescableMoves.size();
+        }
+
         // Now try to coalesce some moves.
         std::ranges::sort(m_coalescableMoves, std::ranges::greater { }, &CoalescableMove::frequency);
 
@@ -271,10 +313,13 @@ private:
             if (m_interference.contains(slotToKill, slotToKeep))
                 continue;
 
+            m_stats.numStackSlotsCoalesced++;
             m_remappedStackSlotIndices[slotToKill] = slotToKeep;
 
-            for (IndexType interferingSlot : m_interference[slotToKill])
+            for (IndexType interferingSlot : m_interference[slotToKill]) {
                 addEdge(interferingSlot, slotToKeep);
+                m_stats.addEdgeCoalesce++;
+            }
             m_interference.mayClear(slotToKill);
         }
 
@@ -316,6 +361,19 @@ private:
             }
 
             assign(slot, otherSlots);
+        }
+
+        if (Options::airDumpRegAllocStats()) {
+            HashSet<intptr_t> uniqueOffsets;
+            unsigned frameSize = 0;
+            for (StackSlot* slot : m_code.stackSlots()) {
+                if (isRemappedSlotIndex(slot->index()))
+                    continue;
+                uniqueOffsets.add(slot->offsetFromFP());
+                frameSize = std::max(frameSize, static_cast<unsigned>(-slot->offsetFromFP()));
+            }
+            m_stats.numStackSlotsAllocated = uniqueOffsets.size();
+            m_stats.frameSize = frameSize;
         }
     }
 
@@ -362,6 +420,7 @@ private:
 
     InterferenceGraph m_interference;
     Vector<CoalescableMove> m_coalescableMoves;
+    AirStackAllocatorStats m_stats;
 };
 
 // We try to avoid computing the liveness information if there is no spill slot to allocate

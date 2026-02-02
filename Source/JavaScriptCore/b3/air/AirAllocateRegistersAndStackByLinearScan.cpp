@@ -581,6 +581,8 @@ private:
 
     void scanForStack()
     {
+        CompilerTimingScope timingScope("Air"_s, "LinearScan::scanForStack"_s);
+
         // This is loosely modeled after LinearScanRegisterAllocation in Fig. 1 in
         // http://dl.acm.org/citation.cfm?id=330250.
 
