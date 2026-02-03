@@ -47,6 +47,7 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numMoveSpillSpillInsts)               \
     macro(numRematerializeConst)                \
     macro(maxLiveRangeSize)                     \
+    macro(maxLiveRangeIntervals)                \
     macro(didSpill)                             \
     macro(numSplitAroundClobbers)               \
     macro(numSplitAroundClobberSpilled)         \

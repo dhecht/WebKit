@@ -1562,6 +1562,7 @@ private:
                 return;
             }
             m_stats[bank].maxLiveRangeSize = std::max(m_stats[bank].maxLiveRangeSize, static_cast<unsigned>(tmpData.liveRange.size()));
+            m_stats[bank].maxLiveRangeIntervals = std::max(m_stats[bank].maxLiveRangeIntervals, static_cast<unsigned>(tmpData.liveRange.intervals().size()));
             Stage initialStage = shouldSpillEverything() ? Stage::Spill : Stage::TryAllocate;
             setStageAndEnqueue(tmp, tmpData, initialStage);
         });
