@@ -47,7 +47,7 @@ namespace {
 
 namespace AirAllocateStackByGraphColoringInternal {
 static constexpr bool verbose = false;
-static constexpr bool reportLargeMemoryUses = true;
+static constexpr bool reportLargeMemoryUses = false;
 }
 
 class StackAllocatorBase {
