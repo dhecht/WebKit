@@ -2174,7 +2174,8 @@ private:
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             TmpData& tmpData = m_map.get<bank>(tmp);
             if (tmpData.stage == Stage::Spilled && !spillSlot(tmp)) {
-                m_map[groupForSpill(tmp)].groupSpillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
+                Tmp group = groupForSpill(tmp);
+                m_map[group].groupSpillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(group)), StackSlotKind::Spill);
                 ASSERT(spillSlot(tmp));
                 m_stats[bank].numSpillStackSlots++;
             }
