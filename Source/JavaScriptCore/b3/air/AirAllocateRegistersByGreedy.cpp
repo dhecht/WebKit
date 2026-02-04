@@ -2277,7 +2277,7 @@ private:
                             // we need to avoid placing the Tmp's stack address into the instruction.
                             return;
                         }
-                        Width spillWidth = m_tmpWidth.requiredWidth(arg.tmp());
+                        Width spillWidth = m_tmpWidth.requiredWidth(groupForSpill(arg.tmp()));
                         if (Arg::isAnyDef(role) && width < spillWidth) {
                             // Either there are users of this tmp who will use more than width,
                             // or there are producers who will produce more than width non-zero
@@ -2314,6 +2314,7 @@ private:
                     // This has become a Move spillN, SpillM. If N==M, we can remove this instruction. Otherwise,
                     // a scratch register is needed in order to execute the move between spill slots.
                     if (maybeCoalescable && inst.args[0] == inst.args[1]) {
+                        ASSERT_IMPLIES(inst.kind.opcode == Move32, inst.args[1].stackSlot()->byteSize() == bytesForWidth(Width32));
                         // TODO: add stat
                         inst = Inst(); // Will be removed during assignRegisters final pass
                         continue;
