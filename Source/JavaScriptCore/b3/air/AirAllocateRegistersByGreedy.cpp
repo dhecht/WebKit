@@ -2315,7 +2315,7 @@ private:
                     // a scratch register is needed in order to execute the move between spill slots.
                     if (maybeCoalescable && inst.args[0] == inst.args[1]) {
                         ASSERT_IMPLIES(inst.kind.opcode == Move32, inst.args[1].stackSlot()->byteSize() == bytesForWidth(Width32));
-                        // TODO: add stat
+                        m_stats[bank].numCoalescedStackSlotMoves++;
                         inst = Inst(); // Will be removed during assignRegisters final pass
                         continue;
                     }
@@ -2567,7 +2567,7 @@ private:
 
                 if (mayBeCoalescable && inst.args[0].isTmp() && inst.args[1].isTmp()
                     && inst.args[0].tmp() == inst.args[1].tmp()) {
-                    // TODO: add stat
+                    m_stats[inst.args[0].tmp().bank()].numCoalescedRegisterMoves++;
                     inst = Inst();
                 }
             }
