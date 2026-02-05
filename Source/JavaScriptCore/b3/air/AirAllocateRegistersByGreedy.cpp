@@ -2290,6 +2290,7 @@ private:
                             // stretch the spill slot on demand. One possibility is that it's ZDefs of
                             // smaller width than 32-bit.
                             // https://bugs.webkit.org/show_bug.cgi?id=169823
+                            m_stats[bank].numInPlaceSpillSpillWidthGaveUp++;
                             return;
                         }
                         ASSERT(inst.kind.opcode == Move || !(Arg::isAnyUse(role) && width > spillWidth));

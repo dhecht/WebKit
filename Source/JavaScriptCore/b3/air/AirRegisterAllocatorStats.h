@@ -46,6 +46,7 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numLoadSpill)                         \
     macro(numStoreSpill)                        \
     macro(numInPlaceSpill)                      \
+    macro(numInPlaceSpillSpillWidthGaveUp)      \
     macro(numMoveSpillSpillInsts)               \
     macro(numRematerializeConst)                \
     macro(maxLiveRangeSize)                     \
