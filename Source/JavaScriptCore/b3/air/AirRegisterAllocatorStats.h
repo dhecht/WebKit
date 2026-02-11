@@ -61,6 +61,30 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numSplitIntraBlockLoad)               \
     macro(numSplitIntraBlockStore)              \
     macro(numInsts)                             \
+    /* Per-stage stats: Stage::Unspillable */   \
+    macro(numUnspillableDequeued)               \
+    macro(numUnspillableTryAllocateSuccess)     \
+    macro(numUnspillableTryEvictAttempts)       \
+    macro(numUnspillableTryEvictSuccess)        \
+    /* Per-stage stats: Stage::TryAllocate */   \
+    macro(numTryAllocateDequeued)               \
+    macro(numTryAllocateTryAllocateSuccess)     \
+    macro(numTryAllocateTryEvictAttempts)       \
+    macro(numTryAllocateTryEvictSuccess)        \
+    macro(numTryAllocateToTrySplit)             \
+    macro(numTryAllocateToSpill)                \
+    /* Per-stage stats: Stage::TrySplit */      \
+    macro(numTrySplitDequeued)                  \
+    macro(numTrySplitTryAllocateSuccess)        \
+    macro(numTrySplitTrySplitAttempts)          \
+    macro(numTrySplitTrySplitSuccess)           \
+    macro(numTrySplitToSpill)                   \
+    /* Per-stage stats: Stage::Spill */         \
+    macro(numSpillDequeued)                     \
+    macro(numSpillTryAllocateSuccess)           \
+    macro(numSpillTryEvictAttempts)             \
+    macro(numSpillTryEvictSuccess)              \
+    macro(numSpillSpilled)                      \
 
 class AirAllocateRegistersStats {
 public:
