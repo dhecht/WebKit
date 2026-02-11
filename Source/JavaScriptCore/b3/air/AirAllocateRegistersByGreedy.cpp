@@ -1437,6 +1437,7 @@ private:
                 addSubGroup(newGrp, newGrpData, newGrpData.subGroup1, group1);
                 newGrpData.validate();
                 m_map.append(newGrp, newGrpData);
+                m_stats[bank].numGroupTmpsCreated++;
                 dataLogLnIf(verbose(), "Created group ", newGrp, ": ", m_map.get<bank>(newGrp));
             }
         }
@@ -1921,8 +1922,18 @@ private:
         if (!tmpData.isGroup())
             return false;
         tmpData.stage = Stage::SplitGroup;
-        setStageAndEnqueue(tmpData.subGroup0, m_map.get<bank>(tmpData.subGroup0), Stage::TryAllocate);
-        setStageAndEnqueue(tmpData.subGroup1, m_map.get<bank>(tmpData.subGroup1), Stage::TryAllocate);
+        m_stats[bank].numGroupSplits++;
+
+        auto parentSize = tmpData.liveRange.size();
+        TmpData& subGroup0Data = m_map.get<bank>(tmpData.subGroup0);
+        TmpData& subGroup1Data = m_map.get<bank>(tmpData.subGroup1);
+        if (subGroup0Data.liveRange.size() == parentSize)
+            m_stats[bank].numGroupSplitSubgroupSameSize++;
+        if (subGroup1Data.liveRange.size() == parentSize)
+            m_stats[bank].numGroupSplitSubgroupSameSize++;
+
+        setStageAndEnqueue(tmpData.subGroup0, subGroup0Data, Stage::TryAllocate);
+        setStageAndEnqueue(tmpData.subGroup1, subGroup1Data, Stage::TryAllocate);
         dataLogLnIf(verbose(), "Split (group) ", tmp);
         tmpData.validate();
         return true;

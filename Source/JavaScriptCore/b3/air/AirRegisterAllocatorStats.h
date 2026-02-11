@@ -85,6 +85,10 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numSpillTryEvictAttempts)             \
     macro(numSpillTryEvictSuccess)              \
     macro(numSpillSpilled)                      \
+    /* Group splitting stats */                 \
+    macro(numGroupTmpsCreated)                  \
+    macro(numGroupSplits)                       \
+    macro(numGroupSplitSubgroupSameSize)        \
 
 class AirAllocateRegistersStats {
 public:
