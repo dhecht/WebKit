@@ -1601,112 +1601,19 @@ private:
                 if (tmpData.stage == Stage::Replaced)
                     continue; // Tmp no longer relevant
 
-                Stage stageAtDequeue = tmpData.stage;
-
-                // Track per-stage dequeue counts
-                switch (stageAtDequeue) {
+                switch (tmpData.stage) {
                 case Stage::Unspillable:
-                    m_stats[bank].numUnspillableDequeued++;
-                    break;
+                    processUnspillable<bank>(tmp, tmpData);
+                    continue;
                 case Stage::TryAllocate:
-                    m_stats[bank].numTryAllocateDequeued++;
-                    break;
-                case Stage::TrySplit:
-                    m_stats[bank].numTrySplitDequeued++;
-                    break;
-                case Stage::Spill:
-                    m_stats[bank].numSpillDequeued++;
-                    break;
-                default:
-                    break;
-                }
-
-                // Try to allocate - attempted for all stages
-                if (tryAllocate<bank>(tmp, tmpData)) {
-                    switch (stageAtDequeue) {
-                    case Stage::Unspillable:
-                        m_stats[bank].numUnspillableTryAllocateSuccess++;
-                        break;
-                    case Stage::TryAllocate:
-                        m_stats[bank].numTryAllocateTryAllocateSuccess++;
-                        break;
-                    case Stage::TrySplit:
-                        m_stats[bank].numTrySplitTryAllocateSuccess++;
-                        break;
-                    case Stage::Spill:
-                        m_stats[bank].numSpillTryAllocateSuccess++;
-                        break;
-                    default:
-                        break;
-                    }
+                    processTryAllocate<bank>(tmp, tmpData);
                     continue;
-                }
-
-                // Try to evict - only for stages other than TrySplit
-                if (stageAtDequeue != Stage::TrySplit) {
-                    switch (stageAtDequeue) {
-                    case Stage::Unspillable:
-                        m_stats[bank].numUnspillableTryEvictAttempts++;
-                        break;
-                    case Stage::TryAllocate:
-                        m_stats[bank].numTryAllocateTryEvictAttempts++;
-                        break;
-                    case Stage::Spill:
-                        m_stats[bank].numSpillTryEvictAttempts++;
-                        break;
-                    default:
-                        break;
-                    }
-
-                    if (tryEvict<bank>(tmp, tmpData)) {
-                        switch (stageAtDequeue) {
-                        case Stage::Unspillable:
-                            m_stats[bank].numUnspillableTryEvictSuccess++;
-                            break;
-                        case Stage::TryAllocate:
-                            m_stats[bank].numTryAllocateTryEvictSuccess++;
-                            break;
-                        case Stage::Spill:
-                            m_stats[bank].numSpillTryEvictSuccess++;
-                            break;
-                        default:
-                            break;
-                        }
-                        continue;
-                    }
-                }
-
-                ASSERT(&tmpData == &m_map.get<bank>(tmp)); // Verify m_map hasn't been resized on this path
-                switch (stageAtDequeue) {
-                case Stage::TryAllocate: {
-                    // If we couldn't allocate tmp, allow it to split next time.
-                    Stage nextStage = Stage::TrySplit;
-                    // If we already know splitting won't be profitable, skip it.
-                    if (!tmpData.isGroup() && tmpData.liveRange.size() < splitMinRangeSize) {
-                        nextStage = Stage::Spill;
-                        m_stats[bank].numTryAllocateToSpill++;
-                    } else {
-                        m_stats[bank].numTryAllocateToTrySplit++;
-                    }
-                    setStageAndEnqueue(tmp, tmpData, nextStage);
-                    continue;
-                }
                 case Stage::TrySplit:
-                    m_stats[bank].numTrySplitTrySplitAttempts++;
-                    if (trySplit<bank>(tmp, tmpData)) {
-                        m_stats[bank].numTrySplitTrySplitSuccess++;
-                    } else {
-                        m_stats[bank].numTrySplitToSpill++;
-                        setStageAndEnqueue(tmp, tmpData, Stage::Spill);
-                    }
+                    processTrySplit<bank>(tmp, tmpData);
                     continue;
                 case Stage::Spill:
-                    ASSERT(queueContainsOnlySpills()); // FIXME: remove
-                    m_stats[bank].numSpillSpilled++;
-                    spill(tmp, tmpData);
+                    processSpill<bank>(tmp, tmpData);
                     continue;
-                case Stage::Unspillable:
-                    // Unspillables must have been allocated during tryAllocate or tryEvict.
                 default:
                     dataLogLn("Invalid stage tmp = ", tmp, " tmpData = ", tmpData);
                     // Tmps in these stages should not have been enqueued.
@@ -1720,6 +1627,97 @@ private:
             }
             // Process the spill/fill tmps,
         } while (!m_queue.isEmpty());
+    }
+
+    template <Bank bank>
+    NEVER_INLINE void processUnspillable(Tmp tmp, TmpData& tmpData)
+    {
+        m_stats[bank].numUnspillableDequeued++;
+
+        if (tryAllocate<bank>(tmp, tmpData)) {
+            m_stats[bank].numUnspillableTryAllocateSuccess++;
+            return;
+        }
+
+        m_stats[bank].numUnspillableTryEvictAttempts++;
+        if (tryEvict<bank>(tmp, tmpData)) {
+            m_stats[bank].numUnspillableTryEvictSuccess++;
+            return;
+        }
+
+        dataLogLn("Failed to allocate unspillable tmp = ", tmp, " tmpData = ", tmpData);
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+
+    template <Bank bank>
+    NEVER_INLINE void processTryAllocate(Tmp tmp, TmpData& tmpData)
+    {
+        m_stats[bank].numTryAllocateDequeued++;
+
+        if (tryAllocate<bank>(tmp, tmpData)) {
+            m_stats[bank].numTryAllocateTryAllocateSuccess++;
+            return;
+        }
+
+        m_stats[bank].numTryAllocateTryEvictAttempts++;
+        if (tryEvict<bank>(tmp, tmpData)) {
+            m_stats[bank].numTryAllocateTryEvictSuccess++;
+            return;
+        }
+
+        ASSERT(&tmpData == &m_map.get<bank>(tmp)); // Verify m_map hasn't been resized on this path
+
+        // If we couldn't allocate tmp, allow it to split next time.
+        Stage nextStage = Stage::TrySplit;
+        // If we already know splitting won't be profitable, skip it.
+        if (!tmpData.isGroup() && tmpData.liveRange.size() < splitMinRangeSize) {
+            nextStage = Stage::Spill;
+            m_stats[bank].numTryAllocateToSpill++;
+        } else {
+            m_stats[bank].numTryAllocateToTrySplit++;
+        }
+        setStageAndEnqueue(tmp, tmpData, nextStage);
+    }
+
+    template <Bank bank>
+    NEVER_INLINE void processTrySplit(Tmp tmp, TmpData& tmpData)
+    {
+        m_stats[bank].numTrySplitDequeued++;
+
+        if (tryAllocate<bank>(tmp, tmpData)) {
+            m_stats[bank].numTrySplitTryAllocateSuccess++;
+            return;
+        }
+
+        m_stats[bank].numTrySplitTrySplitAttempts++;
+        if (trySplit<bank>(tmp, tmpData)) {
+            m_stats[bank].numTrySplitTrySplitSuccess++;
+            return;
+        }
+
+        m_stats[bank].numTrySplitToSpill++;
+        setStageAndEnqueue(tmp, tmpData, Stage::Spill);
+    }
+
+    template <Bank bank>
+    NEVER_INLINE void processSpill(Tmp tmp, TmpData& tmpData)
+    {
+        m_stats[bank].numSpillDequeued++;
+
+        if (tryAllocate<bank>(tmp, tmpData)) {
+            m_stats[bank].numSpillTryAllocateSuccess++;
+            return;
+        }
+
+        m_stats[bank].numSpillTryEvictAttempts++;
+        if (tryEvict<bank>(tmp, tmpData)) {
+            m_stats[bank].numSpillTryEvictSuccess++;
+            return;
+        }
+
+        ASSERT(queueContainsOnlySpills()); // FIXME: remove
+        m_stats[bank].numSpillSpilled++;
+        spill(tmp, tmpData);
     }
 
     template <Bank bank>
@@ -1815,7 +1813,7 @@ private:
         };
 
         Reg bestEvictReg;
-        float minSpillCost = unspillableCost;
+        float minSpillCost = tmpData.spillCost();
         m_visited.resize(m_code.numTmps(bank));
         LiveRange& liveRange = tmpData.liveRange;
         Width width = widthForConflicts<bank>(tmp);
