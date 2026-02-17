@@ -68,6 +68,10 @@ extern "C" char __llvm_profile_filename[] = "/private/tmp/WebKitPGO/JavaScriptCo
 #endif
 #endif
 
+#if PLATFORM(COCOA)
+#include <wtf/darwin/OSLogPrintStream.h> // FIXME: rdar://136782494
+#endif
+
 namespace JSC {
 
 static_assert(sizeof(bool) == 1, "LLInt and JIT assume sizeof(bool) is always 1 when touching it directly from assembly code.");
@@ -94,6 +98,8 @@ void initializeWithOptionsCustomization(const ScopedLambda<void()>& optionsCusto
 #if ENABLE(WRITE_BARRIER_PROFILING)
         WriteBarrierCounters::initialize();
 #endif
+        WTF::setDataFile(OSLogPrintStream::open("com.apple.JavaScriptCore", "DataLog", OS_LOG_TYPE_ERROR));;
+        dataLogLn("JSC::initialize() JSString structure crash instrumentation v3");
         {
             Options::AllowUnfinalizedAccessScope scope;
             JITOperationList::initialize();

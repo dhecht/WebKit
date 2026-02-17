@@ -441,7 +441,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, alwaysGeneratePCToCodeOriginMap, false, Normal, "This will make sure we always generate a PCToCodeOriginMap for JITed code."_s) \
     \
     v(Double, randomIntegrityAuditRate, 0.05, Normal, "Probability of random integrity audits [0.0 - 1.0]"_s) \
-    v(Bool, verifyGC, false, Normal, nullptr) \
+    v(Bool, verifyGC, true, Normal, nullptr) \
     v(Bool, verboseVerifyGC, false, Normal, nullptr) \
     v(Bool, verifyHeap, false, Normal, nullptr) \
     v(Unsigned, numberOfGCCyclesToRecordForVerification, 3, Normal, nullptr) \
