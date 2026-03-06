@@ -1481,43 +1481,46 @@ private:
 
         Vector<Tmp, 8> worklist;
 
-        // Step 1b: Propagate external coalescables and fix spillCost.
-        // Must happen before clearing group structure so forEachTmpInGroup
-        // and groupForReg still work.
+        // Collect stats before clearing group structure.
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             TmpData& data = m_map.get<bank>(tmp);
             if (!data.isGroup() || data.parentGroup)
                 return; // Not a root group
-
             m_stats[bank].numGroupsCreated++;
-
-            // Collect all leaf Tmps and build a set of their indices.
-            Vector<Tmp, 8> leaves;
-            forEachTmpInGroup(tmp, worklist, [&](Tmp leaf) {
-                leaves.append(leaf);
+            forEachTmpInGroup(tmp, worklist, [&](Tmp) {
                 m_stats[bank].numGroupTmpsCoalesced++;
                 return IterationStatus::Continue;
             });
+        });
 
-            HashSet<Tmp> leafSet;
-            for (Tmp leaf : leaves)
-                leafSet.add(leaf);
+        // Propagate external coalescables to the group root and
+        // update reverse pointers. This is optional — without it
+        // we lose coalescing opportunities between merged groups
+        // and external Tmps but the allocator is still correct.
+        // Must happen before clearing group structure so
+        // forEachTmpInGroup and groupForReg still work.
+        static constexpr bool propagateCoalescables = true;
+        if constexpr (propagateCoalescables) {
+            m_code.forEachTmp<bank>([&](Tmp tmp) {
+                TmpData& data = m_map.get<bank>(tmp);
+                if (!data.isGroup() || data.parentGroup)
+                    return; // Not a root group
 
-            // Process each leaf's coalescable edges.
-            for (Tmp leaf : leaves) {
-                TmpData& leafData = m_map.get<bank>(leaf);
-                for (auto& edge : leafData.coalescables) {
-                    Tmp target = edge.tmp;
-                    Tmp targetGroup = groupForReg<bank>(target);
-                    if (targetGroup == tmp) {
-                        // Internal edge: both endpoints in same group.
-                        // Subtract cost only once per edge (from the
-                        // lower-index side).
-                        if (leaf.tmpIndex(bank) < target.tmpIndex(bank))
-                            data.useDefCost -= 2 * edge.moveCost;
-                    } else {
+                Vector<Tmp, 8> leaves;
+                forEachTmpInGroup(tmp, worklist, [&](Tmp leaf) {
+                    leaves.append(leaf);
+                    return IterationStatus::Continue;
+                });
+
+                for (Tmp leaf : leaves) {
+                    TmpData& leafData = m_map.get<bank>(leaf);
+                    for (auto& edge : leafData.coalescables) {
+                        Tmp target = edge.tmp;
+                        Tmp targetGroup = groupForReg<bank>(target);
+                        if (targetGroup == tmp)
+                            continue; // Internal edge — handled during rewrite
+
                         // External edge: propagate to root's coalescables.
-                        // Also update the external Tmp's coalescable entry.
                         bool merged = false;
                         for (auto& rootEdge : data.coalescables) {
                             if (rootEdge.tmp == targetGroup) {
@@ -1532,43 +1535,35 @@ private:
                         // Update the external Tmp's coalescable to point
                         // to the root instead of the leaf.
                         TmpData& targetData = m_map.get<bank>(target);
-                        bool found = false;
                         for (auto& targetEdge : targetData.coalescables) {
                             if (targetEdge.tmp == leaf) {
                                 targetEdge.tmp = tmp;
-                                // Check if there's already an entry for tmp
-                                // and merge if so.
-                                found = true;
                                 break;
                             }
                         }
-                        if (found) {
-                            // Deduplicate: merge any duplicate entries
-                            // pointing to the root.
-                            for (size_t i = 0; i < targetData.coalescables.size(); i++) {
-                                if (targetData.coalescables[i].tmp != tmp)
-                                    continue;
-                                for (size_t j = i + 1; j < targetData.coalescables.size(); ) {
-                                    if (targetData.coalescables[j].tmp == tmp) {
-                                        targetData.coalescables[i].moveCost += targetData.coalescables[j].moveCost;
-                                        targetData.coalescables.removeAt(j);
-                                    } else
-                                        j++;
-                                }
-                                break;
+                        // Deduplicate: merge any entries in target pointing
+                        // to the same root.
+                        for (size_t i = 0; i < targetData.coalescables.size(); i++) {
+                            if (targetData.coalescables[i].tmp != tmp)
+                                continue;
+                            for (size_t j = i + 1; j < targetData.coalescables.size(); ) {
+                                if (targetData.coalescables[j].tmp == tmp) {
+                                    targetData.coalescables[i].moveCost += targetData.coalescables[j].moveCost;
+                                    targetData.coalescables.removeAt(j);
+                                } else
+                                    j++;
                             }
+                            break;
                         }
                     }
                 }
-            }
+            });
+        }
 
-            // Ensure useDefCost doesn't go negative due to floating
-            // point imprecision.
-            if (data.useDefCost < 0)
-                data.useDefCost = 0;
-        });
-
-        // Step 1a: Rewrite instructions and nop self-Moves.
+        // Rewrite instructions and nop self-Moves.
+        // When nop'ing a self-Move, subtract its cost from the
+        // merged Tmp's useDefCost (the Move contributed frequency
+        // to both the source use and dest def).
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
                 inst.forEachTmpFast([&](Tmp& t) {
@@ -1580,17 +1575,22 @@ private:
                     if (group != t)
                         t = group;
                 });
-                // Nop out self-Moves so they don't appear in
-                // use/def lists during splitting.
                 if (mayBeCoalescable(inst)
-                    && inst.args[0].isTmp()
-                    && inst.args[1].isTmp()
-                    && inst.args[0].tmp() == inst.args[1].tmp())
+                    && inst.args[0].tmp() == inst.args[1].tmp()) {
+                    Tmp tmp = inst.args[0].tmp();
+                    if (!tmp.isReg()) {
+                        float freq = adjustedBlockFrequency(block);
+                        TmpData& tmpData = m_map.get<bank>(tmp);
+                        tmpData.useDefCost -= 2 * freq;
+                        if (tmpData.useDefCost < 0)
+                            tmpData.useDefCost = 0;
+                    }
                     inst = Inst();
+                }
             }
         }
 
-        // Step 1c: Clear group structure so isGroup() returns false.
+        // Clear group structure so isGroup() returns false.
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             TmpData& data = m_map.get<bank>(tmp);
             if (!data.isGroup() || data.parentGroup)
