@@ -1487,8 +1487,11 @@ private:
             if (!data.isGroup() || data.parentGroup)
                 return; // Not a root group
             m_stats[bank].numGroupsCreated++;
-            forEachTmpInGroup(tmp, worklist, [&](Tmp) {
+            forEachTmpInGroup(tmp, worklist, [&](Tmp leaf) {
                 m_stats[bank].numGroupTmpsCoalesced++;
+                auto leafIndex = AbsoluteTmpMapper<bank>::absoluteIndex(leaf);
+                if (m_useCounts.isConstDef<bank>(leafIndex))
+                    m_stats[bank].numConstDefTmpsMerged++;
                 return IterationStatus::Continue;
             });
         });
