@@ -1572,8 +1572,11 @@ private:
                     if (t.bank() != bank)
                         return;
                     Tmp group = groupForReg<bank>(t);
-                    if (group != t)
+                    if (group != t) {
+                        if (m_map.get<bank>(t).hasColdUse)
+                            m_map.get<bank>(group).hasColdUse = true;
                         t = group;
+                    }
                 });
                 if (mayBeCoalescable(inst)
                     && inst.args[0].tmp() == inst.args[1].tmp()) {
