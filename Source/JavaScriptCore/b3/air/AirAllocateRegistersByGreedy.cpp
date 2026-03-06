@@ -588,7 +588,7 @@ struct TmpData {
         ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled || !parentGroup);
         ASSERT_IMPLIES(stage == Stage::Spilled, spillCost() != unspillableCost);
         ASSERT_IMPLIES(stage == Stage::Spilled, !isGroup()); // Should have been split
-        ASSERT_IMPLIES(coalescables.size(), !isGroup()); // Only bottom-most should have coalescables
+        // After rewriteGroupInstructions, roots temporarily have both coalescables and subGroup pointers.
     }
 
     LiveRange liveRange;
@@ -692,6 +692,8 @@ public:
         coalesceWithPinnedRegisters();
         finalizeGroups<GP>();
         finalizeGroups<FP>();
+        rewriteGroupInstructions<GP>();
+        rewriteGroupInstructions<FP>();
 
         dataLogLnIf(verbose(), "State before greedy register allocation:\n", *this);
 
@@ -1467,6 +1469,137 @@ private:
         }
     }
 
+    // After finalizeGroups has built binary trees of coalesced Tmps,
+    // rewrite all instructions to reference the group root directly.
+    // This allows the existing split strategies (trySplitAroundClobbers,
+    // trySplitIntraBlock) to operate on the merged live range instead
+    // of splitting along arbitrary binary tree boundaries.
+    template<Bank bank>
+    void rewriteGroupInstructions()
+    {
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::rewriteGroupInstructions"_s);
+
+        Vector<Tmp, 8> worklist;
+
+        // Step 1b: Propagate external coalescables and fix spillCost.
+        // Must happen before clearing group structure so forEachTmpInGroup
+        // and groupForReg still work.
+        m_code.forEachTmp<bank>([&](Tmp tmp) {
+            TmpData& data = m_map.get<bank>(tmp);
+            if (!data.isGroup() || data.parentGroup)
+                return; // Not a root group
+
+            m_stats[bank].numGroupsCreated++;
+
+            // Collect all leaf Tmps and build a set of their indices.
+            Vector<Tmp, 8> leaves;
+            forEachTmpInGroup(tmp, worklist, [&](Tmp leaf) {
+                leaves.append(leaf);
+                m_stats[bank].numGroupTmpsCoalesced++;
+                return IterationStatus::Continue;
+            });
+
+            HashSet<Tmp> leafSet;
+            for (Tmp leaf : leaves)
+                leafSet.add(leaf);
+
+            // Process each leaf's coalescable edges.
+            for (Tmp leaf : leaves) {
+                TmpData& leafData = m_map.get<bank>(leaf);
+                for (auto& edge : leafData.coalescables) {
+                    Tmp target = edge.tmp;
+                    Tmp targetGroup = groupForReg<bank>(target);
+                    if (targetGroup == tmp) {
+                        // Internal edge: both endpoints in same group.
+                        // Subtract cost only once per edge (from the
+                        // lower-index side).
+                        if (leaf.tmpIndex(bank) < target.tmpIndex(bank))
+                            data.useDefCost -= 2 * edge.moveCost;
+                    } else {
+                        // External edge: propagate to root's coalescables.
+                        // Also update the external Tmp's coalescable entry.
+                        bool merged = false;
+                        for (auto& rootEdge : data.coalescables) {
+                            if (rootEdge.tmp == targetGroup) {
+                                rootEdge.moveCost += edge.moveCost;
+                                merged = true;
+                                break;
+                            }
+                        }
+                        if (!merged)
+                            data.coalescables.append({ targetGroup, edge.moveCost });
+
+                        // Update the external Tmp's coalescable to point
+                        // to the root instead of the leaf.
+                        TmpData& targetData = m_map.get<bank>(target);
+                        bool found = false;
+                        for (auto& targetEdge : targetData.coalescables) {
+                            if (targetEdge.tmp == leaf) {
+                                targetEdge.tmp = tmp;
+                                // Check if there's already an entry for tmp
+                                // and merge if so.
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) {
+                            // Deduplicate: merge any duplicate entries
+                            // pointing to the root.
+                            for (size_t i = 0; i < targetData.coalescables.size(); i++) {
+                                if (targetData.coalescables[i].tmp != tmp)
+                                    continue;
+                                for (size_t j = i + 1; j < targetData.coalescables.size(); ) {
+                                    if (targetData.coalescables[j].tmp == tmp) {
+                                        targetData.coalescables[i].moveCost += targetData.coalescables[j].moveCost;
+                                        targetData.coalescables.removeAt(j);
+                                    } else
+                                        j++;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Ensure useDefCost doesn't go negative due to floating
+            // point imprecision.
+            if (data.useDefCost < 0)
+                data.useDefCost = 0;
+        });
+
+        // Step 1a: Rewrite instructions and nop self-Moves.
+        for (BasicBlock* block : m_code) {
+            for (Inst& inst : *block) {
+                inst.forEachTmpFast([&](Tmp& t) {
+                    if (t.isReg())
+                        return;
+                    if (t.bank() != bank)
+                        return;
+                    Tmp group = groupForReg<bank>(t);
+                    if (group != t)
+                        t = group;
+                });
+                // Nop out self-Moves so they don't appear in
+                // use/def lists during splitting.
+                if (mayBeCoalescable(inst)
+                    && inst.args[0].isTmp()
+                    && inst.args[1].isTmp()
+                    && inst.args[0].tmp() == inst.args[1].tmp())
+                    inst = Inst();
+            }
+        }
+
+        // Step 1c: Clear group structure so isGroup() returns false.
+        m_code.forEachTmp<bank>([&](Tmp tmp) {
+            TmpData& data = m_map.get<bank>(tmp);
+            if (!data.isGroup() || data.parentGroup)
+                return; // Not a root group
+            data.subGroup0 = Tmp();
+            data.subGroup1 = Tmp();
+        });
+    }
+
     template<Bank bank>
     void initSpillCosts()
     {
@@ -1772,6 +1905,7 @@ private:
         m_visited.resize(m_code.numTmps(bank));
         LiveRange& liveRange = tmpData.liveRange;
         Width width = widthForConflicts<bank>(tmp);
+        m_stats[bank].numTryEvictCalls++;
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
             float conflictsSpillCost = 0.0f;
             m_visited.clear();
@@ -1810,11 +1944,13 @@ private:
             return false;
         }
         // It's cheaper to spill all the already-assigned conflicting tmps, so evict them in favor of assigning 'tmp'.
+        m_stats[bank].numTryEvictSucceeded++;
         m_regRanges[bestEvictReg].forEachConflict(liveRange, widthForConflicts<bank>(tmp),
             [&](auto& conflict) -> IterationStatus {
                 TmpData& conflictData = m_map.get<bank>(conflict.tmp);
                 evict(conflict.tmp, conflictData, bestEvictReg);
                 setStageAndEnqueue(conflict.tmp, conflictData, Stage::TryAllocate);
+                m_stats[bank].numEvictions++;
                 return IterationStatus::Continue;
             });
         assign(tmp, tmpData, bestEvictReg);
@@ -1862,8 +1998,6 @@ private:
     bool trySplit(Tmp tmp, TmpData& tmpData)
     {
         ASSERT(tmpData.spillCost() != unspillableCost); // Should have evicted.
-        if (trySplitGroup<bank>(tmp, tmpData))
-            return true;
         if (trySplitAroundClobbers<bank>(tmp, tmpData))
             return true;
         return trySplitIntraBlock<bank>(tmp, tmpData);
