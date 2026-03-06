@@ -1588,7 +1588,7 @@ private:
                         float freq = adjustedBlockFrequency(block);
                         TmpData& tmpData = m_map.get<bank>(tmp);
                         tmpData.useDefCost -= 2 * freq;
-                        if (tmpData.useDefCost < 0)
+                        if (!(tmpData.useDefCost > 0)) // Handles NaN (from Inf-Inf) and negative
                             tmpData.useDefCost = 0;
                     }
                     inst = Inst();
