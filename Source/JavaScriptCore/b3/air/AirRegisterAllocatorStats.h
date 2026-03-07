@@ -62,6 +62,7 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numSplitIntraBlockStore)              \
     macro(numGroupTmpsCoalesced)                 \
     macro(numGroupsCreated)                      \
+    macro(numGroupMovesCoalesced)                \
     macro(numConstDefTmpsMerged)                 \
     macro(numTryEvictCalls)                      \
     macro(numTryEvictSucceeded)                  \

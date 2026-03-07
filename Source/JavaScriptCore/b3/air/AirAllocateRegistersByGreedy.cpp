@@ -1599,6 +1599,7 @@ private:
                                 tmpData.useDefCost = 0;
                         }
                     }
+                    m_stats[bank].numGroupMovesCoalesced++;
                     inst = Inst();
                 }
             }
