@@ -1587,9 +1587,17 @@ private:
                     if (!tmp.isReg()) {
                         float freq = adjustedBlockFrequency(block);
                         TmpData& tmpData = m_map.get<bank>(tmp);
-                        tmpData.useDefCost -= 2 * freq;
-                        if (!(tmpData.useDefCost > 0)) // Handles NaN (from Inf-Inf) and negative
-                            tmpData.useDefCost = 0;
+                        // FIXME: When block frequency overflows to +Inf (deeply nested loops),
+                        // useDefCost saturates at +Inf and we can't subtract from it without
+                        // producing NaN. We skip the subtraction here, but this means useDefCost
+                        // stays +Inf even if all uses were coalesced moves. Consider recomputing
+                        // useDefCost from scratch after the rewrite.
+                        if (std::isfinite(tmpData.useDefCost)) {
+                            tmpData.useDefCost -= freq;
+                            tmpData.useDefCost -= freq;
+                            if (tmpData.useDefCost < 0)
+                                tmpData.useDefCost = 0;
+                        }
                     }
                     inst = Inst();
                 }
