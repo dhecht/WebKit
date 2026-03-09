@@ -1502,7 +1502,8 @@ private:
         // and external Tmps but the allocator is still correct.
         // Must happen before clearing group structure so
         // forEachTmpInGroup and groupForReg still work.
-        static constexpr bool propagateCoalescables = true;
+        static constexpr bool propagateCoalescables = false;
+        static constexpr bool updateUseDefCost = true;
         if constexpr (propagateCoalescables) {
             m_code.forEachTmp<bank>([&](Tmp tmp) {
                 TmpData& data = m_map.get<bank>(tmp);
@@ -1569,6 +1570,7 @@ private:
         // to both the source use and dest def).
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
+                bool maybeCoalescable = mayBeCoalescable(inst);
                 inst.forEachTmpFast([&](Tmp& t) {
                     if (t.isReg())
                         return;
@@ -1581,10 +1583,9 @@ private:
                         t = group;
                     }
                 });
-                if (mayBeCoalescable(inst)
-                    && inst.args[0].tmp() == inst.args[1].tmp()) {
+                if (maybeCoalescable && inst.args[0].tmp() == inst.args[1].tmp()) {
                     Tmp tmp = inst.args[0].tmp();
-                    if (!tmp.isReg()) {
+                    if (updateUseDefCost && !tmp.isReg()) {
                         float freq = adjustedBlockFrequency(block);
                         TmpData& tmpData = m_map.get<bank>(tmp);
                         // FIXME: When block frequency overflows to +Inf (deeply nested loops),
