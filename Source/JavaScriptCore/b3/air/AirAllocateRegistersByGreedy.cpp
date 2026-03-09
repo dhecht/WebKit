@@ -54,9 +54,6 @@ namespace JSC { namespace B3 { namespace Air {
 
 namespace Greedy {
 
-// Experiments
-static constexpr bool eagerGroupsExhaustiveSearch = false;
-
 static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
 static constexpr float fastTmpSpillCost = std::numeric_limits<float>::max();
 static constexpr float maxSpillableSpillCost = std::numeric_limits<float>::max();
@@ -319,7 +316,6 @@ enum class Stage : uint8_t {
     Coalesced,
     Spilled,
     Replaced,
-    SplitGroup,
 };
 
 class TmpPriority {
@@ -547,15 +543,9 @@ struct TmpData {
     void dump(PrintStream& out) const
     {
         out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
-            ", coalescables = ", listDump(coalescables), ", parentGroup = ", parentGroup, ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
+            ", coalescables = ", listDump(coalescables),
             ", useDefCost = ", useDefCost, ", spillability = ", spillability, ", assigned = ", assigned, ", spillSlot = ", pointerDump(spillSlot),
             ", splitMetadataIndex = ", splitMetadataIndex, "}");
-    }
-
-    bool isGroup()
-    {
-        ASSERT(!subGroup0 == !subGroup1);
-        return !!subGroup0;
     }
 
     float spillCost()
@@ -585,18 +575,13 @@ struct TmpData {
         ASSERT(!(spillSlot && assigned));
         ASSERT(!!assigned == (stage == Stage::Assigned));
         ASSERT(liveRange.intervals().isEmpty() == !liveRange.size());
-        ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled || !parentGroup);
         ASSERT_IMPLIES(stage == Stage::Spilled, spillCost() != unspillableCost);
-        ASSERT_IMPLIES(stage == Stage::Spilled, !isGroup()); // Should have been split
-        // After rewriteGroupInstructions, roots temporarily have both coalescables and subGroup pointers.
     }
 
     LiveRange liveRange;
     Vector<CoalescableWith> coalescables;
     StackSlot* spillSlot { nullptr };
     float useDefCost { 0.0f };
-    Tmp parentGroup;
-    Tmp subGroup0, subGroup1;
     uint32_t splitMetadataIndex : 31 { 0 };
     uint32_t hasColdUse : 1 { 0 };
     Stage stage { Stage::New };
@@ -661,6 +646,18 @@ struct SplitMetadata {
     Vector<Split> splits;
 };
 
+struct GroupInfo {
+    Vector<Tmp> members; // sorted by Tmp index within bank
+    LiveRange mergedLiveRange;
+    Tmp root; // set in rewriteGroupInstructions
+};
+
+struct GroupsData {
+    static constexpr uint32_t noGroup = UINT32_MAX;
+    Vector<GroupInfo> groups;
+    Vector<uint32_t> tmpToGroup; // indexed by absolute Tmp index
+};
+
 class GreedyAllocator {
 public:
     GreedyAllocator(Code& code)
@@ -690,10 +687,14 @@ public:
         initSpillCosts<GP>();
         initSpillCosts<FP>();
         coalesceWithPinnedRegisters();
-        finalizeGroups<GP>();
-        finalizeGroups<FP>();
-        rewriteGroupInstructions<GP>();
-        rewriteGroupInstructions<FP>();
+        {
+            auto gpGroups = finalizeGroups<GP>();
+            rewriteGroupInstructions<GP>(gpGroups);
+        }
+        {
+            auto fpGroups = finalizeGroups<FP>();
+            rewriteGroupInstructions<FP>(fpGroups);
+        }
 
         dataLogLnIf(verbose(), "State before greedy register allocation:\n", *this);
 
@@ -903,35 +904,24 @@ private:
         return Interval();
     }
 
-    // Returns the root of the spill-group tree. All Tmps in the tree are known to not interfere and
-    // will share the same spill slot.
+    // After rewriteGroupInstructions, all Tmps in instructions
+    // reference the root directly, so these are identity functions.
     template<Bank bank>
     Tmp groupForSpill(Tmp tmp)
     {
         ASSERT(m_map.get<bank>(tmp).stage == Stage::Spilled);
-        while (Tmp parent = m_map.get<bank>(tmp).parentGroup)
-            tmp = parent;
         return tmp;
     }
 
-    // Returns the root of the register-subgroup tree. All Tmps in this subtree are candidates for
-    // coalescing into the same register assignment.
     template<Bank bank>
     Tmp groupForReg(Tmp tmp)
     {
-        Tmp parent = m_map.get<bank>(tmp).parentGroup;
-        while (parent && m_map[parent].stage != Stage::SplitGroup) {
-            ASSERT(!m_map[tmp].assigned); // Only the root of the register-group should have an assignment
-            tmp = parent;
-            parent = m_map.get<bank>(tmp).parentGroup;
-        }
         return tmp;
     }
 
     Tmp groupForReg(Tmp tmp)
     {
-        ASSERT(tmp.isGP() || tmp.isFP());
-        return tmp.isGP() ? groupForReg<GP>(tmp) : groupForReg<FP>(tmp);
+        return tmp;
     }
 
     template<Bank bank>
@@ -1305,27 +1295,6 @@ private:
 #endif
     }
 
-    template<typename Func, size_t inlineCapacity>
-    IterationStatus forEachTmpInGroup(Tmp grp, Vector<Tmp, inlineCapacity>& worklist, const Func& func)
-    {
-        ASSERT(worklist.isEmpty());
-        worklist.append(grp);
-
-        while (!worklist.isEmpty()) {
-            Tmp tmp = worklist.takeLast();
-            TmpData& data = m_map[tmp];
-
-            if (data.isGroup()) {
-                worklist.append(data.subGroup1);
-                worklist.append(data.subGroup0);
-            } else if (func(tmp) == IterationStatus::Done) {
-                worklist.shrink(0);
-                return IterationStatus::Done;
-            }
-        }
-        return IterationStatus::Continue;
-    }
-
     void coalesceWithPinnedRegisters()
     {
         // If a Tmp is in a pinned register's coalescables set, that means the
@@ -1346,9 +1315,18 @@ private:
     }
 
     template <Bank bank>
-    void finalizeGroups()
+    GroupsData finalizeGroups()
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::finalizeGroups"_s);
+
+        static constexpr uint32_t noGroup = GroupsData::noGroup;
+        GroupsData result;
+        result.tmpToGroup.resize(Tmp::absoluteIndexEnd(m_code, bank));
+        result.tmpToGroup.fill(noGroup);
+
+        auto absIdx = [](Tmp tmp) {
+            return AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
+        };
 
         struct Move {
             Tmp tmp0, tmp1;
@@ -1360,8 +1338,8 @@ private:
             }
         };
         Vector<Move> moves;
-        Vector<Tmp, 8> worklist0, worklist1;
 
+        // Sort coalescables by Tmp index for merge-scan in hasConflict.
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             ASSERT(!tmp.isReg());
             TmpData& data = m_map.get<bank>(tmp);
@@ -1369,17 +1347,10 @@ private:
                 ASSERT(assignedReg(tmp) && m_code.isPinned(assignedReg(tmp)));
                 return; // Already coalesced with a pinned register
             }
-            std::ranges::sort(data.coalescables, [this](const auto& a, const auto& b) {
-                    if (a.moveCost != b.moveCost)
-                        return a.moveCost > b.moveCost;
-                    // Favor coalescing shorter live ranges.
-                    auto aSize = m_map.get<bank>(a.tmp).liveRange.size();
-                    auto bSize = m_map.get<bank>(b.tmp).liveRange.size();
-                    if (aSize != bSize)
-                        return aSize < bSize;
-                    return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
+            std::ranges::sort(data.coalescables, [](const auto& a, const auto& b) {
+                return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
             });
-            for (auto& with : m_map[tmp].coalescables) {
+            for (auto& with : data.coalescables) {
                 if (tmp.tmpIndex(bank) < with.tmp.tmpIndex(bank))
                     moves.append({ tmp, with.tmp, with.moveCost });
             }
@@ -1388,186 +1359,241 @@ private:
         std::ranges::sort(moves, [](auto& a, auto& b) {
                 if (a.cost != b.cost)
                     return a.cost > b.cost;
-                if (a.tmp0.tmpIndex(bank) != b.tmp1.tmpIndex(bank))
-                    return a.tmp0.tmpIndex(bank) < a.tmp0.tmpIndex(bank);
+                if (a.tmp0.tmpIndex(bank) != b.tmp0.tmpIndex(bank))
+                    return a.tmp0.tmpIndex(bank) < b.tmp0.tmpIndex(bank);
                 ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
                 return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
         });
 
-        auto hasConflict = [this, &worklist0, &worklist1](Tmp group0, Tmp group1) {
-            bool conflicts = false;
-            forEachTmpInGroup(group0, worklist0, [&](Tmp tmp0) {
-                ASSERT(!conflicts);
-                TmpData& data0 = m_map.get<bank>(tmp0);
-                ASSERT(!data0.subGroup0 && !data0.subGroup1);
-                forEachTmpInGroup(group1, worklist1, [&](Tmp tmp1) {
-                    ASSERT(!conflicts);
-                    ASSERT(tmp0 != tmp1);
-                    TmpData& data1 = m_map.get<bank>(tmp1);
-                    if (!data0.coalescables.containsIf([tmp1](auto& with) { return with.tmp == tmp1; })
-                        && data0.liveRange.overlaps(data1.liveRange)) {
-                        conflicts = true;
-                        return IterationStatus::Done;
-                    }
-                    return IterationStatus::Continue;
-                });
-                return conflicts ? IterationStatus::Done : IterationStatus::Continue;
-            });
-            return conflicts;
+        auto hasConflict = [&](Tmp t0, Tmp t1) {
+            uint32_t idx0 = result.tmpToGroup[absIdx(t0)];
+            uint32_t idx1 = result.tmpToGroup[absIdx(t1)];
+
+            // Quick-reject via merged LiveRange overlap.
+            LiveRange& range0 = (idx0 != noGroup)
+                ? result.groups[idx0].mergedLiveRange
+                : m_map.get<bank>(t0).liveRange;
+            LiveRange& range1 = (idx1 != noGroup)
+                ? result.groups[idx1].mergedLiveRange
+                : m_map.get<bank>(t1).liveRange;
+            if (!range0.overlaps(range1))
+                return false;
+
+            // Sorted merge-scan: for each leaf a in group0,
+            // merge-scan a's sorted coalescables against group1's
+            // sorted members. Pairs that are coalescable are
+            // skipped; remaining pairs are checked for live range
+            // overlap.
+            Tmp singletons[2] = { t0, t1 };
+            const Tmp* members0 = (idx0 != noGroup)
+                ? result.groups[idx0].members.begin()
+                : &singletons[0];
+            size_t size0 = (idx0 != noGroup)
+                ? result.groups[idx0].members.size() : 1;
+            const Tmp* members1 = (idx1 != noGroup)
+                ? result.groups[idx1].members.begin()
+                : &singletons[1];
+            size_t size1 = (idx1 != noGroup)
+                ? result.groups[idx1].members.size() : 1;
+
+            for (size_t i = 0; i < size0; i++) {
+                Tmp a = members0[i];
+                TmpData& dataA = m_map.get<bank>(a);
+                auto cIt = dataA.coalescables.begin();
+                auto cEnd = dataA.coalescables.end();
+
+                for (size_t j = 0; j < size1; j++) {
+                    Tmp b = members1[j];
+                    ASSERT(a != b);
+                    // Advance coalescable iterator past b.
+                    while (cIt != cEnd
+                        && cIt->tmp.tmpIndex(bank) < b.tmpIndex(bank))
+                        ++cIt;
+                    if (cIt != cEnd && cIt->tmp == b)
+                        continue; // Coalescable pair, skip
+                    if (dataA.liveRange.overlaps(
+                            m_map.get<bank>(b).liveRange))
+                        return true;
+                }
+            }
+            return false;
         };
 
-        auto addSubGroup = [this](Tmp group, TmpData& groupData, Tmp& subGroupField, Tmp subGroup) {
-            TmpData& subGroupData = m_map.get<bank>(subGroup);
-            subGroupField = subGroup;
-            subGroupData.parentGroup = group;
-            subGroupData.stage = Stage::Coalesced;
-
-            groupData.liveRange = LiveRange::merge(groupData.liveRange, subGroupData.liveRange);
-            groupData.useDefCost += subGroupData.useDefCost;
-            if (!groupData.preferredReg)
-                groupData.preferredReg = subGroupData.preferredReg;
-
-            Width defWidth, useWidth;
-            defWidth = std::max(m_tmpWidth.defWidth(group), m_tmpWidth.defWidth(subGroup));
-            useWidth = std::max(m_tmpWidth.useWidth(group), m_tmpWidth.useWidth(subGroup));
-            m_tmpWidth.setWidths(group, useWidth, defWidth);
+        auto mergeSortedMembers = [](Vector<Tmp>& dst, Vector<Tmp>& src) {
+            Vector<Tmp> merged;
+            merged.reserveInitialCapacity(dst.size() + src.size());
+            auto ai = dst.begin(), ae = dst.end();
+            auto bi = src.begin(), be = src.end();
+            while (ai != ae && bi != be) {
+                if (ai->tmpIndex() < bi->tmpIndex())
+                    merged.append(*ai++);
+                else
+                    merged.append(*bi++);
+            }
+            while (ai != ae)
+                merged.append(*ai++);
+            while (bi != be)
+                merged.append(*bi++);
+            dst = WTF::move(merged);
         };
 
         for (Move& move : moves) {
             dataLogLnIf(verbose(), "Processing move: ", move);
-            Tmp group0 = groupForReg<bank>(move.tmp0);
-            Tmp group1 = groupForReg<bank>(move.tmp1);
-            if (group0 == group1) {
-                dataLogLnIf(verbose(), "Already grouped transitively into ", group0);
+            uint32_t grpIdx0 = result.tmpToGroup[absIdx(move.tmp0)];
+            uint32_t grpIdx1 = result.tmpToGroup[absIdx(move.tmp1)];
+
+            // Already in same group?
+            if (grpIdx0 != noGroup && grpIdx0 == grpIdx1) {
+                dataLogLnIf(verbose(), "Already grouped");
                 continue;
             }
-            if (!hasConflict(group0, group1)) {
-                Tmp newGrp = m_code.newTmp(bank);
-                TmpData newGrpData;
-                m_tmpWidth.setWidths(newGrp, Width8, Width8);
 
-                addSubGroup(newGrp, newGrpData, newGrpData.subGroup0, group0);
-                addSubGroup(newGrp, newGrpData, newGrpData.subGroup1, group1);
-                newGrpData.validate();
-                m_map.append(newGrp, newGrpData);
-                dataLogLnIf(verbose(), "Created group ", newGrp, ": ", m_map.get<bank>(newGrp));
+            if (!hasConflict(move.tmp0, move.tmp1)) {
+                if (grpIdx0 == noGroup && grpIdx1 == noGroup) {
+                    // Two singletons: create new group.
+                    uint32_t newIdx = result.groups.size();
+                    GroupInfo newGroup;
+                    Tmp a = move.tmp0, b = move.tmp1;
+                    if (a.tmpIndex(bank) > b.tmpIndex(bank))
+                        std::swap(a, b);
+                    newGroup.members.reserveInitialCapacity(2);
+                    newGroup.members.append(a);
+                    newGroup.members.append(b);
+                    newGroup.mergedLiveRange = LiveRange::merge(
+                        m_map.get<bank>(a).liveRange,
+                        m_map.get<bank>(b).liveRange);
+                    result.groups.append(WTF::move(newGroup));
+                    result.tmpToGroup[absIdx(move.tmp0)] = newIdx;
+                    result.tmpToGroup[absIdx(move.tmp1)] = newIdx;
+                    dataLogLnIf(verbose(), "Created group ", newIdx,
+                        ": { ", a, ", ", b, " }");
+                } else if (grpIdx0 != noGroup
+                    && grpIdx1 != noGroup) {
+                    // Two different groups: merge smaller into
+                    // larger (union-by-size).
+                    uint32_t largerIdx = grpIdx0;
+                    uint32_t smallerIdx = grpIdx1;
+                    if (result.groups[largerIdx].members.size()
+                        < result.groups[smallerIdx].members.size())
+                        std::swap(largerIdx, smallerIdx);
+
+                    GroupInfo& larger = result.groups[largerIdx];
+                    GroupInfo& smaller = result.groups[smallerIdx];
+
+                    for (Tmp member : smaller.members)
+                        result.tmpToGroup[absIdx(member)] = largerIdx;
+
+                    mergeSortedMembers(larger.members,
+                        smaller.members);
+                    larger.mergedLiveRange = LiveRange::merge(
+                        larger.mergedLiveRange,
+                        smaller.mergedLiveRange);
+                    smaller.members.clear();
+                    smaller.mergedLiveRange = LiveRange();
+                    dataLogLnIf(verbose(), "Merged group ",
+                        smallerIdx, " into ", largerIdx);
+                } else {
+                    // One singleton, one group.
+                    uint32_t groupIdx = (grpIdx0 != noGroup)
+                        ? grpIdx0 : grpIdx1;
+                    Tmp singleton = (grpIdx0 != noGroup)
+                        ? move.tmp1 : move.tmp0;
+
+                    GroupInfo& group = result.groups[groupIdx];
+                    result.tmpToGroup[absIdx(singleton)] = groupIdx;
+
+                    // Insert into sorted position.
+                    auto pos = std::lower_bound(
+                        group.members.begin(), group.members.end(),
+                        singleton,
+                        [](Tmp a, Tmp b) {
+                            return a.tmpIndex(bank)
+                                < b.tmpIndex(bank);
+                        });
+                    group.members.insert(
+                        pos - group.members.begin(), singleton);
+
+                    group.mergedLiveRange = LiveRange::merge(
+                        group.mergedLiveRange,
+                        m_map.get<bank>(singleton).liveRange);
+                    dataLogLnIf(verbose(), "Added ", singleton,
+                        " to group ", groupIdx);
+                }
             }
         }
         if (verbose()) {
-            m_code.forEachTmp<bank>([&](Tmp tmp) {
-                TmpData& data = m_map.get<bank>(tmp);
-                if (!data.parentGroup && data.isGroup()) {
-                    dataLog("Group: ", tmp, " = { ");
-                    CommaPrinter comma;
-                    forEachTmpInGroup(tmp, worklist0, [&comma](Tmp member) {
-                        dataLog(comma, member);
-                        return IterationStatus::Continue;
-                    });
-                    dataLogLn(" }");
-                }
-            });
+            for (size_t i = 0; i < result.groups.size(); i++) {
+                if (result.groups[i].members.isEmpty())
+                    continue;
+                dataLog("Group ", i, ": { ");
+                CommaPrinter comma;
+                for (Tmp member : result.groups[i].members)
+                    dataLog(comma, member);
+                dataLogLn(" }");
+            }
         }
+        return result;
     }
 
-    // After finalizeGroups has built binary trees of coalesced Tmps,
-    // rewrite all instructions to reference the group root directly.
-    // This allows the existing split strategies (trySplitAroundClobbers,
-    // trySplitIntraBlock) to operate on the merged live range instead
-    // of splitting along arbitrary binary tree boundaries.
+    // After finalizeGroups has built flat groups of coalesced Tmps,
+    // create root Tmps and rewrite all instructions to reference
+    // the group root directly. This allows the existing split
+    // strategies to operate on the merged live range.
     template<Bank bank>
-    void rewriteGroupInstructions()
+    void rewriteGroupInstructions(GroupsData& groupsData)
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::rewriteGroupInstructions"_s);
 
-        Vector<Tmp, 8> worklist;
+        static constexpr uint32_t noGroup = GroupsData::noGroup;
 
-        // Collect stats before clearing group structure.
-        m_code.forEachTmp<bank>([&](Tmp tmp) {
-            TmpData& data = m_map.get<bank>(tmp);
-            if (!data.isGroup() || data.parentGroup)
-                return; // Not a root group
+        auto absIdx = [](Tmp tmp) {
+            return AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
+        };
+
+        // Create one root Tmp per final group and compute
+        // aggregate TmpWidth, useDefCost, LiveRange.
+        for (auto& group : groupsData.groups) {
+            if (group.members.isEmpty())
+                continue;
+
             m_stats[bank].numGroupsCreated++;
-            forEachTmpInGroup(tmp, worklist, [&](Tmp leaf) {
+
+            Tmp root = m_code.newTmp(bank);
+            Width useW = Width8, defW = Width8;
+            float cost = 0;
+            Reg preferred;
+            for (Tmp member : group.members) {
                 m_stats[bank].numGroupTmpsCoalesced++;
-                auto leafIndex = AbsoluteTmpMapper<bank>::absoluteIndex(leaf);
-                if (m_useCounts.isConstDef<bank>(leafIndex))
+                auto memberIdx = absIdx(member);
+                if (m_useCounts.isConstDef<bank>(memberIdx))
                     m_stats[bank].numConstDefTmpsMerged++;
-                return IterationStatus::Continue;
-            });
-        });
+                TmpData& memberData = m_map.get<bank>(member);
+                useW = std::max(useW,
+                    m_tmpWidth.useWidth(member));
+                defW = std::max(defW,
+                    m_tmpWidth.defWidth(member));
+                cost += memberData.useDefCost;
+                if (!preferred)
+                    preferred = memberData.preferredReg;
+                memberData.stage = Stage::Coalesced;
+            }
+            m_tmpWidth.setWidths(root, useW, defW);
 
-        // Propagate external coalescables to the group root and
-        // update reverse pointers. This is optional — without it
-        // we lose coalescing opportunities between merged groups
-        // and external Tmps but the allocator is still correct.
-        // Must happen before clearing group structure so
-        // forEachTmpInGroup and groupForReg still work.
-        static constexpr bool propagateCoalescables = false;
-        static constexpr bool updateUseDefCost = true;
-        if constexpr (propagateCoalescables) {
-            m_code.forEachTmp<bank>([&](Tmp tmp) {
-                TmpData& data = m_map.get<bank>(tmp);
-                if (!data.isGroup() || data.parentGroup)
-                    return; // Not a root group
+            m_map.append(root, TmpData());
+            TmpData& rootData = m_map.get<bank>(root);
+            rootData.useDefCost = cost;
+            rootData.liveRange = group.mergedLiveRange;
+            rootData.preferredReg = preferred;
+            rootData.validate();
 
-                Vector<Tmp, 8> leaves;
-                forEachTmpInGroup(tmp, worklist, [&](Tmp leaf) {
-                    leaves.append(leaf);
-                    return IterationStatus::Continue;
-                });
-
-                for (Tmp leaf : leaves) {
-                    TmpData& leafData = m_map.get<bank>(leaf);
-                    for (auto& edge : leafData.coalescables) {
-                        Tmp target = edge.tmp;
-                        Tmp targetGroup = groupForReg<bank>(target);
-                        if (targetGroup == tmp)
-                            continue; // Internal edge — handled during rewrite
-
-                        // External edge: propagate to root's coalescables.
-                        bool merged = false;
-                        for (auto& rootEdge : data.coalescables) {
-                            if (rootEdge.tmp == targetGroup) {
-                                rootEdge.moveCost += edge.moveCost;
-                                merged = true;
-                                break;
-                            }
-                        }
-                        if (!merged)
-                            data.coalescables.append({ targetGroup, edge.moveCost });
-
-                        // Update the external Tmp's coalescable to point
-                        // to the root instead of the leaf.
-                        TmpData& targetData = m_map.get<bank>(target);
-                        for (auto& targetEdge : targetData.coalescables) {
-                            if (targetEdge.tmp == leaf) {
-                                targetEdge.tmp = tmp;
-                                break;
-                            }
-                        }
-                        // Deduplicate: merge any entries in target pointing
-                        // to the same root.
-                        for (size_t i = 0; i < targetData.coalescables.size(); i++) {
-                            if (targetData.coalescables[i].tmp != tmp)
-                                continue;
-                            for (size_t j = i + 1; j < targetData.coalescables.size(); ) {
-                                if (targetData.coalescables[j].tmp == tmp) {
-                                    targetData.coalescables[i].moveCost += targetData.coalescables[j].moveCost;
-                                    targetData.coalescables.removeAt(j);
-                                } else
-                                    j++;
-                            }
-                            break;
-                        }
-                    }
-                }
-            });
+            group.root = root;
+            dataLogLnIf(verbose(), "Created root ", root,
+                " for group with ", group.members.size(),
+                " members");
         }
 
-        // Rewrite instructions and nop self-Moves.
-        // When nop'ing a self-Move, subtract its cost from the
-        // merged Tmp's useDefCost (the Move contributed frequency
-        // to both the source use and dest def).
+        // Rewrite instructions: replace member Tmps with root.
+        // Nop self-Moves and adjust useDefCost.
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
                 bool maybeCoalescable = mayBeCoalescable(inst);
@@ -1576,23 +1602,27 @@ private:
                         return;
                     if (t.bank() != bank)
                         return;
-                    Tmp group = groupForReg<bank>(t);
-                    if (group != t) {
-                        if (m_map.get<bank>(t).hasColdUse)
-                            m_map.get<bank>(group).hasColdUse = true;
-                        t = group;
-                    }
+                    uint32_t idx = groupsData.tmpToGroup[absIdx(t)];
+                    if (idx == noGroup)
+                        return;
+                    GroupInfo& group = groupsData.groups[idx];
+                    if (group.members.isEmpty())
+                        return;
+                    Tmp root = group.root;
+                    ASSERT(root);
+                    if (m_map.get<bank>(t).hasColdUse)
+                        m_map.get<bank>(root).hasColdUse = true;
+                    t = root;
                 });
-                if (maybeCoalescable && inst.args[0].tmp() == inst.args[1].tmp()) {
+                if (maybeCoalescable
+                    && inst.args[0].tmp() == inst.args[1].tmp()) {
                     Tmp tmp = inst.args[0].tmp();
-                    if (updateUseDefCost && !tmp.isReg()) {
+                    if (!tmp.isReg()) {
                         float freq = adjustedBlockFrequency(block);
                         TmpData& tmpData = m_map.get<bank>(tmp);
-                        // FIXME: When block frequency overflows to +Inf (deeply nested loops),
-                        // useDefCost saturates at +Inf and we can't subtract from it without
-                        // producing NaN. We skip the subtraction here, but this means useDefCost
-                        // stays +Inf even if all uses were coalesced moves. Consider recomputing
-                        // useDefCost from scratch after the rewrite.
+                        // FIXME: When block frequency overflows
+                        // to +Inf, useDefCost saturates at +Inf
+                        // and we can't subtract without NaN.
                         if (std::isfinite(tmpData.useDefCost)) {
                             tmpData.useDefCost -= freq;
                             tmpData.useDefCost -= freq;
@@ -1605,15 +1635,7 @@ private:
                 }
             }
         }
-
-        // Clear group structure so isGroup() returns false.
-        m_code.forEachTmp<bank>([&](Tmp tmp) {
-            TmpData& data = m_map.get<bank>(tmp);
-            if (!data.isGroup() || data.parentGroup)
-                return; // Not a root group
-            data.subGroup0 = Tmp();
-            data.subGroup1 = Tmp();
-        });
+        // groupsData is discarded by the caller.
     }
 
     template<Bank bank>
@@ -1732,7 +1754,7 @@ private:
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             ASSERT(!tmp.isReg());
             TmpData& tmpData = m_map.get<bank>(tmp);
-            if (tmpData.parentGroup)
+            if (tmpData.stage == Stage::Coalesced)
                 return;
             if (tmpData.liveRange.intervals().isEmpty())
                 return;
@@ -1796,7 +1818,7 @@ private:
         // If we couldn't allocate tmp, allow it to split next time.
         Stage nextStage = Stage::TrySplit;
         // If we already know splitting won't be profitable, skip it.
-        if (!tmpData.isGroup() && tmpData.liveRange.size() < splitMinRangeSize)
+        if (tmpData.liveRange.size() < splitMinRangeSize)
             nextStage = Stage::Spill;
         setStageAndEnqueue(tmp, tmpData, nextStage);
     }
@@ -1844,33 +1866,12 @@ private:
         };
 
         ScalarRegisterSet alreadyAttempted;
-        if (eagerGroupsExhaustiveSearch) {
-            Vector<Tmp, 8> worklist;
-            // FIXME: this will check coalescables within the group, which is wasteful and common.
-            // But without doing this, we won't try to coalescables between partially split groups.
-            IterationStatus status = forEachTmpInGroup(tmp, worklist, [&](Tmp member) {
-                for (auto& with : m_map.get<bank>(member).coalescables) {
-                    Reg r = assignedReg<bank>(with.tmp);
-                    if (r) {
-                        if (tryAllocateToReg(r))
-                            return IterationStatus::Done;
-                        alreadyAttempted.add(r, IgnoreVectors);
-                    }
-                }
-                return IterationStatus::Continue;
-            });
-            if (status == IterationStatus::Done) {
-                ASSERT(tmpData.assigned);
-                return true;
-            }
-        } else {
-            for (auto& with : tmpData.coalescables) {
-                Reg r = m_map.get<bank>(with.tmp).assigned;
-                if (r) {
-                    if (tryAllocateToReg(r))
-                        return true;
-                    alreadyAttempted.add(r, IgnoreVectors);
-                }
+        for (auto& with : tmpData.coalescables) {
+            Reg r = m_map.get<bank>(with.tmp).assigned;
+            if (r) {
+                if (tryAllocateToReg(r))
+                    return true;
+                alreadyAttempted.add(r, IgnoreVectors);
             }
         }
         ASSERT(!assignedReg<bank>(tmp));
@@ -2017,19 +2018,6 @@ private:
         if (trySplitAroundClobbers<bank>(tmp, tmpData))
             return true;
         return trySplitIntraBlock<bank>(tmp, tmpData);
-    }
-
-    template<Bank bank>
-    bool trySplitGroup(Tmp tmp, TmpData& tmpData)
-    {
-        if (!tmpData.isGroup())
-            return false;
-        tmpData.stage = Stage::SplitGroup;
-        setStageAndEnqueue(tmpData.subGroup0, m_map.get<bank>(tmpData.subGroup0), Stage::TryAllocate);
-        setStageAndEnqueue(tmpData.subGroup1, m_map.get<bank>(tmpData.subGroup1), Stage::TryAllocate);
-        dataLogLnIf(verbose(), "Split (group) ", tmp);
-        tmpData.validate();
-        return true;
     }
 
     template<Bank bank>
@@ -2308,7 +2296,6 @@ private:
     {
         RELEASE_ASSERT(tmpData.spillCost() != unspillableCost);
         ASSERT(tmpData.assigned == Reg());
-        ASSERT(!tmpData.isGroup()); // Should have been split
         ASSERT(groupForReg(tmp) == tmp);
         tmpData.stage = Stage::Spilled;
 
