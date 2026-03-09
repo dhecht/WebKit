@@ -2214,6 +2214,7 @@ private:
 
         SplitMetadata* metadata = nullptr;
         Vector<Tmp*, 8> tmpPtrs;
+        Vector<std::pair<Tmp*, Point>, 4> coldUsePtrs;
         size_t cursor = 0;
 
         size_t numIntervals = tmpData.liveRange.intervals().size();
@@ -2226,15 +2227,21 @@ private:
                 Point lastDefPoint = 0;
                 Interval cluster = { };
                 tmpPtrs.shrink(0);
+                coldUsePtrs.shrink(0);
 
                 remaining = forEachUseDefWithin(tmp, remaining, cursor, [&](Point point, Inst& inst) {
                     inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
-                        if (t == tmp && !Arg::isColdUse(role)) {
+                        if (t == tmp) {
                             Point early = point + PointOffsets::Early;
-                            tmpPtrs.append(&t);
-                            if (Arg::isAnyDef(role))
-                                lastDefPoint = early; // Remember where the fixup store to spill is needed
-                            cluster |= intervalForTiming(early, Arg::timing(role));
+                            Interval timingInterval = intervalForTiming(early, Arg::timing(role));
+                            if (Arg::isColdUse(role))
+                                coldUsePtrs.append({ &t, timingInterval.begin() });
+                            else {
+                                tmpPtrs.append(&t);
+                                if (Arg::isAnyDef(role))
+                                    lastDefPoint = early; // Remember where the fixup store to spill is needed
+                                cluster |= timingInterval;
+                            }
                         }
                     });
                 });
@@ -2258,11 +2265,18 @@ private:
 
                     BasicBlock* block = findBlockContainingPoint(cluster.begin());
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
+                    TmpData& clusterData = m_map.get<bank>(clusterTmp);
                     m_stats[bank].numSplitIntraBlockClusterTmps++;
                     for (auto& ptr : tmpPtrs)
                         *ptr = clusterTmp; // Within this cluster, use clusterTmp rather than Tmp
+                    for (auto& [ptr, point] : coldUsePtrs) {
+                        if (cluster.contains(point)) { // Exclude coldUses before or after the cluster
+                            *ptr = clusterTmp;
+                            clusterData.hasColdUse = true;
+                        }
+                    }
                     metadata->splits.append({ clusterTmp, lastDefPoint });
-                    setStageAndEnqueue(clusterTmp, m_map.get<bank>(clusterTmp), Stage::TryAllocate);
+                    setStageAndEnqueue(clusterTmp, clusterData, Stage::TryAllocate);
                 }
             } while (remaining);
         }
