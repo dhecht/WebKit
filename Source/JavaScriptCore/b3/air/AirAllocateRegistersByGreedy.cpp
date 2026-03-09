@@ -575,6 +575,7 @@ struct TmpData {
         ASSERT(!(spillSlot && assigned));
         ASSERT(!!assigned == (stage == Stage::Assigned));
         ASSERT(liveRange.intervals().isEmpty() == !liveRange.size());
+        ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled);
         ASSERT_IMPLIES(stage == Stage::Spilled, spillCost() != unspillableCost);
     }
 
@@ -1562,6 +1563,7 @@ private:
             Width useW = Width8, defW = Width8;
             float cost = 0;
             Reg preferred;
+            bool hasColdUse = false;
             for (Tmp member : group.members) {
                 m_stats[bank].numGroupTmpsCoalesced++;
                 auto memberIdx = absIdx(member);
@@ -1575,6 +1577,7 @@ private:
                 cost += memberData.useDefCost;
                 if (!preferred)
                     preferred = memberData.preferredReg;
+                hasColdUse |= memberData.hasColdUse;
                 memberData.stage = Stage::Coalesced;
             }
             m_tmpWidth.setWidths(root, useW, defW);
@@ -1584,6 +1587,7 @@ private:
             rootData.useDefCost = cost;
             rootData.liveRange = group.mergedLiveRange;
             rootData.preferredReg = preferred;
+            rootData.hasColdUse = hasColdUse;
             rootData.validate();
 
             group.root = root;
@@ -1610,8 +1614,6 @@ private:
                         return;
                     Tmp root = group.root;
                     ASSERT(root);
-                    if (m_map.get<bank>(t).hasColdUse)
-                        m_map.get<bank>(root).hasColdUse = true;
                     t = root;
                 });
                 if (maybeCoalescable
