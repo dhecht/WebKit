@@ -648,7 +648,7 @@ struct SplitMetadata {
 };
 
 struct GroupInfo {
-    Vector<Tmp> members; // sorted by Tmp index within bank
+    Vector<Tmp> members;
     LiveRange mergedLiveRange;
     Tmp root; // set in rewriteGroupInstructions
 };
@@ -1380,11 +1380,9 @@ private:
             if (!range0.overlaps(range1))
                 return false;
 
-            // Sorted merge-scan: for each leaf a in group0,
-            // merge-scan a's sorted coalescables against group1's
-            // sorted members. Pairs that are coalescable are
-            // skipped; remaining pairs are checked for live range
-            // overlap.
+            // For each pair (a, b) across the two groups,
+            // binary-search a's sorted coalescables for b.
+            // If not coalescable, check live range overlap.
             Tmp singletons[2] = { t0, t1 };
             const Tmp* members0 = (idx0 != noGroup)
                 ? result.groups[idx0].members.begin()
@@ -1397,45 +1395,32 @@ private:
             size_t size1 = (idx1 != noGroup)
                 ? result.groups[idx1].members.size() : 1;
 
+            auto isCoalescable = [](const auto& coalescables, Tmp target) {
+                auto it = std::lower_bound(
+                    coalescables.begin(), coalescables.end(),
+                    target,
+                    [](const auto& edge, Tmp t) {
+                        return edge.tmp.tmpIndex(bank)
+                            < t.tmpIndex(bank);
+                    });
+                return it != coalescables.end()
+                    && it->tmp == target;
+            };
+
             for (size_t i = 0; i < size0; i++) {
                 Tmp a = members0[i];
                 TmpData& dataA = m_map.get<bank>(a);
-                auto cIt = dataA.coalescables.begin();
-                auto cEnd = dataA.coalescables.end();
-
                 for (size_t j = 0; j < size1; j++) {
                     Tmp b = members1[j];
                     ASSERT(a != b);
-                    // Advance coalescable iterator past b.
-                    while (cIt != cEnd
-                        && cIt->tmp.tmpIndex(bank) < b.tmpIndex(bank))
-                        ++cIt;
-                    if (cIt != cEnd && cIt->tmp == b)
-                        continue; // Coalescable pair, skip
+                    if (isCoalescable(dataA.coalescables, b))
+                        continue;
                     if (dataA.liveRange.overlaps(
                             m_map.get<bank>(b).liveRange))
                         return true;
                 }
             }
             return false;
-        };
-
-        auto mergeSortedMembers = [](Vector<Tmp>& dst, Vector<Tmp>& src) {
-            Vector<Tmp> merged;
-            merged.reserveInitialCapacity(dst.size() + src.size());
-            auto ai = dst.begin(), ae = dst.end();
-            auto bi = src.begin(), be = src.end();
-            while (ai != ae && bi != be) {
-                if (ai->tmpIndex() < bi->tmpIndex())
-                    merged.append(*ai++);
-                else
-                    merged.append(*bi++);
-            }
-            while (ai != ae)
-                merged.append(*ai++);
-            while (bi != be)
-                merged.append(*bi++);
-            dst = WTF::move(merged);
         };
 
         for (Move& move : moves) {
@@ -1454,20 +1439,16 @@ private:
                     // Two singletons: create new group.
                     uint32_t newIdx = result.groups.size();
                     GroupInfo newGroup;
-                    Tmp a = move.tmp0, b = move.tmp1;
-                    if (a.tmpIndex(bank) > b.tmpIndex(bank))
-                        std::swap(a, b);
                     newGroup.members.reserveInitialCapacity(2);
-                    newGroup.members.append(a);
-                    newGroup.members.append(b);
+                    newGroup.members.append(move.tmp0);
+                    newGroup.members.append(move.tmp1);
                     newGroup.mergedLiveRange = LiveRange::merge(
-                        m_map.get<bank>(a).liveRange,
-                        m_map.get<bank>(b).liveRange);
+                        m_map.get<bank>(move.tmp0).liveRange,
+                        m_map.get<bank>(move.tmp1).liveRange);
                     result.groups.append(WTF::move(newGroup));
                     result.tmpToGroup[absIdx(move.tmp0)] = newIdx;
                     result.tmpToGroup[absIdx(move.tmp1)] = newIdx;
-                    dataLogLnIf(verbose(), "Created group ", newIdx,
-                        ": { ", a, ", ", b, " }");
+                    dataLogLnIf(verbose(), "Created group ", newIdx);
                 } else if (grpIdx0 != noGroup
                     && grpIdx1 != noGroup) {
                     // Two different groups: merge smaller into
@@ -1484,8 +1465,7 @@ private:
                     for (Tmp member : smaller.members)
                         result.tmpToGroup[absIdx(member)] = largerIdx;
 
-                    mergeSortedMembers(larger.members,
-                        smaller.members);
+                    larger.members.appendVector(smaller.members);
                     larger.mergedLiveRange = LiveRange::merge(
                         larger.mergedLiveRange,
                         smaller.mergedLiveRange);
@@ -1502,18 +1482,7 @@ private:
 
                     GroupInfo& group = result.groups[groupIdx];
                     result.tmpToGroup[absIdx(singleton)] = groupIdx;
-
-                    // Insert into sorted position.
-                    auto pos = std::lower_bound(
-                        group.members.begin(), group.members.end(),
-                        singleton,
-                        [](Tmp a, Tmp b) {
-                            return a.tmpIndex(bank)
-                                < b.tmpIndex(bank);
-                        });
-                    group.members.insert(
-                        pos - group.members.begin(), singleton);
-
+                    group.members.append(singleton);
                     group.mergedLiveRange = LiveRange::merge(
                         group.mergedLiveRange,
                         m_map.get<bank>(singleton).liveRange);
