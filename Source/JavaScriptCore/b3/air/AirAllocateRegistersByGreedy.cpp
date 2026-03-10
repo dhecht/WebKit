@@ -647,9 +647,206 @@ struct SplitMetadata {
     Vector<Split> splits;
 };
 
+// Maps sub-intervals to sets of Tmps live during each sub-interval.
+// Used to accelerate conflict detection during group coalescing.
+//
+// Example: Tmp A live [0,10), Tmp B live [5,15):
+//   [0, 5)  -> {A}
+//   [5, 10) -> {A, B}
+//   [10,15) -> {B}
+class OccupancyMap {
+public:
+    static constexpr unsigned cacheLinesPerNode = 3;
+    using OccupancyIntervalSet = IntervalSet<Point, uint32_t, cacheLinesPerNode>;
+
+    OccupancyMap() = default;
+    OccupancyMap(const OccupancyMap&) = delete;
+    OccupancyMap& operator=(const OccupancyMap&) = delete;
+
+    void add(Tmp tmp, const LiveRange& range)
+    {
+        for (auto& interval : range.intervals())
+            addInterval(tmp, interval);
+    }
+
+    Interval bounds() const { return m_bounds; }
+    size_t numSubIntervals() const { return m_numSubIntervals; }
+
+    // Check if any Tmp in the map conflicts with a singleton.
+    // A conflict means a non-coalescable Tmp has an overlapping live range.
+    template<typename IsCoalescable>
+    bool hasConflictSingletonVsGroup(
+        const LiveRange& singletonRange,
+        const Vector<TmpData::CoalescableWith>& coalescables,
+        const IsCoalescable& isCoalescable) const
+    {
+        for (auto& interval : singletonRange.intervals()) {
+            Point cursor = interval.begin();
+            while (cursor < interval.end()) {
+                auto found = m_intervals.find({ cursor, interval.end() });
+                if (!found)
+                    break;
+                auto [subIv, setIdx] = *found;
+                const auto& tmpSet = m_tmpSets[setIdx];
+
+                // Pigeonhole: more Tmps in set than coalescable partners means conflict.
+                if (tmpSet.size() > coalescables.size())
+                    return true;
+
+                for (Tmp t : tmpSet) {
+                    if (!isCoalescable(coalescables, t))
+                        return true;
+                }
+                cursor = subIv.end();
+            }
+        }
+        return false;
+    }
+
+    // Check if any Tmp in map `a` conflicts with any Tmp in map `b`.
+    // Iterates the smaller map and queries the larger.
+    template<typename GetCoalescables, typename IsCoalescable>
+    static bool hasConflictGroupVsGroup(
+        const OccupancyMap& a,
+        const OccupancyMap& b,
+        const GetCoalescables& getCoalescables,
+        const IsCoalescable& isCoalescable)
+    {
+        const OccupancyMap* smaller = &a;
+        const OccupancyMap* larger = &b;
+        if (a.m_numSubIntervals > b.m_numSubIntervals)
+            std::swap(smaller, larger);
+
+        for (auto [sIv, sSetIdx] : smaller->m_intervals) {
+            const auto& sSet = smaller->m_tmpSets[sSetIdx];
+            Point cursor = sIv.begin();
+            while (cursor < sIv.end()) {
+                auto found = larger->m_intervals.find({ cursor, sIv.end() });
+                if (!found)
+                    break;
+                auto [lIv, lSetIdx] = *found;
+                const auto& lSet = larger->m_tmpSets[lSetIdx];
+
+                for (Tmp aTmp : sSet) {
+                    const auto& coalescables = getCoalescables(aTmp);
+                    if (lSet.size() > coalescables.size())
+                        return true;
+                    for (Tmp bTmp : lSet) {
+                        if (!isCoalescable(coalescables, bTmp))
+                            return true;
+                    }
+                }
+                cursor = lIv.end();
+            }
+        }
+        return false;
+    }
+
+    LiveRange buildMergedLiveRange() const
+    {
+        LiveRange result;
+        Interval current = { };
+        for (auto [subIv, setIdx] : m_intervals) {
+            UNUSED_PARAM(setIdx);
+            if (!current)
+                current = subIv;
+            else if (subIv.begin() <= current.end())
+                current |= subIv;
+            else {
+                result.append(current);
+                current = subIv;
+            }
+        }
+        if (current)
+            result.append(current);
+        return result;
+    }
+
+private:
+    void addInterval(Tmp tmp, Interval interval)
+    {
+        updateBounds(interval);
+        Point cursor = interval.begin();
+        while (cursor < interval.end()) {
+            auto found = m_intervals.find({ cursor, interval.end() });
+
+            if (!found) {
+                // No overlap: insert remainder.
+                m_intervals.insert({ cursor, interval.end() }, allocTmpSet(tmp));
+                m_numSubIntervals++;
+                break;
+            }
+
+            auto [subIv, setIdx] = *found;
+
+            // Gap before the overlapping sub-interval.
+            if (cursor < subIv.begin()) {
+                m_intervals.insert({ cursor, subIv.begin() }, allocTmpSet(tmp));
+                m_numSubIntervals++;
+            }
+
+            // Erase the existing sub-interval; we'll re-insert split pieces.
+            m_intervals.erase(subIv);
+            m_numSubIntervals--;
+
+            // Part before cursor keeps the original set.
+            if (subIv.begin() < cursor) {
+                m_intervals.insert({ subIv.begin(), cursor }, setIdx);
+                m_numSubIntervals++;
+            }
+
+            // Overlapping part gets tmp added.
+            Point overlapEnd = std::min(interval.end(), subIv.end());
+            m_intervals.insert({ std::max(cursor, subIv.begin()), overlapEnd }, cloneAndAdd(setIdx, tmp));
+            m_numSubIntervals++;
+
+            // Part after overlap keeps the original set.
+            if (overlapEnd < subIv.end()) {
+                m_intervals.insert({ overlapEnd, subIv.end() }, setIdx);
+                m_numSubIntervals++;
+            }
+
+            cursor = overlapEnd;
+        }
+    }
+
+    void updateBounds(Interval interval)
+    {
+        if (!m_bounds) {
+            m_bounds = interval;
+            return;
+        }
+        Point newBegin = std::min(m_bounds.begin(), interval.begin());
+        Point newEnd = std::max(m_bounds.end(), interval.end());
+        m_bounds = { newBegin, newEnd };
+    }
+
+    uint32_t allocTmpSet(Tmp tmp)
+    {
+        uint32_t idx = m_tmpSets.size();
+        m_tmpSets.append(Vector<Tmp>());
+        m_tmpSets.last().append(tmp);
+        return idx;
+    }
+
+    uint32_t cloneAndAdd(uint32_t setIdx, Tmp tmp)
+    {
+        Vector<Tmp> newSet = m_tmpSets[setIdx]; // copy before potential realloc
+        newSet.append(tmp);
+        uint32_t newIdx = m_tmpSets.size();
+        m_tmpSets.append(WTF::move(newSet));
+        return newIdx;
+    }
+
+    OccupancyIntervalSet m_intervals;
+    Vector<Vector<Tmp>> m_tmpSets;
+    size_t m_numSubIntervals { 0 };
+    Interval m_bounds;
+};
+
 struct GroupInfo {
     Vector<Tmp> members;
-    LiveRange mergedLiveRange;
+    std::unique_ptr<OccupancyMap> occupancyMap;
     Tmp root; // set in rewriteGroupInstructions
 };
 
@@ -1351,11 +1548,6 @@ private:
             std::ranges::sort(data.coalescables, [](const auto& a, const auto& b) {
                 return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
             });
-            if (data.coalescables.size()) {
-                m_stats[bank].numTmpsWithCoalescables++;
-                m_stats[bank].numCoalescableEdges += data.coalescables.size();
-                m_stats[bank].maxCoalescableSize = std::max(m_stats[bank].maxCoalescableSize, static_cast<unsigned>(data.coalescables.size()));
-            }
             for (auto& with : data.coalescables) {
                 if (tmp.tmpIndex(bank) < with.tmp.tmpIndex(bank))
                     moves.append({ tmp, with.tmp, with.moveCost });
@@ -1371,81 +1563,76 @@ private:
                 return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
         });
 
+        auto isCoalescable = [](const auto& coalescables, Tmp target) {
+            auto it = std::lower_bound(
+                coalescables.begin(), coalescables.end(),
+                target,
+                [](const auto& edge, Tmp t) {
+                    return edge.tmp.tmpIndex(bank)
+                        < t.tmpIndex(bank);
+                });
+            return it != coalescables.end()
+                && it->tmp == target;
+        };
+
         auto hasConflict = [&](Tmp t0, Tmp t1) {
             m_stats[bank].numHasConflictCalls++;
 
             uint32_t idx0 = result.tmpToGroup[absIdx(t0)];
             uint32_t idx1 = result.tmpToGroup[absIdx(t1)];
+            bool isGroup0 = (idx0 != noGroup);
+            bool isGroup1 = (idx1 != noGroup);
 
-            // Quick-reject via merged LiveRange overlap.
-            LiveRange& range0 = (idx0 != noGroup)
-                ? result.groups[idx0].mergedLiveRange
-                : m_map.get<bank>(t0).liveRange;
-            LiveRange& range1 = (idx1 != noGroup)
-                ? result.groups[idx1].mergedLiveRange
-                : m_map.get<bank>(t1).liveRange;
-            if (!range0.overlaps(range1)) {
+            if (!isGroup0 && !isGroup1) {
+                // Singleton vs singleton: they share a move
+                // so they're coalescable. No conflict possible.
+                m_stats[bank].numPairsChecked++;
+                return false;
+            }
+
+            if (isGroup0 && isGroup1) {
+                // Group vs group: use OccupancyMaps.
+                auto& map0 = *result.groups[idx0].occupancyMap;
+                auto& map1 = *result.groups[idx1].occupancyMap;
+                size_t size0 = result.groups[idx0].members.size();
+                size_t size1 = result.groups[idx1].members.size();
+                m_stats[bank].numPairsChecked += size0 * size1;
+
+                if (!map0.bounds().overlaps(map1.bounds())) {
+                    m_stats[bank].numQuickRejectHits++;
+                    return false;
+                }
+
+                auto getCoalescables = [&](Tmp tmp) -> const Vector<TmpData::CoalescableWith>& {
+                    return m_map.get<bank>(tmp).coalescables;
+                };
+
+                return OccupancyMap::hasConflictGroupVsGroup(
+                    map0, map1, getCoalescables, isCoalescable);
+            }
+
+            // Singleton vs group.
+            uint32_t groupIdx = isGroup0 ? idx0 : idx1;
+            Tmp singleton = isGroup0 ? t1 : t0;
+            auto& map = *result.groups[groupIdx].occupancyMap;
+            TmpData& singletonData = m_map.get<bank>(singleton);
+            m_stats[bank].numPairsChecked += result.groups[groupIdx].members.size();
+
+            // Quick-reject via bounds.
+            ASSERT(!singletonData.liveRange.intervals().isEmpty());
+            Interval singletonBounds = {
+                singletonData.liveRange.intervals().first().begin(),
+                singletonData.liveRange.intervals().last().end()
+            };
+            if (!singletonBounds.overlaps(map.bounds())) {
                 m_stats[bank].numQuickRejectHits++;
                 return false;
             }
 
-            // For each pair (a, b) across the two groups,
-            // binary-search a's sorted coalescables for b.
-            // If not coalescable, check live range overlap.
-            Tmp singletons[2] = { t0, t1 };
-            const Tmp* members0 = (idx0 != noGroup)
-                ? result.groups[idx0].members.begin()
-                : &singletons[0];
-            size_t size0 = (idx0 != noGroup)
-                ? result.groups[idx0].members.size() : 1;
-            const Tmp* members1 = (idx1 != noGroup)
-                ? result.groups[idx1].members.begin()
-                : &singletons[1];
-            size_t size1 = (idx1 != noGroup)
-                ? result.groups[idx1].members.size() : 1;
-
-            m_stats[bank].numPairsChecked += size0 * size1;
-
-            bool hasSingleton = (size0 == 1 || size1 == 1);
-            if (hasSingleton)
-                m_stats[bank].numPairsWithSingleton += size0 * size1;
-            else
-                m_stats[bank].numPairsGroupVsGroup += size0 * size1;
-
-            auto isCoalescable = [](const auto& coalescables, Tmp target) {
-                auto it = std::lower_bound(
-                    coalescables.begin(), coalescables.end(),
-                    target,
-                    [](const auto& edge, Tmp t) {
-                        return edge.tmp.tmpIndex(bank)
-                            < t.tmpIndex(bank);
-                    });
-                return it != coalescables.end()
-                    && it->tmp == target;
-            };
-
-            for (size_t i = 0; i < size0; i++) {
-                Tmp a = members0[i];
-                TmpData& dataA = m_map.get<bank>(a);
-                for (size_t j = 0; j < size1; j++) {
-                    Tmp b = members1[j];
-                    ASSERT(a != b);
-                    bool bsResult = isCoalescable(dataA.coalescables, b);
-                    bool linResult = dataA.coalescables.containsIf([b](const auto& edge) { return edge.tmp == b; });
-                    RELEASE_ASSERT(bsResult == linResult);
-                    if (bsResult)
-                        continue;
-                    m_stats[bank].numOverlapsChecked++;
-                    if (hasSingleton)
-                        m_stats[bank].numOverlapsWithSingleton++;
-                    else
-                        m_stats[bank].numOverlapsGroupVsGroup++;
-                    if (dataA.liveRange.overlaps(
-                            m_map.get<bank>(b).liveRange))
-                        return true;
-                }
-            }
-            return false;
+            return map.hasConflictSingletonVsGroup(
+                singletonData.liveRange,
+                singletonData.coalescables,
+                isCoalescable);
         };
 
         for (Move& move : moves) {
@@ -1461,15 +1648,15 @@ private:
 
             if (!hasConflict(move.tmp0, move.tmp1)) {
                 if (grpIdx0 == noGroup && grpIdx1 == noGroup) {
-                    // Two singletons: create new group.
+                    // Two singletons: create new group with OccupancyMap.
                     uint32_t newIdx = result.groups.size();
                     GroupInfo newGroup;
                     newGroup.members.reserveInitialCapacity(2);
                     newGroup.members.append(move.tmp0);
                     newGroup.members.append(move.tmp1);
-                    newGroup.mergedLiveRange = LiveRange::merge(
-                        m_map.get<bank>(move.tmp0).liveRange,
-                        m_map.get<bank>(move.tmp1).liveRange);
+                    newGroup.occupancyMap = std::unique_ptr<OccupancyMap>(new OccupancyMap());
+                    newGroup.occupancyMap->add(move.tmp0, m_map.get<bank>(move.tmp0).liveRange);
+                    newGroup.occupancyMap->add(move.tmp1, m_map.get<bank>(move.tmp1).liveRange);
                     result.groups.append(WTF::move(newGroup));
                     result.tmpToGroup[absIdx(move.tmp0)] = newIdx;
                     result.tmpToGroup[absIdx(move.tmp1)] = newIdx;
@@ -1488,15 +1675,14 @@ private:
                     GroupInfo& larger = result.groups[largerIdx];
                     GroupInfo& smaller = result.groups[smallerIdx];
 
-                    for (Tmp member : smaller.members)
+                    for (Tmp member : smaller.members) {
                         result.tmpToGroup[absIdx(member)] = largerIdx;
+                        larger.occupancyMap->add(member, m_map.get<bank>(member).liveRange);
+                    }
 
                     larger.members.appendVector(smaller.members);
-                    larger.mergedLiveRange = LiveRange::merge(
-                        larger.mergedLiveRange,
-                        smaller.mergedLiveRange);
                     smaller.members.clear();
-                    smaller.mergedLiveRange = LiveRange();
+                    smaller.occupancyMap = nullptr;
                     m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(larger.members.size()));
                     dataLogLnIf(verbose(), "Merged group ",
                         smallerIdx, " into ", largerIdx);
@@ -1510,9 +1696,7 @@ private:
                     GroupInfo& group = result.groups[groupIdx];
                     result.tmpToGroup[absIdx(singleton)] = groupIdx;
                     group.members.append(singleton);
-                    group.mergedLiveRange = LiveRange::merge(
-                        group.mergedLiveRange,
-                        m_map.get<bank>(singleton).liveRange);
+                    group.occupancyMap->add(singleton, m_map.get<bank>(singleton).liveRange);
                     m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(group.members.size()));
                     dataLogLnIf(verbose(), "Added ", singleton,
                         " to group ", groupIdx);
@@ -1582,7 +1766,7 @@ private:
             m_map.append(root, TmpData());
             TmpData& rootData = m_map.get<bank>(root);
             rootData.useDefCost = cost;
-            rootData.liveRange = group.mergedLiveRange;
+            rootData.liveRange = group.occupancyMap->buildMergedLiveRange();
             rootData.preferredReg = preferred;
             rootData.hasColdUse = hasColdUse;
             rootData.validate();
