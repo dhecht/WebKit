@@ -66,7 +66,7 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numConstDefTmpsMerged)                 \
     macro(numHasConflictCalls)                    \
     macro(numQuickRejectHits)                    \
-    macro(numPairsChecked)                       \
+    macro(numOccupancyChecks)                     \
     macro(maxGroupSize)                          \
     macro(numTryEvictCalls)                      \
     macro(numTryEvictSucceeded)                  \
