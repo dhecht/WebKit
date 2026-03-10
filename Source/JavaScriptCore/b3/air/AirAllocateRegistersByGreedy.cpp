@@ -676,8 +676,8 @@ public:
         initSpillCosts<GP>();
         initSpillCosts<FP>();
         coalesceWithPinnedRegisters();
-        coalesceGroups<GP>();
-        coalesceGroups<FP>();
+        coalesceTmps<GP>();
+        coalesceTmps<FP>();
 
         dataLogLnIf(verbose(), "State before greedy register allocation:\n", *this);
 
@@ -1616,9 +1616,9 @@ private:
     // Build groups of coalescable Tmps, create representative Tmps, and
     // rewrite all instructions to reference the group representative directly.
     template<Bank bank>
-    void coalesceGroups()
+    void coalesceTmps()
     {
-        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::coalesceGroups"_s);
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::coalesceTmps"_s);
 
         static constexpr uint32_t noGroup = UINT32_MAX;
         Vector<AffinityGroup> groups;
@@ -1626,7 +1626,7 @@ private:
 
         buildCoalescingGroups<bank>(groups, tmpToGroup);
         createGroupRepresentatives<bank>(groups);
-        rewriteCoalescedInstructions<bank>(groups, tmpToGroup);
+        rewriteCoalescedTmps<bank>(groups, tmpToGroup);
     }
 
     // Phase 1: Sort coalescables for binary search. Collect and sort moves.
@@ -1804,7 +1804,7 @@ private:
     // Phase 3: Replace member Tmps with representative in all instructions.
     // Nop self-Moves and adjust useDefCost for removed moves.
     template<Bank bank>
-    void rewriteCoalescedInstructions(
+    void rewriteCoalescedTmps(
         const Vector<AffinityGroup>& groups,
         const IndexMap<Tmp::AbsolutelyIndexed<bank>, uint32_t>& tmpToGroup)
     {
