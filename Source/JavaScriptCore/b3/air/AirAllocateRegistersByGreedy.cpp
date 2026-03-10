@@ -1724,6 +1724,7 @@ private:
         ASSERT(!tmp.isReg());
         ASSERT(&tmpData == &m_map[tmp]);
         ASSERT(m_map[tmp].liveRange.size()); // 0-size ranges don't need a register and spillCost() depends on size() != 0
+        ASSERT(tmpData.stage != Stage::Coalesced && tmpData.stage != Stage::Spilled && tmpData.stage != Stage::Replaced);
         ASSERT(stage == Stage::Unspillable || stage == Stage::TryAllocate || stage == Stage::TrySplit || stage == Stage::Spill);
         ASSERT(groupForReg(tmp) == tmp); // Only the roots of register-groups should be enqueued
         tmpData.validate();
