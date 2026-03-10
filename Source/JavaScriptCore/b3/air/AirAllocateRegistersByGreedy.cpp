@@ -1481,10 +1481,13 @@ private:
 
     // Represents a group of coalescable Tmps with their combined liveness information.
     class AffinityGroup {
+        WTF_MAKE_NONCOPYABLE(AffinityGroup);
     public:
-        AffinityGroup() = default;
-        AffinityGroup(const AffinityGroup&) = delete;
-        AffinityGroup& operator=(const AffinityGroup&) = delete;
+        AffinityGroup(Tmp tmp0, const LiveRange& range0, Tmp tmp1, const LiveRange& range1)
+        {
+            addMember(tmp0, range0);
+            addMember(tmp1, range1);
+        }
         AffinityGroup(AffinityGroup&&) = default;
         AffinityGroup& operator=(AffinityGroup&&) = default;
 
@@ -1545,10 +1548,7 @@ private:
         m_stats[bank].numOccupancyChecks++;
 
         auto newIndex = groups.size();
-        groups.append(AffinityGroup());
-        AffinityGroup& newGroup = groups[newIndex];
-        newGroup.addMember(tmp0, m_map.get<bank>(tmp0).liveRange);
-        newGroup.addMember(tmp1, m_map.get<bank>(tmp1).liveRange);
+        groups.constructAndAppend(tmp0, m_map.get<bank>(tmp0).liveRange, tmp1, m_map.get<bank>(tmp1).liveRange);
         tmpToGroup[tmp0] = newIndex;
         tmpToGroup[tmp1] = newIndex;
         m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, 2u);
