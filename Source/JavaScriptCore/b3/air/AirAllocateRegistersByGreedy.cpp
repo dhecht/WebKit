@@ -1437,7 +1437,10 @@ private:
                 for (size_t j = 0; j < size1; j++) {
                     Tmp b = members1[j];
                     ASSERT(a != b);
-                    if (isCoalescable(dataA.coalescables, b))
+                    bool bsResult = isCoalescable(dataA.coalescables, b);
+                    bool linResult = dataA.coalescables.containsIf([b](const auto& edge) { return edge.tmp == b; });
+                    RELEASE_ASSERT(bsResult == linResult);
+                    if (bsResult)
                         continue;
                     m_stats[bank].numOverlapsChecked++;
                     if (dataA.liveRange.overlaps(
