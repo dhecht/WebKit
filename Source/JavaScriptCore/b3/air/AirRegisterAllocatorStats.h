@@ -64,10 +64,17 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numGroupsCreated)                      \
     macro(numGroupMovesCoalesced)                \
     macro(numConstDefTmpsMerged)                 \
+    macro(numTmpsWithCoalescables)               \
+    macro(numCoalescableEdges)                   \
+    macro(maxCoalescableSize)                    \
     macro(numHasConflictCalls)                    \
     macro(numQuickRejectHits)                    \
     macro(numPairsChecked)                       \
     macro(numOverlapsChecked)                    \
+    macro(numPairsWithSingleton)                  \
+    macro(numOverlapsWithSingleton)               \
+    macro(numPairsGroupVsGroup)                   \
+    macro(numOverlapsGroupVsGroup)                \
     macro(maxGroupSize)                          \
     macro(numTryEvictCalls)                      \
     macro(numTryEvictSucceeded)                  \

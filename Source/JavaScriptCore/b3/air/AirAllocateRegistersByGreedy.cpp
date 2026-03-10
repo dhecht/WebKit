@@ -1358,6 +1358,11 @@ private:
                     return aSize < bSize;
                 return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
             });
+            if (data.coalescables.size()) {
+                m_stats[bank].numTmpsWithCoalescables++;
+                m_stats[bank].numCoalescableEdges += data.coalescables.size();
+                m_stats[bank].maxCoalescableSize = std::max(m_stats[bank].maxCoalescableSize, static_cast<unsigned>(data.coalescables.size()));
+            }
             for (auto& with : data.coalescables) {
                 if (tmp.tmpIndex(bank) < with.tmp.tmpIndex(bank))
                     moves.append({ tmp, with.tmp, with.moveCost });
@@ -1419,6 +1424,12 @@ private:
 
             m_stats[bank].numPairsChecked += size0 * size1;
 
+            bool hasSingleton = (size0 == 1 || size1 == 1);
+            if (hasSingleton)
+                m_stats[bank].numPairsWithSingleton += size0 * size1;
+            else
+                m_stats[bank].numPairsGroupVsGroup += size0 * size1;
+
             auto isCoalescable = [](const auto& coalescables, Tmp target) {
                 auto it = std::lower_bound(
                     coalescables.begin(), coalescables.end(),
@@ -1443,6 +1454,10 @@ private:
                     if (bsResult)
                         continue;
                     m_stats[bank].numOverlapsChecked++;
+                    if (hasSingleton)
+                        m_stats[bank].numOverlapsWithSingleton++;
+                    else
+                        m_stats[bank].numOverlapsGroupVsGroup++;
                     if (dataA.liveRange.overlaps(
                             m_map.get<bank>(b).liveRange))
                         return true;
