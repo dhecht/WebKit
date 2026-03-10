@@ -1536,37 +1536,84 @@ private:
     using TmpGroupMap = IndexMap<Tmp::Indexed<bank>, GroupIndex>;
     static constexpr GroupIndex noGroup = std::numeric_limits<GroupIndex>::max();
 
-    // Check whether two Tmps (or their groups) can be coalesced without conflicts.
+    // Two singletons sharing a move are always coalescable. Create a new group.
     template<Bank bank>
-    bool canCoalesce(Tmp tmp0, Tmp tmp1,
-        const TmpGroupMap<bank>& tmpToGroup,
-        const Vector<AffinityGroup>& groups)
+    void coalesceSingletons(Tmp tmp0, Tmp tmp1,
+        Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    {
+        m_stats[bank].numHasConflictCalls++;
+        m_stats[bank].numOccupancyChecks++;
+
+        auto newIndex = groups.size();
+        groups.append(AffinityGroup());
+        AffinityGroup& newGroup = groups[newIndex];
+        newGroup.addMember(tmp0, m_map.get<bank>(tmp0).liveRange);
+        newGroup.addMember(tmp1, m_map.get<bank>(tmp1).liveRange);
+        tmpToGroup[tmp0] = newIndex;
+        tmpToGroup[tmp1] = newIndex;
+        m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, 2u);
+        dataLogLnIf(verbose(), "Created group ", newIndex);
+    }
+
+    // Try to add a singleton Tmp to an existing group. Returns true if successful.
+    template<Bank bank>
+    bool tryCoalesceSingletonWithGroup(Tmp singleton, GroupIndex groupIndex,
+        Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         m_stats[bank].numHasConflictCalls++;
 
-        auto groupIndex0 = tmpToGroup[tmp0];
-        auto groupIndex1 = tmpToGroup[tmp1];
-        bool inGroup0 = groupIndex0 != noGroup;
-        bool inGroup1 = groupIndex1 != noGroup;
+        const auto& group = groups[groupIndex];
+        TmpData& singletonData = m_map.get<bank>(singleton);
 
-        if (!inGroup0 && !inGroup1) {
-            // Singleton vs singleton: they share a move so they're coalescable.
-            m_stats[bank].numOccupancyChecks++;
-            return true;
+        ASSERT(!singletonData.liveRange.intervals().isEmpty());
+        Interval singletonBounds = {
+            singletonData.liveRange.intervals().first().begin(),
+            singletonData.liveRange.intervals().last().end()
+        };
+        if (!singletonBounds.overlaps(group.bounds())) {
+            m_stats[bank].numQuickRejectHits++;
+        } else {
+            auto isCoalescableFunc = isCoalescable<bank>;
+            bool conflict = false;
+            group.forEachOverlappingTmpSet(singletonData.liveRange, [&](const Vector<Tmp>& tmpSet) -> IterationStatus {
+                m_stats[bank].numOccupancyChecks++;
+                if (tmpSet.size() > singletonData.coalescables.size()) {
+                    conflict = true;
+                    return IterationStatus::Done;
+                }
+                for (Tmp member : tmpSet) {
+                    if (!isCoalescableFunc(singletonData.coalescables, member)) {
+                        conflict = true;
+                        return IterationStatus::Done;
+                    }
+                }
+                return IterationStatus::Continue;
+            });
+            if (conflict)
+                return false;
         }
 
-        auto isCoalescableFunc = isCoalescable<bank>;
+        groups[groupIndex].addMember(singleton, singletonData.liveRange);
+        tmpToGroup[singleton] = groupIndex;
+        m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(groups[groupIndex].size()));
+        dataLogLnIf(verbose(), "Added ", singleton, " to group ", groupIndex);
+        return true;
+    }
 
-        if (inGroup0 && inGroup1) {
-            // Group vs group: merge groups if no contained live ranges interfere.
-            const auto& group0 = groups[groupIndex0];
-            const auto& group1 = groups[groupIndex1];
+    // Try to merge two groups. Returns true if successful.
+    template<Bank bank>
+    bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1,
+        Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    {
+        m_stats[bank].numHasConflictCalls++;
 
-            if (!group0.bounds().overlaps(group1.bounds())) {
-                m_stats[bank].numQuickRejectHits++;
-                return true;
-            }
+        const auto& group0 = groups[groupIndex0];
+        const auto& group1 = groups[groupIndex1];
 
+        if (!group0.bounds().overlaps(group1.bounds())) {
+            m_stats[bank].numQuickRejectHits++;
+        } else {
+            auto isCoalescableFunc = isCoalescable<bank>;
             bool conflict = false;
             AffinityGroup::forEachOverlappingPair(group0, group1, [&](const Vector<Tmp>& smallerSet, const Vector<Tmp>& largerSet) -> IterationStatus {
                 m_stats[bank].numOccupancyChecks++;
@@ -1574,7 +1621,6 @@ private:
                     const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
                     if (largerSet.size() > coalescables.size()) {
                         conflict = true; // via pigeonhole principle
-
                         return IterationStatus::Done;
                     }
                     for (Tmp otherTmp : largerSet) {
@@ -1586,41 +1632,26 @@ private:
                 }
                 return IterationStatus::Continue;
             });
-            return !conflict;
+            if (conflict)
+                return false;
         }
 
-        // Singleton vs group.
-        auto groupIndex = inGroup0 ? groupIndex0 : groupIndex1;
-        Tmp singleton = inGroup0 ? tmp1 : tmp0;
-        const auto& group = groups[groupIndex];
-        TmpData& singletonData = m_map.get<bank>(singleton);
+        // Merge smaller into larger (union-by-size).
+        auto largerIndex = groupIndex0;
+        auto smallerIndex = groupIndex1;
+        if (groups[largerIndex].size() < groups[smallerIndex].size())
+            std::swap(largerIndex, smallerIndex);
 
-        ASSERT(!singletonData.liveRange.intervals().isEmpty());
-        Interval singletonBounds = {
-            singletonData.liveRange.intervals().first().begin(),
-            singletonData.liveRange.intervals().last().end()
+        for (Tmp member : groups[smallerIndex].members())
+            tmpToGroup[member] = largerIndex;
+
+        auto getLiveRange = [&](Tmp tmp) -> const LiveRange& {
+            return m_map.get<bank>(tmp).liveRange;
         };
-        if (!singletonBounds.overlaps(group.bounds())) {
-            m_stats[bank].numQuickRejectHits++;
-            return true;
-        }
-
-        bool conflict = false;
-        group.forEachOverlappingTmpSet(singletonData.liveRange, [&](const Vector<Tmp>& tmpSet) -> IterationStatus {
-            m_stats[bank].numOccupancyChecks++;
-            if (tmpSet.size() > singletonData.coalescables.size()) {
-                conflict = true;
-                return IterationStatus::Done;
-            }
-            for (Tmp member : tmpSet) {
-                if (!isCoalescableFunc(singletonData.coalescables, member)) {
-                    conflict = true;
-                    return IterationStatus::Done;
-                }
-            }
-            return IterationStatus::Continue;
-        });
-        return !conflict;
+        groups[largerIndex].mergeFrom(groups[smallerIndex], getLiveRange);
+        m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(groups[largerIndex].size()));
+        dataLogLnIf(verbose(), "Merged group ", smallerIndex, " into ", largerIndex);
+        return true;
     }
 
     // Build groups of coalescable Tmps, create representative Tmps, and
@@ -1680,10 +1711,6 @@ private:
             return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
         });
 
-        auto getLiveRange = [&](Tmp tmp) -> const LiveRange& {
-            return m_map.get<bank>(tmp).liveRange;
-        };
-
         for (Move& move : moves) {
             dataLogLnIf(verbose(), "Processing move: ", move);
             auto groupIndex0 = tmpToGroup[move.tmp0];
@@ -1694,45 +1721,14 @@ private:
                 continue;
             }
 
-            if (canCoalesce<bank>(move.tmp0, move.tmp1, tmpToGroup, groups)) {
-                if (groupIndex0 == noGroup && groupIndex1 == noGroup) {
-                    // Two singletons: create new group.
-                    auto newIndex = groups.size();
-                    groups.append(AffinityGroup());
-                    AffinityGroup& newGroup = groups.last();
-                    newGroup.addMember(move.tmp0, m_map.get<bank>(move.tmp0).liveRange);
-                    newGroup.addMember(move.tmp1, m_map.get<bank>(move.tmp1).liveRange);
-                    tmpToGroup[move.tmp0] = newIndex;
-                    tmpToGroup[move.tmp1] = newIndex;
-                    m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, 2u);
-                    dataLogLnIf(verbose(), "Created group ", newIndex);
-                } else if (groupIndex0 != noGroup && groupIndex1 != noGroup) {
-                    // Two different groups: merge smaller into larger (union-by-size).
-                    auto largerIndex = groupIndex0;
-                    auto smallerIndex = groupIndex1;
-                    if (groups[largerIndex].size() < groups[smallerIndex].size())
-                        std::swap(largerIndex, smallerIndex);
-
-                    AffinityGroup& larger = groups[largerIndex];
-                    AffinityGroup& smaller = groups[smallerIndex];
-
-                    for (Tmp member : smaller.members())
-                        tmpToGroup[member] = largerIndex;
-
-                    larger.mergeFrom(smaller, getLiveRange);
-                    m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(larger.size()));
-                    dataLogLnIf(verbose(), "Merged group ", smallerIndex, " into ", largerIndex);
-                } else {
-                    // One singleton, one group.
-                    auto groupIndex = groupIndex0 != noGroup ? groupIndex0 : groupIndex1;
-                    Tmp singleton = groupIndex0 != noGroup ? move.tmp1 : move.tmp0;
-
-                    AffinityGroup& group = groups[groupIndex];
-                    tmpToGroup[singleton] = groupIndex;
-                    group.addMember(singleton, m_map.get<bank>(singleton).liveRange);
-                    m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(group.size()));
-                    dataLogLnIf(verbose(), "Added ", singleton, " to group ", groupIndex);
-                }
+            if (groupIndex0 == noGroup && groupIndex1 == noGroup)
+                coalesceSingletons<bank>(move.tmp0, move.tmp1, groups, tmpToGroup);
+            else if (groupIndex0 != noGroup && groupIndex1 != noGroup)
+                tryCoalesceGroups<bank>(groupIndex0, groupIndex1, groups, tmpToGroup);
+            else {
+                auto groupIndex = groupIndex0 != noGroup ? groupIndex0 : groupIndex1;
+                Tmp singleton = groupIndex0 != noGroup ? move.tmp1 : move.tmp0;
+                tryCoalesceSingletonWithGroup<bank>(singleton, groupIndex, groups, tmpToGroup);
             }
         }
         if (verbose()) {
