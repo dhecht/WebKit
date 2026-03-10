@@ -1522,18 +1522,22 @@ private:
         LivenessMap m_liveness;
     };
 
+    using GroupIndex = uint32_t;
+    template<Bank bank>
+    using TmpGroupMap = IndexMap<Tmp::Indexed<bank>, GroupIndex>;
+    static constexpr GroupIndex noGroup = std::numeric_limits<GroupIndex>::max();
+
     // Check whether two Tmps (or their groups) can be coalesced without conflicts.
     // Returns true if no conflict is found (i.e. coalescing is safe).
     template<Bank bank>
     bool canCoalesce(Tmp t0, Tmp t1,
-        const IndexMap<Tmp::AbsolutelyIndexed<bank>, uint32_t>& tmpToGroup,
+        const TmpGroupMap<bank>& tmpToGroup,
         const Vector<AffinityGroup>& groups)
     {
-        static constexpr uint32_t noGroup = UINT32_MAX;
         m_stats[bank].numHasConflictCalls++;
 
-        uint32_t idx0 = tmpToGroup[t0];
-        uint32_t idx1 = tmpToGroup[t1];
+        auto idx0 = tmpToGroup[t0];
+        auto idx1 = tmpToGroup[t1];
         bool isGroup0 = (idx0 != noGroup);
         bool isGroup1 = (idx1 != noGroup);
 
@@ -1578,7 +1582,7 @@ private:
         }
 
         // Singleton vs group.
-        uint32_t groupIdx = isGroup0 ? idx0 : idx1;
+        auto groupIdx = isGroup0 ? idx0 : idx1;
         Tmp singleton = isGroup0 ? t1 : t0;
         const auto& group = groups[groupIdx];
         TmpData& singletonData = m_map.get<bank>(singleton);
@@ -1620,9 +1624,8 @@ private:
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::coalesceTmps"_s);
 
-        static constexpr uint32_t noGroup = UINT32_MAX;
         Vector<AffinityGroup> groups;
-        IndexMap<Tmp::AbsolutelyIndexed<bank>, uint32_t> tmpToGroup(Tmp::absoluteIndexEnd(m_code, bank), noGroup);
+        TmpGroupMap<bank> tmpToGroup(Tmp::indexEnd(m_code, bank), noGroup);
 
         buildCoalescingGroups<bank>(groups, tmpToGroup);
         createGroupRepresentatives<bank>(groups);
@@ -1634,10 +1637,8 @@ private:
     template<Bank bank>
     void buildCoalescingGroups(
         Vector<AffinityGroup>& groups,
-        IndexMap<Tmp::AbsolutelyIndexed<bank>, uint32_t>& tmpToGroup)
+        TmpGroupMap<bank>& tmpToGroup)
     {
-        static constexpr uint32_t noGroup = UINT32_MAX;
-
         struct Move {
             Tmp tmp0, tmp1;
             float cost;
@@ -1681,8 +1682,8 @@ private:
 
         for (Move& move : moves) {
             dataLogLnIf(verbose(), "Processing move: ", move);
-            uint32_t grpIdx0 = tmpToGroup[move.tmp0];
-            uint32_t grpIdx1 = tmpToGroup[move.tmp1];
+            auto grpIdx0 = tmpToGroup[move.tmp0];
+            auto grpIdx1 = tmpToGroup[move.tmp1];
 
             // Already in same group?
             if (grpIdx0 != noGroup && grpIdx0 == grpIdx1) {
@@ -1693,7 +1694,7 @@ private:
             if (canCoalesce<bank>(move.tmp0, move.tmp1, tmpToGroup, groups)) {
                 if (grpIdx0 == noGroup && grpIdx1 == noGroup) {
                     // Two singletons: create new group.
-                    uint32_t newIdx = groups.size();
+                    auto newIdx = groups.size();
                     groups.append(AffinityGroup());
                     AffinityGroup& newGroup = groups.last();
                     newGroup.addMember(move.tmp0, m_map.get<bank>(move.tmp0).liveRange);
@@ -1706,8 +1707,8 @@ private:
                     && grpIdx1 != noGroup) {
                     // Two different groups: merge smaller into
                     // larger (union-by-size).
-                    uint32_t largerIdx = grpIdx0;
-                    uint32_t smallerIdx = grpIdx1;
+                    auto largerIdx = grpIdx0;
+                    auto smallerIdx = grpIdx1;
                     if (groups[largerIdx].size()
                         < groups[smallerIdx].size())
                         std::swap(largerIdx, smallerIdx);
@@ -1724,7 +1725,7 @@ private:
                         smallerIdx, " into ", largerIdx);
                 } else {
                     // One singleton, one group.
-                    uint32_t groupIdx = (grpIdx0 != noGroup)
+                    auto groupIdx = (grpIdx0 != noGroup)
                         ? grpIdx0 : grpIdx1;
                     Tmp singleton = (grpIdx0 != noGroup)
                         ? move.tmp1 : move.tmp0;
@@ -1806,9 +1807,8 @@ private:
     template<Bank bank>
     void rewriteCoalescedTmps(
         const Vector<AffinityGroup>& groups,
-        const IndexMap<Tmp::AbsolutelyIndexed<bank>, uint32_t>& tmpToGroup)
+        const TmpGroupMap<bank>& tmpToGroup)
     {
-        static constexpr uint32_t noGroup = UINT32_MAX;
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
                 bool maybeCoalescable = mayBeCoalescable(inst);
@@ -1817,7 +1817,7 @@ private:
                         return;
                     if (t.bank() != bank)
                         return;
-                    uint32_t idx = tmpToGroup[t];
+                    auto idx = tmpToGroup[t];
                     if (idx == noGroup)
                         return;
                     const AffinityGroup& group = groups[idx];
