@@ -1439,6 +1439,7 @@ private:
                     ASSERT(a != b);
                     if (isCoalescable(dataA.coalescables, b))
                         continue;
+                    m_stats[bank].numOverlapsChecked++;
                     if (dataA.liveRange.overlaps(
                             m_map.get<bank>(b).liveRange))
                         return true;
