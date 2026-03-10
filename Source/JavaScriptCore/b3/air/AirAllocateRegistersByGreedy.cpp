@@ -1502,6 +1502,7 @@ private:
                 m_liveness.add(member, getLiveRange(member));
             m_members.appendVector(smaller.m_members);
             smaller.m_members.clear();
+            smaller.m_liveness = LivenessMap();
         }
 
         const Vector<Tmp>& members() const { return m_members; }
@@ -1640,9 +1641,7 @@ private:
     // Phase 1: Sort coalescables for binary search. Collect and sort moves.
     // Iterate moves doing union-find grouping with interference checking.
     template<Bank bank>
-    void buildCoalescingGroups(
-        Vector<AffinityGroup>& groups,
-        TmpGroupMap<bank>& tmpToGroup)
+    void buildCoalescingGroups(Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         struct Move {
             Tmp tmp0, tmp1;
@@ -1673,12 +1672,12 @@ private:
         });
 
         std::ranges::sort(moves, [](auto& a, auto& b) {
-                if (a.cost != b.cost)
-                    return a.cost > b.cost;
-                if (a.tmp0.tmpIndex(bank) != b.tmp0.tmpIndex(bank))
-                    return a.tmp0.tmpIndex(bank) < b.tmp0.tmpIndex(bank);
-                ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
-                return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
+            if (a.cost != b.cost)
+                return a.cost > b.cost;
+            if (a.tmp0.tmpIndex(bank) != b.tmp0.tmpIndex(bank))
+                return a.tmp0.tmpIndex(bank) < b.tmp0.tmpIndex(bank);
+            ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
+            return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
         });
 
         auto getLiveRange = [&](Tmp tmp) -> const LiveRange& {
