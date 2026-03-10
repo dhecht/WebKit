@@ -73,7 +73,45 @@ public:
     static_assert(leafOrder >= 2, "cacheLinesPerNode parameter too small: LeafNode order must be at least 2 for a valid B+ tree");
     static_assert(innerOrder >= 2, "cacheLinesPerNode parameter too small: InnerNode order must be at least 2 for a valid B+ tree");
 
+    WTF_MAKE_NONCOPYABLE(IntervalSet);
+
     IntervalSet() = default;
+
+    IntervalSet(IntervalSet&& other)
+        : m_root(other.m_root)
+        , m_rootInterval(other.m_rootInterval)
+        , m_height(other.m_height)
+#if ASSERT_ENABLED
+        , assertOnlyNumNodes(other.assertOnlyNumNodes)
+#endif
+    {
+        other.m_root = { };
+        other.m_rootInterval = { };
+        other.m_height = 0;
+#if ASSERT_ENABLED
+        other.assertOnlyNumNodes = 0;
+#endif
+    }
+
+    IntervalSet& operator=(IntervalSet&& other)
+    {
+        if (this != &other) {
+            freeAllNodes();
+            m_root = other.m_root;
+            m_rootInterval = other.m_rootInterval;
+            m_height = other.m_height;
+#if ASSERT_ENABLED
+            assertOnlyNumNodes = other.assertOnlyNumNodes;
+#endif
+            other.m_root = { };
+            other.m_rootInterval = { };
+            other.m_height = 0;
+#if ASSERT_ENABLED
+            other.assertOnlyNumNodes = 0;
+#endif
+        }
+        return *this;
+    }
 
     ~IntervalSet()
     {
