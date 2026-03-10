@@ -1340,7 +1340,8 @@ private:
         };
         Vector<Move> moves;
 
-        // Sort coalescables by Tmp index for merge-scan in hasConflict.
+        // Sort coalescables by moveCost (descending) for building the
+        // moves vector in the same order as the old code.
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             ASSERT(!tmp.isReg());
             TmpData& data = m_map.get<bank>(tmp);
@@ -1348,7 +1349,13 @@ private:
                 ASSERT(assignedReg(tmp) && m_code.isPinned(assignedReg(tmp)));
                 return; // Already coalesced with a pinned register
             }
-            std::ranges::sort(data.coalescables, [](const auto& a, const auto& b) {
+            std::ranges::sort(data.coalescables, [this](const auto& a, const auto& b) {
+                if (a.moveCost != b.moveCost)
+                    return a.moveCost > b.moveCost;
+                auto aSize = m_map.get<bank>(a.tmp).liveRange.size();
+                auto bSize = m_map.get<bank>(b.tmp).liveRange.size();
+                if (aSize != bSize)
+                    return aSize < bSize;
                 return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
             });
             for (auto& with : data.coalescables) {
@@ -1357,11 +1364,22 @@ private:
             }
         });
 
+        // Re-sort coalescables by Tmp index for binary search in
+        // hasConflict.
+        m_code.forEachTmp<bank>([&](Tmp tmp) {
+            TmpData& data = m_map.get<bank>(tmp);
+            if (data.stage != Stage::New)
+                return;
+            std::ranges::sort(data.coalescables, [](const auto& a, const auto& b) {
+                return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
+            });
+        });
+
         std::ranges::sort(moves, [](auto& a, auto& b) {
                 if (a.cost != b.cost)
                     return a.cost > b.cost;
-                if (a.tmp0.tmpIndex(bank) != b.tmp0.tmpIndex(bank))
-                    return a.tmp0.tmpIndex(bank) < b.tmp0.tmpIndex(bank);
+                if (a.tmp0.tmpIndex(bank) != b.tmp1.tmpIndex(bank))
+                    return a.tmp0.tmpIndex(bank) < a.tmp0.tmpIndex(bank);
                 ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
                 return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
         });
