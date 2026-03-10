@@ -1385,6 +1385,8 @@ private:
         });
 
         auto hasConflict = [&](Tmp t0, Tmp t1) {
+            m_stats[bank].numHasConflictCalls++;
+
             uint32_t idx0 = result.tmpToGroup[absIdx(t0)];
             uint32_t idx1 = result.tmpToGroup[absIdx(t1)];
 
@@ -1395,8 +1397,10 @@ private:
             LiveRange& range1 = (idx1 != noGroup)
                 ? result.groups[idx1].mergedLiveRange
                 : m_map.get<bank>(t1).liveRange;
-            if (!range0.overlaps(range1))
+            if (!range0.overlaps(range1)) {
+                m_stats[bank].numQuickRejectHits++;
                 return false;
+            }
 
             // For each pair (a, b) across the two groups,
             // binary-search a's sorted coalescables for b.
@@ -1412,6 +1416,8 @@ private:
                 : &singletons[1];
             size_t size1 = (idx1 != noGroup)
                 ? result.groups[idx1].members.size() : 1;
+
+            m_stats[bank].numPairsChecked += size0 * size1;
 
             auto isCoalescable = [](const auto& coalescables, Tmp target) {
                 auto it = std::lower_bound(
@@ -1466,6 +1472,7 @@ private:
                     result.groups.append(WTF::move(newGroup));
                     result.tmpToGroup[absIdx(move.tmp0)] = newIdx;
                     result.tmpToGroup[absIdx(move.tmp1)] = newIdx;
+                    m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, 2u);
                     dataLogLnIf(verbose(), "Created group ", newIdx);
                 } else if (grpIdx0 != noGroup
                     && grpIdx1 != noGroup) {
@@ -1489,6 +1496,7 @@ private:
                         smaller.mergedLiveRange);
                     smaller.members.clear();
                     smaller.mergedLiveRange = LiveRange();
+                    m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(larger.members.size()));
                     dataLogLnIf(verbose(), "Merged group ",
                         smallerIdx, " into ", largerIdx);
                 } else {
@@ -1504,6 +1512,7 @@ private:
                     group.mergedLiveRange = LiveRange::merge(
                         group.mergedLiveRange,
                         m_map.get<bank>(singleton).liveRange);
+                    m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(group.members.size()));
                     dataLogLnIf(verbose(), "Added ", singleton,
                         " to group ", groupIdx);
                 }
