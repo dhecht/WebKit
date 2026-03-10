@@ -1528,32 +1528,30 @@ private:
     static constexpr GroupIndex noGroup = std::numeric_limits<GroupIndex>::max();
 
     // Check whether two Tmps (or their groups) can be coalesced without conflicts.
-    // Returns true if no conflict is found (i.e. coalescing is safe).
     template<Bank bank>
-    bool canCoalesce(Tmp t0, Tmp t1,
+    bool canCoalesce(Tmp tmp0, Tmp tmp1,
         const TmpGroupMap<bank>& tmpToGroup,
         const Vector<AffinityGroup>& groups)
     {
         m_stats[bank].numHasConflictCalls++;
 
-        auto idx0 = tmpToGroup[t0];
-        auto idx1 = tmpToGroup[t1];
-        bool isGroup0 = (idx0 != noGroup);
-        bool isGroup1 = (idx1 != noGroup);
+        auto groupIndex0 = tmpToGroup[tmp0];
+        auto groupIndex1 = tmpToGroup[tmp1];
+        bool inGroup0 = groupIndex0 != noGroup;
+        bool inGroup1 = groupIndex1 != noGroup;
 
-        if (!isGroup0 && !isGroup1) {
-            // Singleton vs singleton: they share a move
-            // so they're coalescable. No conflict possible.
+        if (!inGroup0 && !inGroup1) {
+            // Singleton vs singleton: they share a move so they're coalescable.
             m_stats[bank].numOccupancyChecks++;
             return true;
         }
 
         auto isCoalescableFunc = isCoalescable<bank>;
 
-        if (isGroup0 && isGroup1) {
-            // Group vs group.
-            const auto& group0 = groups[idx0];
-            const auto& group1 = groups[idx1];
+        if (inGroup0 && inGroup1) {
+            // Group vs group: merge groups if no contained live ranges interfere.
+            const auto& group0 = groups[groupIndex0];
+            const auto& group1 = groups[groupIndex1];
 
             if (!group0.bounds().overlaps(group1.bounds())) {
                 m_stats[bank].numQuickRejectHits++;
@@ -1561,16 +1559,17 @@ private:
             }
 
             bool conflict = false;
-            AffinityGroup::forEachOverlappingPair(group0, group1, [&](const Vector<Tmp>& sSet, const Vector<Tmp>& lSet) -> IterationStatus {
+            AffinityGroup::forEachOverlappingPair(group0, group1, [&](const Vector<Tmp>& smallerSet, const Vector<Tmp>& largerSet) -> IterationStatus {
                 m_stats[bank].numOccupancyChecks++;
-                for (Tmp aTmp : sSet) {
-                    const auto& coalescables = m_map.get<bank>(aTmp).coalescables;
-                    if (lSet.size() > coalescables.size()) {
-                        conflict = true;
+                for (Tmp memberTmp : smallerSet) {
+                    const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
+                    if (largerSet.size() > coalescables.size()) {
+                        conflict = true; // via pigeonhole principle
+
                         return IterationStatus::Done;
                     }
-                    for (Tmp bTmp : lSet) {
-                        if (!isCoalescableFunc(coalescables, bTmp)) {
+                    for (Tmp otherTmp : largerSet) {
+                        if (!isCoalescableFunc(coalescables, otherTmp)) {
                             conflict = true;
                             return IterationStatus::Done;
                         }
@@ -1582,12 +1581,11 @@ private:
         }
 
         // Singleton vs group.
-        auto groupIdx = isGroup0 ? idx0 : idx1;
-        Tmp singleton = isGroup0 ? t1 : t0;
-        const auto& group = groups[groupIdx];
+        auto groupIndex = inGroup0 ? groupIndex0 : groupIndex1;
+        Tmp singleton = inGroup0 ? tmp1 : tmp0;
+        const auto& group = groups[groupIndex];
         TmpData& singletonData = m_map.get<bank>(singleton);
 
-        // Quick-reject via bounds.
         ASSERT(!singletonData.liveRange.intervals().isEmpty());
         Interval singletonBounds = {
             singletonData.liveRange.intervals().first().begin(),
@@ -1601,13 +1599,12 @@ private:
         bool conflict = false;
         group.forEachOverlappingTmpSet(singletonData.liveRange, [&](const Vector<Tmp>& tmpSet) -> IterationStatus {
             m_stats[bank].numOccupancyChecks++;
-            // Pigeonhole: more Tmps in set than coalescable partners means conflict.
             if (tmpSet.size() > singletonData.coalescables.size()) {
                 conflict = true;
                 return IterationStatus::Done;
             }
-            for (Tmp t : tmpSet) {
-                if (!isCoalescableFunc(singletonData.coalescables, t)) {
+            for (Tmp member : tmpSet) {
+                if (!isCoalescableFunc(singletonData.coalescables, member)) {
                     conflict = true;
                     return IterationStatus::Done;
                 }
@@ -1682,60 +1679,52 @@ private:
 
         for (Move& move : moves) {
             dataLogLnIf(verbose(), "Processing move: ", move);
-            auto grpIdx0 = tmpToGroup[move.tmp0];
-            auto grpIdx1 = tmpToGroup[move.tmp1];
+            auto groupIndex0 = tmpToGroup[move.tmp0];
+            auto groupIndex1 = tmpToGroup[move.tmp1];
 
-            // Already in same group?
-            if (grpIdx0 != noGroup && grpIdx0 == grpIdx1) {
+            if (groupIndex0 != noGroup && groupIndex0 == groupIndex1) {
                 dataLogLnIf(verbose(), "Already grouped");
                 continue;
             }
 
             if (canCoalesce<bank>(move.tmp0, move.tmp1, tmpToGroup, groups)) {
-                if (grpIdx0 == noGroup && grpIdx1 == noGroup) {
+                if (groupIndex0 == noGroup && groupIndex1 == noGroup) {
                     // Two singletons: create new group.
-                    auto newIdx = groups.size();
+                    auto newIndex = groups.size();
                     groups.append(AffinityGroup());
                     AffinityGroup& newGroup = groups.last();
                     newGroup.addMember(move.tmp0, m_map.get<bank>(move.tmp0).liveRange);
                     newGroup.addMember(move.tmp1, m_map.get<bank>(move.tmp1).liveRange);
-                    tmpToGroup[move.tmp0] = newIdx;
-                    tmpToGroup[move.tmp1] = newIdx;
+                    tmpToGroup[move.tmp0] = newIndex;
+                    tmpToGroup[move.tmp1] = newIndex;
                     m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, 2u);
-                    dataLogLnIf(verbose(), "Created group ", newIdx);
-                } else if (grpIdx0 != noGroup
-                    && grpIdx1 != noGroup) {
-                    // Two different groups: merge smaller into
-                    // larger (union-by-size).
-                    auto largerIdx = grpIdx0;
-                    auto smallerIdx = grpIdx1;
-                    if (groups[largerIdx].size()
-                        < groups[smallerIdx].size())
-                        std::swap(largerIdx, smallerIdx);
+                    dataLogLnIf(verbose(), "Created group ", newIndex);
+                } else if (groupIndex0 != noGroup && groupIndex1 != noGroup) {
+                    // Two different groups: merge smaller into larger (union-by-size).
+                    auto largerIndex = groupIndex0;
+                    auto smallerIndex = groupIndex1;
+                    if (groups[largerIndex].size() < groups[smallerIndex].size())
+                        std::swap(largerIndex, smallerIndex);
 
-                    AffinityGroup& larger = groups[largerIdx];
-                    AffinityGroup& smaller = groups[smallerIdx];
+                    AffinityGroup& larger = groups[largerIndex];
+                    AffinityGroup& smaller = groups[smallerIndex];
 
                     for (Tmp member : smaller.members())
-                        tmpToGroup[member] = largerIdx;
+                        tmpToGroup[member] = largerIndex;
 
                     larger.mergeFrom(smaller, getLiveRange);
                     m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(larger.size()));
-                    dataLogLnIf(verbose(), "Merged group ",
-                        smallerIdx, " into ", largerIdx);
+                    dataLogLnIf(verbose(), "Merged group ", smallerIndex, " into ", largerIndex);
                 } else {
                     // One singleton, one group.
-                    auto groupIdx = (grpIdx0 != noGroup)
-                        ? grpIdx0 : grpIdx1;
-                    Tmp singleton = (grpIdx0 != noGroup)
-                        ? move.tmp1 : move.tmp0;
+                    auto groupIndex = groupIndex0 != noGroup ? groupIndex0 : groupIndex1;
+                    Tmp singleton = groupIndex0 != noGroup ? move.tmp1 : move.tmp0;
 
-                    AffinityGroup& group = groups[groupIdx];
-                    tmpToGroup[singleton] = groupIdx;
+                    AffinityGroup& group = groups[groupIndex];
+                    tmpToGroup[singleton] = groupIndex;
                     group.addMember(singleton, m_map.get<bank>(singleton).liveRange);
                     m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(group.size()));
-                    dataLogLnIf(verbose(), "Added ", singleton,
-                        " to group ", groupIdx);
+                    dataLogLnIf(verbose(), "Added ", singleton, " to group ", groupIndex);
                 }
             }
         }
@@ -1765,7 +1754,8 @@ private:
             m_stats[bank].numGroupsCreated++;
 
             Tmp representative = m_code.newTmp(bank);
-            Width useW = Width8, defW = Width8;
+            Width useWidth = Width8;
+            Width defWidth = Width8;
             float cost = 0;
             Reg preferred;
             bool hasColdUse = false;
@@ -1775,30 +1765,26 @@ private:
                 if (m_useCounts.isConstDef<bank>(memberIdx))
                     m_stats[bank].numConstDefTmpsMerged++;
                 TmpData& memberData = m_map.get<bank>(member);
-                useW = std::max(useW,
-                    m_tmpWidth.useWidth(member));
-                defW = std::max(defW,
-                    m_tmpWidth.defWidth(member));
+                useWidth = std::max(useWidth, m_tmpWidth.useWidth(member));
+                defWidth = std::max(defWidth, m_tmpWidth.defWidth(member));
                 cost += memberData.useDefCost;
                 if (!preferred)
                     preferred = memberData.preferredReg;
                 hasColdUse |= memberData.hasColdUse;
                 memberData.stage = Stage::Coalesced;
             }
-            m_tmpWidth.setWidths(representative, useW, defW);
+            m_tmpWidth.setWidths(representative, useWidth, defWidth);
 
             m_map.append(representative, TmpData());
-            TmpData& repData = m_map.get<bank>(representative);
-            repData.useDefCost = cost;
-            repData.liveRange = group.buildMergedLiveRange();
-            repData.preferredReg = preferred;
-            repData.hasColdUse = hasColdUse;
-            repData.validate();
+            TmpData& representativeData = m_map.get<bank>(representative);
+            representativeData.useDefCost = cost;
+            representativeData.liveRange = group.buildMergedLiveRange();
+            representativeData.preferredReg = preferred;
+            representativeData.hasColdUse = hasColdUse;
+            representativeData.validate();
 
             group.representative = representative;
-            dataLogLnIf(verbose(), "Created representative ", representative,
-                " for group with ", group.size(),
-                " members");
+            dataLogLnIf(verbose(), "Created representative ", representative, " for group with ", group.size(), " members");
         }
     }
 
