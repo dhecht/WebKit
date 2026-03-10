@@ -80,7 +80,7 @@ static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 // conflicts, e.g. when a late use is followed by an early def. Two "gap" points, Pre & Post,
 // exist for each instruction to allow distinguishing e.g. a Tmp being live into a block from
 // a Tmp becoming live due to an early def by the first instruction of the block
-// (and sinilarly for block exits and late use).
+// (and similarly for block exits and late use).
 //
 // Interval: contiguous set of points, represented by a half open interval [begin, end).
 //
@@ -95,13 +95,21 @@ static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 // the register at each Point. Tmps and their associated Intervals can be assigned and
 // evicted to/from the RegisterRange as the register allocation algorithm progresses.
 //
+// AffinityGroup: a set of Tmps connected by move instructions where simultaneously-live
+// members are guaranteed to hold the same value (due to the connecting moves), so their
+// live ranges may overlap and they can still be coalesced into a single representative Tmp.
+//
+// LivenessMap: for an AffinityGroup, tracks which member Tmps are live at each point.
+// Used to accelerate conflict detection during coalescing.
+//
 // Algorithm:
 //
 // 1. Initialization:
 //   a. Define where Points are located in the IR.
 //   b. Run liveness analysis and build a LiveRange for each Tmp (including fixed registers).
 //   c. Run analysis to determine the cost to spill each Tmp.
-//   d. Build metadata related to Tmp coalescing. Eagerly group Tmps that can be coalesced.
+//   d. Coalesce Tmps by building affinity groups from move instructions and replacing
+//      each group's members with a single representative Tmp.
 // 2. Register allocation:
 //   a. Process each Tmp in order of priority. Priority is mostly related to the "stage" of the
 //      Tmp, whether a Tmp has a preferred register, and the size of a Tmp's LiveRange. The idea
@@ -112,9 +120,9 @@ static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 //     - First, simply try to find space where the LiveRange can fit in a RegisterRange.
 //     - If that's not successful, we may evict LiveRanges in favor of a LiveRange with higher
 //       spill cost. The evicted LiveRanges will requeued for further processing.
-//     - If that's not successful, we may split up eagerly coalesced Tmps and process each
-//       subgroup individually. We also try other forms of splitting LiveRanges, which will
-//       produce new Tmps/LiveRanges, some of which may be assignable to registers.
+//     - If that's not successful, we may split LiveRanges, e.g. around register clobbers or
+//       at intra-block boundaries, producing new Tmps/LiveRanges, some of which may be
+//       assignable to registers.
 //     - Finally, if all else fails, the Tmp is spilled and new Tmps for the spill/fill fixups
 //       are queued for processing.
 // 3. Finalization: fixup IR code is inserted to handle Tmps' split ranges and spills.
