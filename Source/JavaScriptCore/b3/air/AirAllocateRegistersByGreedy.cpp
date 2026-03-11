@@ -1539,10 +1539,8 @@ private:
     using TmpGroupMap = IndexMap<Tmp::Indexed<bank>, GroupIndex>;
     static constexpr GroupIndex noGroup = std::numeric_limits<GroupIndex>::max();
 
-    // Two singletons sharing a move are always coalescable. Create a new group.
     template<Bank bank>
-    void coalesceSingletons(Tmp tmp0, Tmp tmp1,
-        Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    void coalesceSingletons(Tmp tmp0, Tmp tmp1, Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         auto newIndex = groups.size();
         groups.constructAndAppend(tmp0, m_map.get<bank>(tmp0).liveRange, tmp1, m_map.get<bank>(tmp1).liveRange);
@@ -1551,10 +1549,8 @@ private:
         dataLogLnIf(verbose(), "Created group ", newIndex);
     }
 
-    // Try to add a singleton Tmp to an existing group. Returns true if successful.
     template<Bank bank>
-    bool tryCoalesceSingletonWithGroup(Tmp singleton, GroupIndex groupIndex,
-        Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    bool tryCoalesceSingletonWithGroup(Tmp singleton, GroupIndex groupIndex, Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         const auto& group = groups[groupIndex];
         TmpData& singletonData = m_map.get<bank>(singleton);
@@ -1571,7 +1567,7 @@ private:
             bool conflict = false;
             group.forEachOverlappingTmpSet(singletonData.liveRange, [&](const Vector<Tmp>& tmpSet) -> IterationStatus {
                 if (tmpSet.size() > singletonData.coalescables.size()) {
-                    conflict = true;
+                    conflict = true; // Pigeonhole principle
                     return IterationStatus::Done;
                 }
                 for (Tmp member : tmpSet) {
@@ -1592,10 +1588,8 @@ private:
         return true;
     }
 
-    // Try to merge two groups. Returns true if successful.
     template<Bank bank>
-    bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1,
-        Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1, Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         const auto& group0 = groups[groupIndex0];
         const auto& group1 = groups[groupIndex1];
@@ -1603,17 +1597,16 @@ private:
         if (!group0.bounds().overlaps(group1.bounds())) {
             m_stats[bank].numQuickRejectHits++;
         } else {
-            auto isCoalescableFunc = isCoalescable<bank>;
             bool conflict = false;
             AffinityGroup::forEachOverlappingPair(group0, group1, [&](const Vector<Tmp>& smallerSet, const Vector<Tmp>& largerSet) -> IterationStatus {
                 for (Tmp memberTmp : smallerSet) {
                     const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
                     if (largerSet.size() > coalescables.size()) {
-                        conflict = true; // via pigeonhole principle
+                        conflict = true; // Pigeonhole principle
                         return IterationStatus::Done;
                     }
                     for (Tmp otherTmp : largerSet) {
-                        if (!isCoalescableFunc(coalescables, otherTmp)) {
+                        if (!isCoalescable<bank>(coalescables, otherTmp)) {
                             conflict = true;
                             return IterationStatus::Done;
                         }
