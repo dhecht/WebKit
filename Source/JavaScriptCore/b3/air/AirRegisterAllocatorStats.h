@@ -60,6 +60,11 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numSplitIntraBlockClusterTmpsSpilled) \
     macro(numSplitIntraBlockLoad)               \
     macro(numSplitIntraBlockStore)              \
+    macro(numGroupTmpsCoalesced)                \
+    macro(numGroupsCreated)                     \
+    macro(numGroupMovesCoalesced)               \
+    macro(numGroupConstDefMerged)               \
+    macro(maxGroupSize)                         \
     macro(numInsts)                             \
 
 class AirAllocateRegistersStats {
