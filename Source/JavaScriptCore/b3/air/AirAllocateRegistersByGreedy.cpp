@@ -1572,18 +1572,14 @@ private:
 
         bool conflict = false;
         AffinityGroup::forEachPairwiseOverlap(group0, group1, [&](const auto& tmpListA, const auto& tmpListB) {
-            const auto* iterateList = &tmpListA;
-            const auto* checkList = &tmpListB;
-            if (iterateList->size() > checkList->size())
-                std::swap(iterateList, checkList);
-            for (Tmp iterateTmp : *iterateList) {
-                const auto& coalescables = m_map.get<bank>(iterateTmp).coalescables;
-                if (checkList->size() > coalescables.size()) {
+            for (Tmp memberTmp : tmpListA) {
+                const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
+                if (tmpListB.size() > coalescables.size()) {
                     conflict = true; // Pigeonhole principle
                     return IterationStatus::Done;
                 }
-                for (Tmp checkTmp : *checkList) {
-                    if (!isInCoalescables<bank>(checkTmp, coalescables)) {
+                for (Tmp otherTmp : tmpListB) {
+                    if (!isInCoalescables<bank>(otherTmp, coalescables)) {
                         conflict = true;
                         return IterationStatus::Done;
                     }
