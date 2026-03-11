@@ -1294,7 +1294,7 @@ private:
         return it != coalescables.end() && it->tmp == tmp;
     }
 
-    // Maps sub-intervals to sets of Tmps live during each sub-interval.
+    // Maps sub-intervals to lists of Tmps live during each sub-interval.
     // Used to accelerate conflict detection during group coalescing.
     //
     // Example: Tmp A live [0,10), Tmp B live [5,15):
@@ -1304,6 +1304,8 @@ private:
     class LivenessMap {
         WTF_MAKE_NONCOPYABLE(LivenessMap);
     public:
+        using TmpList = Vector<Tmp>;
+
         static constexpr unsigned cacheLinesPerNode = 3;
         using LivenessIntervalSet = IntervalSet<Point, uint32_t, cacheLinesPerNode>;
 
@@ -1321,10 +1323,9 @@ private:
         size_t numSubIntervals() const { return m_numSubIntervals; }
 
         // Iterates over sub-intervals of this map that overlap with the given range.
-        // Calls func(const Vector<Tmp>& tmpSet) for each overlapping sub-interval.
+        // Calls func(const TmpList&) for each overlapping sub-interval.
         // func returns IterationStatus to allow early termination.
-        template<typename Func>
-        IterationStatus forEachOverlappingTmpSet(const LiveRange& range, const Func& func) const
+        IterationStatus forEachOverlappingTmpList(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
             for (auto& interval : range.intervals()) {
                 Point cursor = interval.begin();
@@ -1332,8 +1333,8 @@ private:
                     auto found = m_intervals.find({ cursor, interval.end() });
                     if (!found)
                         break;
-                    auto [subIv, setIdx] = *found;
-                    if (func(m_tmpSets[setIdx]) == IterationStatus::Done)
+                    auto [subIv, listIdx] = *found;
+                    if (func(m_tmpLists[listIdx]) == IterationStatus::Done)
                         return IterationStatus::Done;
                     cursor = subIv.end();
                 }
@@ -1342,25 +1343,24 @@ private:
         }
 
         // Iterates the smaller map's sub-intervals against the larger, calling func
-        // with both Tmp sets for each overlapping pair.
-        template<typename Func>
-        static IterationStatus forEachOverlappingPair(const LivenessMap& a, const LivenessMap& b, const Func& func)
+        // with both Tmp lists for each overlapping pair.
+        static IterationStatus forEachOverlappingPair(const LivenessMap& a, const LivenessMap& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
         {
             const LivenessMap* smaller = &a;
             const LivenessMap* larger = &b;
             if (a.m_numSubIntervals > b.m_numSubIntervals)
                 std::swap(smaller, larger);
 
-            for (auto [sIv, sSetIdx] : smaller->m_intervals) {
-                const auto& sSet = smaller->m_tmpSets[sSetIdx];
+            for (auto [sIv, sListIdx] : smaller->m_intervals) {
+                const auto& sList = smaller->m_tmpLists[sListIdx];
                 Point cursor = sIv.begin();
                 while (cursor < sIv.end()) {
                     auto found = larger->m_intervals.find({ cursor, sIv.end() });
                     if (!found)
                         break;
-                    auto [lIv, lSetIdx] = *found;
-                    const auto& lSet = larger->m_tmpSets[lSetIdx];
-                    if (func(sSet, lSet) == IterationStatus::Done)
+                    auto [lIv, lListIdx] = *found;
+                    const auto& lList = larger->m_tmpLists[lListIdx];
+                    if (func(sList, lList) == IterationStatus::Done)
                         return IterationStatus::Done;
                     cursor = lIv.end();
                 }
@@ -1372,8 +1372,8 @@ private:
         {
             LiveRange result;
             Interval current = { };
-            for (auto [subIv, setIdx] : m_intervals) {
-                UNUSED_PARAM(setIdx);
+            for (auto [subIv, listIdx] : m_intervals) {
+                UNUSED_PARAM(listIdx);
                 if (!current)
                     current = subIv;
                 else if (subIv.begin() <= current.end())
@@ -1398,16 +1398,16 @@ private:
 
                 if (!found) {
                     // No overlap: insert remainder.
-                    m_intervals.insert({ cursor, interval.end() }, allocTmpSet(tmp));
+                    m_intervals.insert({ cursor, interval.end() }, allocTmpList(tmp));
                     m_numSubIntervals++;
                     break;
                 }
 
-                auto [subIv, setIdx] = *found;
+                auto [subIv, listIdx] = *found;
 
                 // Gap before the overlapping sub-interval.
                 if (cursor < subIv.begin()) {
-                    m_intervals.insert({ cursor, subIv.begin() }, allocTmpSet(tmp));
+                    m_intervals.insert({ cursor, subIv.begin() }, allocTmpList(tmp));
                     m_numSubIntervals++;
                 }
 
@@ -1417,18 +1417,18 @@ private:
 
                 // Part before cursor keeps the original set.
                 if (subIv.begin() < cursor) {
-                    m_intervals.insert({ subIv.begin(), cursor }, setIdx);
+                    m_intervals.insert({ subIv.begin(), cursor }, listIdx);
                     m_numSubIntervals++;
                 }
 
                 // Overlapping part gets tmp added.
                 Point overlapEnd = std::min(interval.end(), subIv.end());
-                m_intervals.insert({ std::max(cursor, subIv.begin()), overlapEnd }, cloneAndAdd(setIdx, tmp));
+                m_intervals.insert({ std::max(cursor, subIv.begin()), overlapEnd }, cloneAndAdd(listIdx, tmp));
                 m_numSubIntervals++;
 
                 // Part after overlap keeps the original set.
                 if (overlapEnd < subIv.end()) {
-                    m_intervals.insert({ overlapEnd, subIv.end() }, setIdx);
+                    m_intervals.insert({ overlapEnd, subIv.end() }, listIdx);
                     m_numSubIntervals++;
                 }
 
@@ -1447,25 +1447,25 @@ private:
             m_bounds = { newBegin, newEnd };
         }
 
-        uint32_t allocTmpSet(Tmp tmp)
+        uint32_t allocTmpList(Tmp tmp)
         {
-            uint32_t idx = m_tmpSets.size();
-            m_tmpSets.append(Vector<Tmp>());
-            m_tmpSets.last().append(tmp);
+            uint32_t idx = m_tmpLists.size();
+            m_tmpLists.append(TmpList());
+            m_tmpLists.last().append(tmp);
             return idx;
         }
 
-        uint32_t cloneAndAdd(uint32_t setIdx, Tmp tmp)
+        uint32_t cloneAndAdd(uint32_t listIdx, Tmp tmp)
         {
-            Vector<Tmp> newSet = m_tmpSets[setIdx]; // copy before potential realloc
-            newSet.append(tmp);
-            uint32_t newIdx = m_tmpSets.size();
-            m_tmpSets.append(WTF::move(newSet));
+            TmpList newList = m_tmpLists[listIdx]; // copy before potential realloc
+            newList.append(tmp);
+            uint32_t newIdx = m_tmpLists.size();
+            m_tmpLists.append(WTF::move(newList));
             return newIdx;
         }
 
         LivenessIntervalSet m_intervals;
-        Vector<Vector<Tmp>> m_tmpSets;
+        Vector<TmpList> m_tmpLists;
         size_t m_numSubIntervals { 0 };
         Interval m_bounds;
     };
@@ -1511,15 +1511,14 @@ private:
         Interval bounds() const { return m_liveness.bounds(); }
         LiveRange buildMergedLiveRange() const { return m_liveness.buildMergedLiveRange(); }
 
-        template<typename Func>
-        IterationStatus forEachOverlappingTmpSet(const LiveRange& range, const Func& func) const
+        using TmpList = LivenessMap::TmpList;
+
+        IterationStatus forEachOverlappingTmpList(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
-            return m_liveness.forEachOverlappingTmpSet(range, func);
+            return m_liveness.forEachOverlappingTmpList(range, func);
         }
 
-        template<typename Func>
-        static IterationStatus forEachOverlappingPair(
-            const AffinityGroup& a, const AffinityGroup& b, const Func& func)
+        static IterationStatus forEachOverlappingPair(const AffinityGroup& a, const AffinityGroup& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
         {
             return LivenessMap::forEachOverlappingPair(a.m_liveness, b.m_liveness, func);
         }
@@ -1561,12 +1560,12 @@ private:
             m_stats[bank].numQuickRejectHits++;
         } else {
             bool conflict = false;
-            group.forEachOverlappingTmpSet(singletonData.liveRange, [&](const Vector<Tmp>& tmpSet) -> IterationStatus {
-                if (tmpSet.size() > singletonData.coalescables.size()) {
+            group.forEachOverlappingTmpList(singletonData.liveRange, [&](const auto& tmpList) -> IterationStatus {
+                if (tmpList.size() > singletonData.coalescables.size()) {
                     conflict = true; // Pigeonhole principle
                     return IterationStatus::Done;
                 }
-                for (Tmp member : tmpSet) {
+                for (Tmp member : tmpList) {
                     if (!isInCoalescables<bank>(member, singletonData.coalescables)) {
                         conflict = true;
                         return IterationStatus::Done;
@@ -1595,14 +1594,14 @@ private:
             m_stats[bank].numQuickRejectHits++;
         } else {
             bool conflict = false;
-            AffinityGroup::forEachOverlappingPair(group0, group1, [&](const Vector<Tmp>& smallerSet, const Vector<Tmp>& largerSet) -> IterationStatus {
-                for (Tmp memberTmp : smallerSet) {
+            AffinityGroup::forEachOverlappingPair(group0, group1, [&](const auto& smallerList, const auto& largerList) -> IterationStatus {
+                for (Tmp memberTmp : smallerList) {
                     const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
-                    if (largerSet.size() > coalescables.size()) {
+                    if (largerList.size() > coalescables.size()) {
                         conflict = true; // Pigeonhole principle
                         return IterationStatus::Done;
                     }
-                    for (Tmp otherTmp : largerSet) {
+                    for (Tmp otherTmp : largerList) {
                         if (!isInCoalescables<bank>(otherTmp, coalescables)) {
                             conflict = true;
                             return IterationStatus::Done;
