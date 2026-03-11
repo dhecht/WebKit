@@ -1325,7 +1325,7 @@ private:
         // Iterates over sub-intervals of this map that overlap with the given range.
         // Calls func(const TmpList&) for each overlapping sub-interval.
         // func returns IterationStatus to allow early termination.
-        IterationStatus forEachOverlappingTmpList(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
+        IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
             for (auto& interval : range.intervals()) {
                 Point cursor = interval.begin();
@@ -1344,7 +1344,7 @@ private:
 
         // Iterates the smaller map's sub-intervals against the larger, calling func
         // with both Tmp lists for each overlapping pair.
-        static IterationStatus forEachOverlappingPair(const LivenessMap& a, const LivenessMap& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
+        static IterationStatus forEachPairwiseOverlap(const LivenessMap& a, const LivenessMap& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
         {
             const LivenessMap* smaller = &a;
             const LivenessMap* larger = &b;
@@ -1368,7 +1368,7 @@ private:
             return IterationStatus::Continue;
         }
 
-        LiveRange buildMergedLiveRange() const
+        LiveRange buildLiveRange() const
         {
             LiveRange result;
             Interval current = { };
@@ -1509,18 +1509,18 @@ private:
         size_t size() const { return m_members.size(); }
         bool isEmpty() const { return m_members.isEmpty(); }
         Interval bounds() const { return m_liveness.bounds(); }
-        LiveRange buildMergedLiveRange() const { return m_liveness.buildMergedLiveRange(); }
+        LiveRange buildLiveRange() const { return m_liveness.buildLiveRange(); }
 
         using TmpList = LivenessMap::TmpList;
 
-        IterationStatus forEachOverlappingTmpList(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
+        IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
-            return m_liveness.forEachOverlappingTmpList(range, func);
+            return m_liveness.forEachOverlap(range, func);
         }
 
-        static IterationStatus forEachOverlappingPair(const AffinityGroup& a, const AffinityGroup& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
+        static IterationStatus forEachPairwiseOverlap(const AffinityGroup& a, const AffinityGroup& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
         {
-            return LivenessMap::forEachOverlappingPair(a.m_liveness, b.m_liveness, func);
+            return LivenessMap::forEachPairwiseOverlap(a.m_liveness, b.m_liveness, func);
         }
 
         Tmp representative; // Set during finalization
@@ -1560,7 +1560,7 @@ private:
             m_stats[bank].numQuickRejectHits++;
         } else {
             bool conflict = false;
-            group.forEachOverlappingTmpList(singletonData.liveRange, [&](const auto& tmpList) -> IterationStatus {
+            group.forEachOverlap(singletonData.liveRange, [&](const auto& tmpList) -> IterationStatus {
                 if (tmpList.size() > singletonData.coalescables.size()) {
                     conflict = true; // Pigeonhole principle
                     return IterationStatus::Done;
@@ -1594,7 +1594,7 @@ private:
             m_stats[bank].numQuickRejectHits++;
         } else {
             bool conflict = false;
-            AffinityGroup::forEachOverlappingPair(group0, group1, [&](const auto& smallerList, const auto& largerList) -> IterationStatus {
+            AffinityGroup::forEachPairwiseOverlap(group0, group1, [&](const auto& smallerList, const auto& largerList) -> IterationStatus {
                 for (Tmp memberTmp : smallerList) {
                     const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
                     if (largerList.size() > coalescables.size()) {
@@ -1752,7 +1752,7 @@ private:
             m_map.append(representative, TmpData());
             TmpData& representativeData = m_map.get<bank>(representative);
             representativeData.useDefCost = cost;
-            representativeData.liveRange = group.buildMergedLiveRange();
+            representativeData.liveRange = group.buildLiveRange();
             representativeData.preferredReg = preferred;
             representativeData.hasColdUse = hasColdUse;
             representativeData.validate();
