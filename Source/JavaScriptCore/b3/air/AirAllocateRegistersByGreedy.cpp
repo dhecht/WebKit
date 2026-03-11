@@ -1285,19 +1285,13 @@ private:
 
     // Binary search in a sorted coalescables vector to check if 'target' is coalescable.
     template<Bank bank>
-    static bool isCoalescable(
-        const Vector<TmpData::CoalescableWith>& coalescables,
-        Tmp target)
+    static bool isInCoalescables(Tmp tmp, const Vector<TmpData::CoalescableWith>& coalescables)
     {
-        auto it = std::lower_bound(
-            coalescables.begin(), coalescables.end(),
-            target,
+        auto it = std::lower_bound(coalescables.begin(), coalescables.end(), tmp,
             [](const auto& edge, Tmp t) {
-                return edge.tmp.tmpIndex(bank)
-                    < t.tmpIndex(bank);
+                return edge.tmp.tmpIndex(bank) < t.tmpIndex(bank);
             });
-        return it != coalescables.end()
-            && it->tmp == target;
+        return it != coalescables.end() && it->tmp == tmp;
     }
 
     // Maps sub-intervals to sets of Tmps live during each sub-interval.
@@ -1569,7 +1563,6 @@ private:
         if (!singletonBounds.overlaps(group.bounds())) {
             m_stats[bank].numQuickRejectHits++;
         } else {
-            auto isCoalescableFunc = isCoalescable<bank>;
             bool conflict = false;
             group.forEachOverlappingTmpSet(singletonData.liveRange, [&](const Vector<Tmp>& tmpSet) -> IterationStatus {
                 if (tmpSet.size() > singletonData.coalescables.size()) {
@@ -1577,7 +1570,7 @@ private:
                     return IterationStatus::Done;
                 }
                 for (Tmp member : tmpSet) {
-                    if (!isCoalescableFunc(singletonData.coalescables, member)) {
+                    if (!isInCoalescables<bank>(member, singletonData.coalescables)) {
                         conflict = true;
                         return IterationStatus::Done;
                     }
@@ -1613,7 +1606,7 @@ private:
                         return IterationStatus::Done;
                     }
                     for (Tmp otherTmp : largerSet) {
-                        if (!isCoalescable<bank>(coalescables, otherTmp)) {
+                        if (!isInCoalescables<bank>(otherTmp, coalescables)) {
                             conflict = true;
                             return IterationStatus::Done;
                         }
@@ -1666,7 +1659,7 @@ private:
         };
         Vector<Move> moves;
 
-        // Sort coalescables by Tmp index for binary search in isCoalescable.
+        // Sort coalescables by Tmp index for binary search in isInCoalescables.
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             ASSERT(!tmp.isReg());
             TmpData& data = m_map.get<bank>(tmp);
