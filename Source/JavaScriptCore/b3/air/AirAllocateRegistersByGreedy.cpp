@@ -1541,7 +1541,7 @@ private:
         TmpData& singletonData = m_map.get<bank>(singleton);
 
         bool conflict = false;
-        group.forEachOverlap(singletonData.liveRange, [&](const auto& tmpList) -> IterationStatus {
+        group.forEachOverlap(singletonData.liveRange, [&](const auto& tmpList) {
             if (tmpList.size() > singletonData.coalescables.size()) {
                 conflict = true; // Pigeonhole principle
                 return IterationStatus::Done;
@@ -1571,15 +1571,19 @@ private:
         const auto& group1 = groups[groupIndex1];
 
         bool conflict = false;
-        AffinityGroup::forEachPairwiseOverlap(group0, group1, [&](const auto& smallerList, const auto& largerList) -> IterationStatus {
-            for (Tmp memberTmp : smallerList) {
-                const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
-                if (largerList.size() > coalescables.size()) {
+        AffinityGroup::forEachPairwiseOverlap(group0, group1, [&](const auto& tmpListA, const auto& tmpListB) {
+            const auto* iterateList = &tmpListA;
+            const auto* checkList = &tmpListB;
+            if (iterateList->size() > checkList->size())
+                std::swap(iterateList, checkList);
+            for (Tmp iterateTmp : *iterateList) {
+                const auto& coalescables = m_map.get<bank>(iterateTmp).coalescables;
+                if (checkList->size() > coalescables.size()) {
                     conflict = true; // Pigeonhole principle
                     return IterationStatus::Done;
                 }
-                for (Tmp otherTmp : largerList) {
-                    if (!isInCoalescables<bank>(otherTmp, coalescables)) {
+                for (Tmp checkTmp : *checkList) {
+                    if (!isInCoalescables<bank>(checkTmp, coalescables)) {
                         conflict = true;
                         return IterationStatus::Done;
                     }
