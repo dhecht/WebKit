@@ -1441,8 +1441,7 @@ private:
         uint32_t allocTmpList(Tmp tmp)
         {
             uint32_t idx = m_tmpLists.size();
-            m_tmpLists.append(TmpList());
-            m_tmpLists.last().append(tmp);
+            m_tmpLists.constructAndAppend({ tmp });
             return idx;
         }
 
