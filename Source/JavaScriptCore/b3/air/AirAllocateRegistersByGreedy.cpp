@@ -1319,8 +1319,6 @@ private:
                 addInterval(tmp, interval);
         }
 
-        Interval bounds() const { return m_bounds; }
-
         // Iterates over sub-intervals of this map that overlap with the given range.
         // Calls func(const TmpList&) for each overlapping sub-interval.
         // func returns IterationStatus to allow early termination.
@@ -1404,7 +1402,6 @@ private:
 
         void addInterval(Tmp tmp, Interval interval)
         {
-            updateBounds(interval);
             while (true) {
                 auto entry = m_intervals.find(interval);
 
@@ -1441,17 +1438,6 @@ private:
             }
         }
 
-        void updateBounds(Interval interval)
-        {
-            if (!m_bounds) {
-                m_bounds = interval;
-                return;
-            }
-            Point newBegin = std::min(m_bounds.begin(), interval.begin());
-            Point newEnd = std::max(m_bounds.end(), interval.end());
-            m_bounds = { newBegin, newEnd };
-        }
-
         uint32_t allocTmpList(Tmp tmp)
         {
             uint32_t idx = m_tmpLists.size();
@@ -1472,7 +1458,6 @@ private:
         LivenessIntervalSet m_intervals;
         Vector<TmpList> m_tmpLists;
         size_t m_numIntervals { 0 };
-        Interval m_bounds;
     };
 
     // Represents a group of coalescable Tmps with their combined liveness information.
@@ -1513,7 +1498,6 @@ private:
         const Vector<Tmp>& members() const { return m_members; }
         size_t size() const { return m_members.size(); }
         bool isEmpty() const { return m_members.isEmpty(); }
-        Interval bounds() const { return m_liveness.bounds(); }
         LiveRange buildLiveRange() const { return m_liveness.buildLiveRange(); }
 
         using TmpList = LivenessMap::TmpList;
@@ -1556,31 +1540,22 @@ private:
         const auto& group = groups[groupIndex];
         TmpData& singletonData = m_map.get<bank>(singleton);
 
-        ASSERT(!singletonData.liveRange.intervals().isEmpty());
-        Interval singletonBounds = {
-            singletonData.liveRange.intervals().first().begin(),
-            singletonData.liveRange.intervals().last().end()
-        };
-        if (!singletonBounds.overlaps(group.bounds())) {
-            m_stats[bank].numQuickRejectHits++;
-        } else {
-            bool conflict = false;
-            group.forEachOverlap(singletonData.liveRange, [&](const auto& tmpList) -> IterationStatus {
-                if (tmpList.size() > singletonData.coalescables.size()) {
-                    conflict = true; // Pigeonhole principle
+        bool conflict = false;
+        group.forEachOverlap(singletonData.liveRange, [&](const auto& tmpList) -> IterationStatus {
+            if (tmpList.size() > singletonData.coalescables.size()) {
+                conflict = true; // Pigeonhole principle
+                return IterationStatus::Done;
+            }
+            for (Tmp member : tmpList) {
+                if (!isInCoalescables<bank>(member, singletonData.coalescables)) {
+                    conflict = true;
                     return IterationStatus::Done;
                 }
-                for (Tmp member : tmpList) {
-                    if (!isInCoalescables<bank>(member, singletonData.coalescables)) {
-                        conflict = true;
-                        return IterationStatus::Done;
-                    }
-                }
-                return IterationStatus::Continue;
-            });
-            if (conflict)
-                return false;
-        }
+            }
+            return IterationStatus::Continue;
+        });
+        if (conflict)
+            return false;
 
         groups[groupIndex].addMember(singleton, singletonData.liveRange);
         tmpToGroup[singleton] = groupIndex;
@@ -1595,29 +1570,25 @@ private:
         const auto& group0 = groups[groupIndex0];
         const auto& group1 = groups[groupIndex1];
 
-        if (!group0.bounds().overlaps(group1.bounds())) {
-            m_stats[bank].numQuickRejectHits++;
-        } else {
-            bool conflict = false;
-            AffinityGroup::forEachPairwiseOverlap(group0, group1, [&](const auto& smallerList, const auto& largerList) -> IterationStatus {
-                for (Tmp memberTmp : smallerList) {
-                    const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
-                    if (largerList.size() > coalescables.size()) {
-                        conflict = true; // Pigeonhole principle
+        bool conflict = false;
+        AffinityGroup::forEachPairwiseOverlap(group0, group1, [&](const auto& smallerList, const auto& largerList) -> IterationStatus {
+            for (Tmp memberTmp : smallerList) {
+                const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
+                if (largerList.size() > coalescables.size()) {
+                    conflict = true; // Pigeonhole principle
+                    return IterationStatus::Done;
+                }
+                for (Tmp otherTmp : largerList) {
+                    if (!isInCoalescables<bank>(otherTmp, coalescables)) {
+                        conflict = true;
                         return IterationStatus::Done;
                     }
-                    for (Tmp otherTmp : largerList) {
-                        if (!isInCoalescables<bank>(otherTmp, coalescables)) {
-                            conflict = true;
-                            return IterationStatus::Done;
-                        }
-                    }
                 }
-                return IterationStatus::Continue;
-            });
-            if (conflict)
-                return false;
-        }
+            }
+            return IterationStatus::Continue;
+        });
+        if (conflict)
+            return false;
 
         auto getLiveRange = [&](Tmp tmp) -> const LiveRange& {
             return m_map.get<bank>(tmp).liveRange;
