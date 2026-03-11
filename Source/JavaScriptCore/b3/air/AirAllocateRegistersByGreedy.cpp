@@ -1344,10 +1344,7 @@ private:
         // Iterates the smaller map's sub-intervals against the larger, calling func
         // with both Tmp sets for each overlapping pair.
         template<typename Func>
-        static IterationStatus forEachOverlappingPair(
-            const LivenessMap& a,
-            const LivenessMap& b,
-            const Func& func)
+        static IterationStatus forEachOverlappingPair(const LivenessMap& a, const LivenessMap& b, const Func& func)
         {
             const LivenessMap* smaller = &a;
             const LivenessMap* larger = &b;
@@ -1769,9 +1766,7 @@ private:
     // Phase 3: Replace member Tmps with representative in all instructions.
     // Nop self-Moves and adjust useDefCost for removed moves.
     template<Bank bank>
-    void rewriteCoalescedTmps(
-        const Vector<AffinityGroup>& groups,
-        const TmpGroupMap<bank>& tmpToGroup)
+    void rewriteCoalescedTmps(const Vector<AffinityGroup>& groups, const TmpGroupMap<bank>& tmpToGroup)
     {
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
