@@ -1307,6 +1307,7 @@ private:
         using TmpList = Vector<Tmp, 4>;
 
         static constexpr unsigned cacheLinesPerNode = 3;
+        // Value is index into m_tmpLists
         using LivenessIntervalSet = IntervalSet<Point, uint32_t, cacheLinesPerNode>;
 
         LivenessMap() = default;
@@ -1319,9 +1320,7 @@ private:
                 addInterval(tmp, interval);
         }
 
-        // Iterates over sub-intervals of this map that overlap with the given range.
-        // Calls func(const TmpList&) for each overlapping sub-interval.
-        // func returns IterationStatus to allow early termination.
+        // Calls func with the TmpList for any intervals in this map that overlaps with range.
         IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
             for (auto interval : range.intervals()) {
@@ -1340,8 +1339,7 @@ private:
             return IterationStatus::Continue;
         }
 
-        // Iterates the smaller map's sub-intervals against the larger, calling func
-        // with both Tmp lists for each overlapping pair.
+        // Calls func with both TmpLists for each pair of overlapping intervals in a and b.
         static IterationStatus forEachPairwiseOverlap(const LivenessMap& a, const LivenessMap& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
         {
             const LivenessMap* smaller = &a;
@@ -1412,7 +1410,6 @@ private:
                 }
 
                 auto [overlapInterval, listIdx] = *entry;
-
                 // Gap before the overlapping interval.
                 if (interval.begin() < overlapInterval.begin())
                     insertInterval({ interval.begin(), overlapInterval.begin() }, allocTmpList(tmp));
@@ -1428,8 +1425,8 @@ private:
                 Interval combined = { std::max(interval.begin(), overlapInterval.begin()), std::min(interval.end(), overlapInterval.end()) };
                 insertInterval(combined, cloneAndAdd(listIdx, tmp));
 
-                // Part after overlap keeps the original list.
                 if (interval.end() <= overlapInterval.end()) {
+                    // Part after overlap keeps the original list.
                     if (interval.end() < overlapInterval.end())
                         insertInterval({ interval.end(), overlapInterval.end() }, listIdx);
                     break;
@@ -1477,12 +1474,10 @@ private:
             m_liveness.add(tmp, range);
         }
 
-        // Merges the other group into this one (union-by-size).
+        // Merges the other group into this one.
         template<typename GetLiveRange>
         void merge(AffinityGroup& other, const GetLiveRange& getLiveRange)
         {
-            // Union-by-size: if the other group is larger, swap contents
-            // so we always merge the smaller into the larger.
             if (other.size() > size()) {
                 std::swap(m_members, other.m_members);
                 std::swap(m_liveness, other.m_liveness);
@@ -1511,7 +1506,14 @@ private:
             return LivenessMap::forEachPairwiseOverlap(a.m_liveness, b.m_liveness, func);
         }
 
-        Tmp representative; // Set during finalization
+        void dump(PrintStream& out) const
+        {
+            if (m_representative)
+                out.print(m_representative, " <= ");
+            out.print("{ ", listDump(m_members), " }");
+        }
+
+        Tmp m_representative; // Only set for non-empty groups at finalization
 
     private:
         Vector<Tmp> m_members;
@@ -1562,7 +1564,6 @@ private:
         return true;
     }
 
-    // Try to merge two groups. Returns true if successful.
     template<Bank bank>
     bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1, Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
@@ -1592,15 +1593,13 @@ private:
         auto getLiveRange = [&](Tmp tmp) -> const LiveRange& {
             return m_map.get<bank>(tmp).liveRange;
         };
-        groups[groupIndex0].merge(groups[groupIndex1], getLiveRange);
-        for (Tmp member : groups[groupIndex0].members())
+        for (Tmp member : groups[groupIndex1].members())
             tmpToGroup[member] = groupIndex0;
+        groups[groupIndex0].merge(groups[groupIndex1], getLiveRange);
         dataLogLnIf(verbose(), "Merged group ", groupIndex1, " into ", groupIndex0);
         return true;
     }
 
-    // Build groups of coalescable Tmps, create representative Tmps, and
-    // rewrite all instructions to reference the group representative directly.
     template<Bank bank>
     void coalesceTmps()
     {
@@ -1614,8 +1613,6 @@ private:
         rewriteCoalescedTmps<bank>(groups, tmpToGroup);
     }
 
-    // Phase 1: Sort coalescables for binary search. Collect and sort moves.
-    // Iterate moves doing union-find grouping with interference checking.
     template<Bank bank>
     void buildCoalescingGroups(Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
@@ -1676,22 +1673,8 @@ private:
                 tryCoalesceSingletonWithGroup<bank>(singleton, groupIndex, groups, tmpToGroup);
             }
         }
-        if (verbose()) {
-            for (size_t i = 0; i < groups.size(); i++) {
-                if (groups[i].isEmpty())
-                    continue;
-                dataLog("Group ", i, ": { ");
-                CommaPrinter comma;
-                for (Tmp member : groups[i].members())
-                    dataLog(comma, member);
-                dataLogLn(" }");
-            }
-        }
     }
 
-    // Phase 2: For each non-empty group, create a representative Tmp,
-    // aggregate width/useDefCost/preferredReg/hasColdUse, build merged
-    // LiveRange, mark members as Stage::Coalesced.
     template<Bank bank>
     void createGroupRepresentatives(Vector<AffinityGroup>& groups)
     {
@@ -1732,8 +1715,8 @@ private:
             representativeData.hasColdUse = hasColdUse;
             representativeData.validate();
 
-            group.representative = representative;
-            dataLogLnIf(verbose(), "Created representative ", representative, " for group with ", group.size(), " members");
+            group.m_representative = representative;
+            dataLogLnIf(verbose(), "Coalescing group: ", group);
         }
     }
 
@@ -1745,30 +1728,25 @@ private:
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
                 bool maybeCoalescable = mayBeCoalescable(inst);
-                inst.forEachTmpFast([&](Tmp& t) {
-                    if (t.isReg())
+                inst.forEachTmpFast([&](Tmp& tmp) {
+                    if (tmp.isReg() || tmp.bank() != bank)
                         return;
-                    if (t.bank() != bank)
-                        return;
-                    auto idx = tmpToGroup[t];
+                    auto idx = tmpToGroup[tmp];
                     if (idx == noGroup)
                         return;
                     const AffinityGroup& group = groups[idx];
-                    if (group.isEmpty())
-                        return;
-                    Tmp representative = group.representative;
-                    ASSERT(representative);
-                    t = representative;
+                    ASSERT(!group.isEmpty() && group.m_representative);
+                    tmp = group.m_representative;
                 });
-                if (maybeCoalescable
-                    && inst.args[0].tmp() == inst.args[1].tmp()) {
+                if (maybeCoalescable && inst.args[0].tmp() == inst.args[1].tmp()) {
                     Tmp tmp = inst.args[0].tmp();
+                    inst = Inst();
+                    m_stats[bank].numGroupMovesCoalesced++;
                     if (!tmp.isReg()) {
                         float freq = adjustedBlockFrequency(block);
                         TmpData& tmpData = m_map.get<bank>(tmp);
-                        // FIXME: When block frequency overflows
-                        // to +Inf, useDefCost saturates at +Inf
-                        // and we can't subtract without NaN.
+                        // Avoid computing NaN which can happen when tmpData.useDefCost is inf and freq or 2*freq is Inf.
+                        // And if useDefCost became Inf (usually due high nesting depth) subtracting not necessarily the right thing anyway.
                         if (std::isfinite(tmpData.useDefCost)) {
                             tmpData.useDefCost -= freq;
                             tmpData.useDefCost -= freq;
@@ -1776,8 +1754,6 @@ private:
                                 tmpData.useDefCost = 0;
                         }
                     }
-                    m_stats[bank].numGroupMovesCoalesced++;
-                    inst = Inst();
                 }
             }
         }
