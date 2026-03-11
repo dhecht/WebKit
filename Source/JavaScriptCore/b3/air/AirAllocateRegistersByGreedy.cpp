@@ -1283,7 +1283,7 @@ private:
         });
     }
 
-    // Binary search in a sorted coalescables vector to check if 'target' is coalescable.
+    // Binary search a sorted coalescables vector to check if 'target' is coalescable.
     template<Bank bank>
     static bool isInCoalescables(Tmp tmp, const Vector<TmpData::CoalescableWith>& coalescables)
     {
@@ -1294,7 +1294,7 @@ private:
         return it != coalescables.end() && it->tmp == tmp;
     }
 
-    // Maps sub-intervals to lists of Tmps live during each sub-interval.
+    // Maps intervals to lists of Tmps live during each sub-interval.
     // Used to accelerate conflict detection during group coalescing.
     //
     // Example: Tmp A live [0,10), Tmp B live [5,15):
@@ -1304,7 +1304,7 @@ private:
     class LivenessMap {
         WTF_MAKE_NONCOPYABLE(LivenessMap);
     public:
-        using TmpList = Vector<Tmp>;
+        using TmpList = Vector<Tmp, 4>;
 
         static constexpr unsigned cacheLinesPerNode = 3;
         using LivenessIntervalSet = IntervalSet<Point, uint32_t, cacheLinesPerNode>;
