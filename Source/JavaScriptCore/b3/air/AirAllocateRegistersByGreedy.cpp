@@ -1544,14 +1544,10 @@ private:
     void coalesceSingletons(Tmp tmp0, Tmp tmp1,
         Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
-        m_stats[bank].numHasConflictCalls++;
-        m_stats[bank].numOccupancyChecks++;
-
         auto newIndex = groups.size();
         groups.constructAndAppend(tmp0, m_map.get<bank>(tmp0).liveRange, tmp1, m_map.get<bank>(tmp1).liveRange);
         tmpToGroup[tmp0] = newIndex;
         tmpToGroup[tmp1] = newIndex;
-        m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, 2u);
         dataLogLnIf(verbose(), "Created group ", newIndex);
     }
 
@@ -1560,8 +1556,6 @@ private:
     bool tryCoalesceSingletonWithGroup(Tmp singleton, GroupIndex groupIndex,
         Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
-        m_stats[bank].numHasConflictCalls++;
-
         const auto& group = groups[groupIndex];
         TmpData& singletonData = m_map.get<bank>(singleton);
 
@@ -1576,7 +1570,6 @@ private:
             auto isCoalescableFunc = isCoalescable<bank>;
             bool conflict = false;
             group.forEachOverlappingTmpSet(singletonData.liveRange, [&](const Vector<Tmp>& tmpSet) -> IterationStatus {
-                m_stats[bank].numOccupancyChecks++;
                 if (tmpSet.size() > singletonData.coalescables.size()) {
                     conflict = true;
                     return IterationStatus::Done;
@@ -1595,7 +1588,6 @@ private:
 
         groups[groupIndex].addMember(singleton, singletonData.liveRange);
         tmpToGroup[singleton] = groupIndex;
-        m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(groups[groupIndex].size()));
         dataLogLnIf(verbose(), "Added ", singleton, " to group ", groupIndex);
         return true;
     }
@@ -1605,8 +1597,6 @@ private:
     bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1,
         Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
-        m_stats[bank].numHasConflictCalls++;
-
         const auto& group0 = groups[groupIndex0];
         const auto& group1 = groups[groupIndex1];
 
@@ -1616,7 +1606,6 @@ private:
             auto isCoalescableFunc = isCoalescable<bank>;
             bool conflict = false;
             AffinityGroup::forEachOverlappingPair(group0, group1, [&](const Vector<Tmp>& smallerSet, const Vector<Tmp>& largerSet) -> IterationStatus {
-                m_stats[bank].numOccupancyChecks++;
                 for (Tmp memberTmp : smallerSet) {
                     const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
                     if (largerSet.size() > coalescables.size()) {
@@ -1649,7 +1638,6 @@ private:
             return m_map.get<bank>(tmp).liveRange;
         };
         groups[largerIndex].mergeFrom(groups[smallerIndex], getLiveRange);
-        m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(groups[largerIndex].size()));
         dataLogLnIf(verbose(), "Merged group ", smallerIndex, " into ", largerIndex);
         return true;
     }
@@ -1755,6 +1743,7 @@ private:
                 continue;
 
             m_stats[bank].numGroupsCreated++;
+            m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(group.size()));
 
             Tmp representative = m_code.newTmp(bank);
             Width useWidth = Width8;
