@@ -1497,15 +1497,21 @@ private:
             m_liveness.add(tmp, range);
         }
 
-        // Merges smaller group into this one. Caller must provide a way to look up live ranges.
+        // Merges the other group into this one (union-by-size).
         template<typename GetLiveRange>
-        void mergeFrom(AffinityGroup& smaller, const GetLiveRange& getLiveRange)
+        void merge(AffinityGroup& other, const GetLiveRange& getLiveRange)
         {
-            for (Tmp member : smaller.m_members)
+            // Union-by-size: if the other group is larger, swap contents
+            // so we always merge the smaller into the larger.
+            if (other.size() > size()) {
+                std::swap(m_members, other.m_members);
+                std::swap(m_liveness, other.m_liveness);
+            }
+            for (Tmp member : other.m_members)
                 m_liveness.add(member, getLiveRange(member));
-            m_members.appendVector(smaller.m_members);
-            smaller.m_members.clear();
-            smaller.m_liveness = LivenessMap();
+            m_members.appendVector(other.m_members);
+            other.m_members.clear();
+            other.m_liveness = LivenessMap();
         }
 
         const Vector<Tmp>& members() const { return m_members; }
@@ -1588,6 +1594,7 @@ private:
         return true;
     }
 
+    // Try to merge two groups. Returns true if successful.
     template<Bank bank>
     bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1, Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
@@ -1618,20 +1625,13 @@ private:
                 return false;
         }
 
-        // Merge smaller into larger (union-by-size).
-        auto largerIndex = groupIndex0;
-        auto smallerIndex = groupIndex1;
-        if (groups[largerIndex].size() < groups[smallerIndex].size())
-            std::swap(largerIndex, smallerIndex);
-
-        for (Tmp member : groups[smallerIndex].members())
-            tmpToGroup[member] = largerIndex;
-
         auto getLiveRange = [&](Tmp tmp) -> const LiveRange& {
             return m_map.get<bank>(tmp).liveRange;
         };
-        groups[largerIndex].mergeFrom(groups[smallerIndex], getLiveRange);
-        dataLogLnIf(verbose(), "Merged group ", smallerIndex, " into ", largerIndex);
+        groups[groupIndex0].merge(groups[groupIndex1], getLiveRange);
+        for (Tmp member : groups[groupIndex0].members())
+            tmpToGroup[member] = groupIndex0;
+        dataLogLnIf(verbose(), "Merged group ", groupIndex1, " into ", groupIndex0);
         return true;
     }
 
