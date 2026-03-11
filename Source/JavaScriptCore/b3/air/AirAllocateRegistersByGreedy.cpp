@@ -1327,16 +1327,17 @@ private:
         // func returns IterationStatus to allow early termination.
         IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
-            for (auto& interval : range.intervals()) {
-                Point cursor = interval.begin();
-                while (cursor < interval.end()) {
-                    auto found = m_intervals.find({ cursor, interval.end() });
-                    if (!found)
+            for (auto interval : range.intervals()) {
+                while (true) {
+                    auto entry = m_intervals.find(interval);
+                    if (!entry)
                         break;
-                    auto [subInterval, listIdx] = *found;
+                    auto [overlappingInterval, listIdx] = *entry;
                     if (func(m_tmpLists[listIdx]) == IterationStatus::Done)
                         return IterationStatus::Done;
-                    cursor = subInterval.end();
+                    if (interval.end() <= overlappingInterval.end())
+                        break;
+                    interval = { overlappingInterval.end(), interval.end() };
                 }
             }
             return IterationStatus::Continue;
@@ -1351,18 +1352,19 @@ private:
             if (a.m_numSubIntervals > b.m_numSubIntervals)
                 std::swap(smaller, larger);
 
-            for (auto [smallerInterval, smallerListIdx] : smaller->m_intervals) {
-                const auto& smallerList = smaller->m_tmpLists[smallerListIdx];
-                Point cursor = smallerInterval.begin();
-                while (cursor < smallerInterval.end()) {
-                    auto found = larger->m_intervals.find({ cursor, smallerInterval.end() });
-                    if (!found)
+            for (auto [interval, listIdx] : smaller->m_intervals) {
+                const auto& smallerList = smaller->m_tmpLists[listIdx];
+                while (true) {
+                    auto entry = larger->m_intervals.find(interval);
+                    if (!entry)
                         break;
-                    auto [largerInterval, largerListIdx] = *found;
-                    const auto& largerList = larger->m_tmpLists[largerListIdx];
+                    auto [overlapInterval, overlapListIdx] = *entry;
+                    const auto& largerList = larger->m_tmpLists[overlapListIdx];
                     if (func(smallerList, largerList) == IterationStatus::Done)
                         return IterationStatus::Done;
-                    cursor = largerInterval.end();
+                    if (interval.end() <= overlapInterval.end())
+                        break;
+                    interval = { overlapInterval.end(), interval.end() };
                 }
             }
             return IterationStatus::Continue;
