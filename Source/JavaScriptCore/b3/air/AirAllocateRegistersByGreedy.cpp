@@ -1320,7 +1320,6 @@ private:
         }
 
         Interval bounds() const { return m_bounds; }
-        size_t numSubIntervals() const { return m_numSubIntervals; }
 
         // Iterates over sub-intervals of this map that overlap with the given range.
         // Calls func(const TmpList&) for each overlapping sub-interval.
@@ -1349,7 +1348,7 @@ private:
         {
             const LivenessMap* smaller = &a;
             const LivenessMap* larger = &b;
-            if (a.m_numSubIntervals > b.m_numSubIntervals)
+            if (a.m_numIntervals > b.m_numIntervals)
                 std::swap(smaller, larger);
 
             for (auto [interval, listIdx] : smaller->m_intervals) {
@@ -1391,50 +1390,54 @@ private:
         }
 
     private:
+        void insertInterval(const Interval& interval, uint32_t listIdx)
+        {
+            m_intervals.insert(interval, listIdx);
+            m_numIntervals++;
+        }
+
+        void eraseInterval(const Interval& interval)
+        {
+            m_intervals.erase(interval);
+            m_numIntervals--;
+        }
+
         void addInterval(Tmp tmp, Interval interval)
         {
             updateBounds(interval);
-            Point cursor = interval.begin();
-            while (cursor < interval.end()) {
-                auto found = m_intervals.find({ cursor, interval.end() });
+            while (true) {
+                auto entry = m_intervals.find(interval);
 
-                if (!found) {
+                if (!entry) {
                     // No overlap: insert remainder.
-                    m_intervals.insert({ cursor, interval.end() }, allocTmpList(tmp));
-                    m_numSubIntervals++;
+                    insertInterval(interval, allocTmpList(tmp));
                     break;
                 }
 
-                auto [subInterval, listIdx] = *found;
+                auto [overlapInterval, listIdx] = *entry;
 
-                // Gap before the overlapping sub-interval.
-                if (cursor < subInterval.begin()) {
-                    m_intervals.insert({ cursor, subInterval.begin() }, allocTmpList(tmp));
-                    m_numSubIntervals++;
-                }
+                // Gap before the overlapping interval.
+                if (interval.begin() < overlapInterval.begin())
+                    insertInterval({ interval.begin(), overlapInterval.begin() }, allocTmpList(tmp));
 
-                // Erase the existing sub-interval; we'll re-insert split pieces.
-                m_intervals.erase(subInterval);
-                m_numSubIntervals--;
+                // Erase the existing interval; we'll re-insert split pieces.
+                eraseInterval(overlapInterval);
 
-                // Part before cursor keeps the original set.
-                if (subInterval.begin() < cursor) {
-                    m_intervals.insert({ subInterval.begin(), cursor }, listIdx);
-                    m_numSubIntervals++;
-                }
+                // Part before our interval keeps the original list.
+                if (overlapInterval.begin() < interval.begin())
+                    insertInterval({ overlapInterval.begin(), interval.begin() }, listIdx);
 
                 // Overlapping part gets tmp added.
-                Point overlapEnd = std::min(interval.end(), subInterval.end());
-                m_intervals.insert({ std::max(cursor, subInterval.begin()), overlapEnd }, cloneAndAdd(listIdx, tmp));
-                m_numSubIntervals++;
+                Interval combined = { std::max(interval.begin(), overlapInterval.begin()), std::min(interval.end(), overlapInterval.end()) };
+                insertInterval(combined, cloneAndAdd(listIdx, tmp));
 
-                // Part after overlap keeps the original set.
-                if (overlapEnd < subInterval.end()) {
-                    m_intervals.insert({ overlapEnd, subInterval.end() }, listIdx);
-                    m_numSubIntervals++;
+                // Part after overlap keeps the original list.
+                if (interval.end() <= overlapInterval.end()) {
+                    if (interval.end() < overlapInterval.end())
+                        insertInterval({ interval.end(), overlapInterval.end() }, listIdx);
+                    break;
                 }
-
-                cursor = overlapEnd;
+                interval = { overlapInterval.end(), interval.end() };
             }
         }
 
@@ -1468,7 +1471,7 @@ private:
 
         LivenessIntervalSet m_intervals;
         Vector<TmpList> m_tmpLists;
-        size_t m_numSubIntervals { 0 };
+        size_t m_numIntervals { 0 };
         Interval m_bounds;
     };
 
