@@ -1333,10 +1333,10 @@ private:
                     auto found = m_intervals.find({ cursor, interval.end() });
                     if (!found)
                         break;
-                    auto [subIv, listIdx] = *found;
+                    auto [subInterval, listIdx] = *found;
                     if (func(m_tmpLists[listIdx]) == IterationStatus::Done)
                         return IterationStatus::Done;
-                    cursor = subIv.end();
+                    cursor = subInterval.end();
                 }
             }
             return IterationStatus::Continue;
@@ -1351,18 +1351,18 @@ private:
             if (a.m_numSubIntervals > b.m_numSubIntervals)
                 std::swap(smaller, larger);
 
-            for (auto [sIv, sListIdx] : smaller->m_intervals) {
-                const auto& sList = smaller->m_tmpLists[sListIdx];
-                Point cursor = sIv.begin();
-                while (cursor < sIv.end()) {
-                    auto found = larger->m_intervals.find({ cursor, sIv.end() });
+            for (auto [smallerInterval, smallerListIdx] : smaller->m_intervals) {
+                const auto& smallerList = smaller->m_tmpLists[smallerListIdx];
+                Point cursor = smallerInterval.begin();
+                while (cursor < smallerInterval.end()) {
+                    auto found = larger->m_intervals.find({ cursor, smallerInterval.end() });
                     if (!found)
                         break;
-                    auto [lIv, lListIdx] = *found;
-                    const auto& lList = larger->m_tmpLists[lListIdx];
-                    if (func(sList, lList) == IterationStatus::Done)
+                    auto [largerInterval, largerListIdx] = *found;
+                    const auto& largerList = larger->m_tmpLists[largerListIdx];
+                    if (func(smallerList, largerList) == IterationStatus::Done)
                         return IterationStatus::Done;
-                    cursor = lIv.end();
+                    cursor = largerInterval.end();
                 }
             }
             return IterationStatus::Continue;
@@ -1372,15 +1372,15 @@ private:
         {
             LiveRange result;
             Interval current = { };
-            for (auto [subIv, listIdx] : m_intervals) {
+            for (auto [interval, listIdx] : m_intervals) {
                 UNUSED_PARAM(listIdx);
                 if (!current)
-                    current = subIv;
-                else if (subIv.begin() <= current.end())
-                    current |= subIv;
+                    current = interval;
+                else if (interval.begin() <= current.end())
+                    current |= interval;
                 else {
                     result.append(current);
-                    current = subIv;
+                    current = interval;
                 }
             }
             if (current)
@@ -1403,32 +1403,32 @@ private:
                     break;
                 }
 
-                auto [subIv, listIdx] = *found;
+                auto [subInterval, listIdx] = *found;
 
                 // Gap before the overlapping sub-interval.
-                if (cursor < subIv.begin()) {
-                    m_intervals.insert({ cursor, subIv.begin() }, allocTmpList(tmp));
+                if (cursor < subInterval.begin()) {
+                    m_intervals.insert({ cursor, subInterval.begin() }, allocTmpList(tmp));
                     m_numSubIntervals++;
                 }
 
                 // Erase the existing sub-interval; we'll re-insert split pieces.
-                m_intervals.erase(subIv);
+                m_intervals.erase(subInterval);
                 m_numSubIntervals--;
 
                 // Part before cursor keeps the original set.
-                if (subIv.begin() < cursor) {
-                    m_intervals.insert({ subIv.begin(), cursor }, listIdx);
+                if (subInterval.begin() < cursor) {
+                    m_intervals.insert({ subInterval.begin(), cursor }, listIdx);
                     m_numSubIntervals++;
                 }
 
                 // Overlapping part gets tmp added.
-                Point overlapEnd = std::min(interval.end(), subIv.end());
-                m_intervals.insert({ std::max(cursor, subIv.begin()), overlapEnd }, cloneAndAdd(listIdx, tmp));
+                Point overlapEnd = std::min(interval.end(), subInterval.end());
+                m_intervals.insert({ std::max(cursor, subInterval.begin()), overlapEnd }, cloneAndAdd(listIdx, tmp));
                 m_numSubIntervals++;
 
                 // Part after overlap keeps the original set.
-                if (overlapEnd < subIv.end()) {
-                    m_intervals.insert({ overlapEnd, subIv.end() }, listIdx);
+                if (overlapEnd < subInterval.end()) {
+                    m_intervals.insert({ overlapEnd, subInterval.end() }, listIdx);
                     m_numSubIntervals++;
                 }
 
