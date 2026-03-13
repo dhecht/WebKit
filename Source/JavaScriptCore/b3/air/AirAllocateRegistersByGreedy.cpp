@@ -1317,7 +1317,6 @@ private:
 
         static EncodedTmpList encodeSingleton(Tmp tmp)
         {
-            ASSERT(tmp.hasTmpIndex());
             unsigned tIdx = tmp.tmpIndex();
             ASSERT(tIdx < isIndexBit);
             return { tIdx };
@@ -1345,18 +1344,17 @@ private:
         using LivenessIntervalSet = IntervalSet<Point, EncodedTmpList, cacheLinesPerNode>;
 
         LivenessMap()
+        : m_singletonScratch({ Tmp() })
         {
-            m_singletonScratch.append(Tmp());
         }
         LivenessMap(LivenessMap&&) = default;
         LivenessMap& operator=(LivenessMap&&) = default;
 
         void add(Tmp tmp, const LiveRange& range)
         {
-            EncodedTmpList encoded = encodeSingleton(tmp);
-            m_numSingletons++;
+            EncodedTmpList encodedList = encodeSingleton(tmp);
             for (auto& interval : range.intervals())
-                addInterval(interval, tmp, encoded);
+                addInterval(interval, tmp, encodedList);
         }
 
         // Calls func with the TmpList for any intervals in this map that overlaps with the given range.
@@ -1367,8 +1365,8 @@ private:
                     auto entry = m_intervals.find(interval);
                     if (!entry)
                         break;
-                    auto [overlappingInterval, listIdx] = *entry;
-                    if (func(decodeTmpList(listIdx)) == IterationStatus::Done)
+                    auto [overlappingInterval, overlappingList] = *entry;
+                    if (func(decodeTmpList(overlappingList)) == IterationStatus::Done)
                         return IterationStatus::Done;
                     if (interval.end() <= overlappingInterval.end())
                         break;
@@ -1386,15 +1384,15 @@ private:
             if (a.m_numIntervals > b.m_numIntervals)
                 std::swap(smaller, larger);
 
-            for (auto [interval, listIdx] : smaller->m_intervals) {
-                const auto& smallerList = smaller->decodeTmpList(listIdx);
+            for (auto [interval, encodedList] : smaller->m_intervals) {
+                const auto& outerList = smaller->decodeTmpList(encodedList);
                 while (true) {
                     auto entry = larger->m_intervals.find(interval);
                     if (!entry)
                         break;
-                    auto [overlapInterval, overlapListIdx] = *entry;
-                    const auto& largerList = larger->decodeTmpList(overlapListIdx);
-                    if (func(smallerList, largerList) == IterationStatus::Done)
+                    auto [overlapInterval, overlapEncodedList] = *entry;
+                    const auto& innerList = larger->decodeTmpList(overlapEncodedList);
+                    if (func(outerList, innerList) == IterationStatus::Done)
                         return IterationStatus::Done;
                     if (interval.end() <= overlapInterval.end())
                         break;
@@ -1424,9 +1422,6 @@ private:
             return result;
         }
 
-        size_t numSingletons() const { return m_numSingletons; }
-        size_t numMultiElement() const { return m_numMultiElement; }
-
     private:
         void insertInterval(const Interval& interval, EncodedTmpList listIdx)
         {
@@ -1440,23 +1435,23 @@ private:
             m_numIntervals--;
         }
 
-        void addInterval(Interval interval, Tmp tmp, EncodedTmpList encoded)
+        void addInterval(Interval interval, Tmp tmp, EncodedTmpList encodedTmp)
         {
-            ASSERT(isSingleton(encoded) && decodeSingleton(encoded) == tmp);
+            ASSERT(decodeSingleton(encodedTmp) == tmp);
 
             while (true) {
                 auto entry = m_intervals.find(interval);
 
                 if (!entry) {
                     // No overlap: insert remainder.
-                    insertInterval(interval, encoded);
+                    insertInterval(interval, encodedTmp);
                     break;
                 }
 
                 auto [overlapInterval, overlapListIdx] = *entry;
                 // Gap before the overlapping interval.
                 if (interval.begin() < overlapInterval.begin())
-                    insertInterval({ interval.begin(), overlapInterval.begin() }, encoded);
+                    insertInterval({ interval.begin(), overlapInterval.begin() }, encodedTmp);
 
                 // Erase the existing interval; we'll re-insert split pieces.
                 eraseInterval(overlapInterval);
@@ -1479,32 +1474,29 @@ private:
             }
         }
 
-        EncodedTmpList cloneAndAdd(EncodedTmpList listIdx, Tmp tmp)
+        EncodedTmpList cloneAndAdd(EncodedTmpList encodedList, Tmp tmp)
         {
-            TmpList newList = decodeTmpList(listIdx);
+            TmpList newList = decodeTmpList(encodedList);
             ASSERT(!newList.contains(tmp));
             newList.append(tmp);
-            EncodedTmpList newIdx = encodeIndex(m_tmpLists.size());
+            EncodedTmpList newEncodedList = encodeIndex(m_tmpLists.size());
             m_tmpLists.append(WTF::move(newList));
-            m_numMultiElement++;
-            return newIdx;
+            return newEncodedList;
         }
 
-        const TmpList& decodeTmpList(EncodedTmpList idx) const
+        const TmpList& decodeTmpList(EncodedTmpList encodedList) const
         {
-            if (isSingleton(idx)) [[likely]] {
-                m_singletonScratch[0] = decodeSingleton(idx);
+            if (isSingleton(encodedList)) [[likely]] {
+                m_singletonScratch[0] = decodeSingleton(encodedList);
                 return m_singletonScratch;
             }
-            return m_tmpLists[decodeIndex(idx)];
+            return m_tmpLists[decodeIndex(encodedList)];
         }
 
         LivenessIntervalSet m_intervals;
         Vector<TmpList> m_tmpLists;
         mutable TmpList m_singletonScratch;
         size_t m_numIntervals { 0 };
-        size_t m_numSingletons { 0 };
-        size_t m_numMultiElement { 0 };
     };
 
     // Represents a group of coalescable Tmps with their combined liveness information.
@@ -1545,8 +1537,6 @@ private:
         size_t size() const { return m_members.size(); }
         bool isEmpty() const { return m_members.isEmpty(); }
         LiveRange buildLiveRange() const { return m_liveness.buildLiveRange(); }
-        size_t numSingletons() const { return m_liveness.numSingletons(); }
-        size_t numMultiElement() const { return m_liveness.numMultiElement(); }
 
         using TmpList = typename LivenessMap<bank>::TmpList;
 
@@ -1809,8 +1799,6 @@ private:
 
             m_stats[bank].numGroupsCreated++;
             m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(group.size()));
-            m_stats[bank].numTmpListSingletons += group.numSingletons();
-            m_stats[bank].numTmpListMultiElement += group.numMultiElement();
 
             Tmp representative = m_code.newTmp(bank);
             Width useWidth = Width8;
