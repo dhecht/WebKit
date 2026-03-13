@@ -1292,25 +1292,71 @@ private:
     //   [0, 5)  -> {A}
     //   [5, 10) -> {A, B}
     //   [10,15) -> {B}
+    template<Bank bank>
     class LivenessMap {
         WTF_MAKE_NONCOPYABLE(LivenessMap);
     public:
         using TmpList = Vector<Tmp, 4>;
-        using TmpListsIndex = uint32_t;
+
+        struct EncodedTmpList {
+            uint32_t m_value { 0 };
+
+            void dump(PrintStream& out) const
+            {
+                if (m_value & isIndexBit)
+                    out.print("list#", m_value & (isIndexBit - 1));
+                else
+                    out.print(Tmp::tmpForIndex(bank, m_value));
+            }
+        };
+
+        static constexpr uint32_t isIndexBit = 1u << 31;
+        static constexpr uint32_t indexMask = isIndexBit - 1;
+
+        static bool isSingleton(EncodedTmpList idx) { return !(idx.m_value & isIndexBit); }
+
+        static EncodedTmpList encodeSingleton(Tmp tmp)
+        {
+            ASSERT(tmp.hasTmpIndex());
+            unsigned tIdx = tmp.tmpIndex();
+            ASSERT(tIdx < isIndexBit);
+            return { tIdx };
+        }
+
+        static Tmp decodeSingleton(EncodedTmpList idx)
+        {
+            ASSERT(isSingleton(idx));
+            return Tmp::tmpForIndex(bank, idx.m_value);
+        }
+
+        static EncodedTmpList encodeIndex(size_t index)
+        {
+            ASSERT(index <= indexMask);
+            return { isIndexBit | static_cast<uint32_t>(index) };
+        }
+
+        static unsigned decodeIndex(EncodedTmpList idx)
+        {
+            ASSERT(!isSingleton(idx));
+            return idx.m_value & indexMask;
+        }
 
         static constexpr unsigned cacheLinesPerNode = 3;
-        // Value is an index into m_tmpLists
-        using LivenessIntervalSet = IntervalSet<Point, TmpListsIndex, cacheLinesPerNode>;
+        using LivenessIntervalSet = IntervalSet<Point, EncodedTmpList, cacheLinesPerNode>;
 
-        LivenessMap() = default;
+        LivenessMap()
+        {
+            m_singletonScratch.append(Tmp());
+        }
         LivenessMap(LivenessMap&&) = default;
         LivenessMap& operator=(LivenessMap&&) = default;
 
         void add(Tmp tmp, const LiveRange& range)
         {
-            TmpListsIndex tmpIndex = allocTmpList(tmp);
+            EncodedTmpList encoded = encodeSingleton(tmp);
+            m_numSingletons++;
             for (auto& interval : range.intervals())
-                addInterval(interval, tmp, tmpIndex);
+                addInterval(interval, tmp, encoded);
         }
 
         // Calls func with the TmpList for any intervals in this map that overlaps with the given range.
@@ -1322,7 +1368,7 @@ private:
                     if (!entry)
                         break;
                     auto [overlappingInterval, listIdx] = *entry;
-                    if (func(m_tmpLists[listIdx]) == IterationStatus::Done)
+                    if (func(decodeTmpList(listIdx)) == IterationStatus::Done)
                         return IterationStatus::Done;
                     if (interval.end() <= overlappingInterval.end())
                         break;
@@ -1341,13 +1387,13 @@ private:
                 std::swap(smaller, larger);
 
             for (auto [interval, listIdx] : smaller->m_intervals) {
-                const auto& smallerList = smaller->m_tmpLists[listIdx];
+                const auto& smallerList = smaller->decodeTmpList(listIdx);
                 while (true) {
                     auto entry = larger->m_intervals.find(interval);
                     if (!entry)
                         break;
                     auto [overlapInterval, overlapListIdx] = *entry;
-                    const auto& largerList = larger->m_tmpLists[overlapListIdx];
+                    const auto& largerList = larger->decodeTmpList(overlapListIdx);
                     if (func(smallerList, largerList) == IterationStatus::Done)
                         return IterationStatus::Done;
                     if (interval.end() <= overlapInterval.end())
@@ -1378,8 +1424,11 @@ private:
             return result;
         }
 
+        size_t numSingletons() const { return m_numSingletons; }
+        size_t numMultiElement() const { return m_numMultiElement; }
+
     private:
-        void insertInterval(const Interval& interval, TmpListsIndex listIdx)
+        void insertInterval(const Interval& interval, EncodedTmpList listIdx)
         {
             m_intervals.insert(interval, listIdx);
             m_numIntervals++;
@@ -1391,23 +1440,23 @@ private:
             m_numIntervals--;
         }
 
-        void addInterval(Interval interval, Tmp tmp, TmpListsIndex tmpIndex)
+        void addInterval(Interval interval, Tmp tmp, EncodedTmpList encoded)
         {
-            ASSERT(m_tmpLists[tmpIndex].size() == 1 && m_tmpLists[tmpIndex].last() == tmp);
+            ASSERT(isSingleton(encoded) && decodeSingleton(encoded) == tmp);
 
             while (true) {
                 auto entry = m_intervals.find(interval);
 
                 if (!entry) {
                     // No overlap: insert remainder.
-                    insertInterval(interval, tmpIndex);
+                    insertInterval(interval, encoded);
                     break;
                 }
 
                 auto [overlapInterval, overlapListIdx] = *entry;
                 // Gap before the overlapping interval.
                 if (interval.begin() < overlapInterval.begin())
-                    insertInterval({ interval.begin(), overlapInterval.begin() }, tmpIndex);
+                    insertInterval({ interval.begin(), overlapInterval.begin() }, encoded);
 
                 // Erase the existing interval; we'll re-insert split pieces.
                 eraseInterval(overlapInterval);
@@ -1430,29 +1479,36 @@ private:
             }
         }
 
-        TmpListsIndex allocTmpList(Tmp tmp)
+        EncodedTmpList cloneAndAdd(EncodedTmpList listIdx, Tmp tmp)
         {
-            TmpListsIndex idx = m_tmpLists.size();
-            m_tmpLists.append(TmpList { tmp });
-            return idx;
-        }
-
-        TmpListsIndex cloneAndAdd(TmpListsIndex listIdx, Tmp tmp)
-        {
-            TmpList newList = m_tmpLists[listIdx]; // copy before potential realloc
+            TmpList newList = decodeTmpList(listIdx);
             ASSERT(!newList.contains(tmp));
             newList.append(tmp);
-            TmpListsIndex newIdx = m_tmpLists.size();
+            EncodedTmpList newIdx = encodeIndex(m_tmpLists.size());
             m_tmpLists.append(WTF::move(newList));
+            m_numMultiElement++;
             return newIdx;
+        }
+
+        const TmpList& decodeTmpList(EncodedTmpList idx) const
+        {
+            if (isSingleton(idx)) [[likely]] {
+                m_singletonScratch[0] = decodeSingleton(idx);
+                return m_singletonScratch;
+            }
+            return m_tmpLists[decodeIndex(idx)];
         }
 
         LivenessIntervalSet m_intervals;
         Vector<TmpList> m_tmpLists;
+        mutable TmpList m_singletonScratch;
         size_t m_numIntervals { 0 };
+        size_t m_numSingletons { 0 };
+        size_t m_numMultiElement { 0 };
     };
 
     // Represents a group of coalescable Tmps with their combined liveness information.
+    template<Bank bank>
     class AffinityGroup {
         WTF_MAKE_NONCOPYABLE(AffinityGroup);
     public:
@@ -1482,15 +1538,17 @@ private:
                 m_liveness.add(member, getLiveRange(member));
             m_members.appendVector(other.m_members);
             other.m_members.clear();
-            other.m_liveness = LivenessMap();
+            other.m_liveness = LivenessMap<bank>();
         }
 
         const Vector<Tmp>& members() const { return m_members; }
         size_t size() const { return m_members.size(); }
         bool isEmpty() const { return m_members.isEmpty(); }
         LiveRange buildLiveRange() const { return m_liveness.buildLiveRange(); }
+        size_t numSingletons() const { return m_liveness.numSingletons(); }
+        size_t numMultiElement() const { return m_liveness.numMultiElement(); }
 
-        using TmpList = LivenessMap::TmpList;
+        using TmpList = typename LivenessMap<bank>::TmpList;
 
         IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
@@ -1499,7 +1557,7 @@ private:
 
         static IterationStatus forEachPairwiseOverlap(const AffinityGroup& a, const AffinityGroup& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
         {
-            return LivenessMap::forEachPairwiseOverlap(a.m_liveness, b.m_liveness, func);
+            return LivenessMap<bank>::forEachPairwiseOverlap(a.m_liveness, b.m_liveness, func);
         }
 
         void dump(PrintStream& out) const
@@ -1513,7 +1571,7 @@ private:
 
     private:
         Vector<Tmp> m_members;
-        LivenessMap m_liveness;
+        LivenessMap<bank> m_liveness;
     };
 
     using GroupIndex = uint32_t;
@@ -1522,7 +1580,7 @@ private:
     static constexpr GroupIndex noGroup = std::numeric_limits<GroupIndex>::max();
 
     template<Bank bank>
-    void coalesceSingletons(Tmp tmp0, Tmp tmp1, Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    void coalesceSingletons(Tmp tmp0, Tmp tmp1, Vector<AffinityGroup<bank>>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         ASSERT(isInCoalescables<bank>(tmp1, m_map.get<bank>(tmp0).coalescables) && isInCoalescables<bank>(tmp0, m_map.get<bank>(tmp1).coalescables));
         auto newIndex = groups.size();
@@ -1533,7 +1591,7 @@ private:
     }
 
     template<Bank bank>
-    bool tryCoalesceSingletonWithGroup(Tmp singleton, GroupIndex groupIndex, Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    bool tryCoalesceSingletonWithGroup(Tmp singleton, GroupIndex groupIndex, Vector<AffinityGroup<bank>>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         const auto& group = groups[groupIndex];
         TmpData& singletonData = m_map.get<bank>(singleton);
@@ -1562,13 +1620,13 @@ private:
     }
 
     template<Bank bank>
-    bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1, Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1, Vector<AffinityGroup<bank>>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         const auto& group0 = groups[groupIndex0];
         const auto& group1 = groups[groupIndex1];
 
         bool conflict = false;
-        AffinityGroup::forEachPairwiseOverlap(group0, group1, [&](const auto& tmpListA, const auto& tmpListB) {
+        AffinityGroup<bank>::forEachPairwiseOverlap(group0, group1, [&](const auto& tmpListA, const auto& tmpListB) {
             for (Tmp memberTmp : tmpListA) {
                 const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
                 if (tmpListB.size() > coalescables.size()) {
@@ -1602,7 +1660,7 @@ private:
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::coalesceTmps"_s);
 
-        Vector<AffinityGroup> groups;
+        Vector<AffinityGroup<bank>> groups;
         TmpGroupMap<bank> tmpToGroup(Tmp::indexEnd(m_code, bank), noGroup);
 
         buildCoalescingGroups<bank>(groups, tmpToGroup);
@@ -1612,7 +1670,7 @@ private:
     }
 
     template<Bank bank>
-    void buildCoalescingGroups(Vector<AffinityGroup>& groups, TmpGroupMap<bank>& tmpToGroup)
+    void buildCoalescingGroups(Vector<AffinityGroup<bank>>& groups, TmpGroupMap<bank>& tmpToGroup)
     {
         struct Move {
             Tmp tmp0, tmp1;
@@ -1678,7 +1736,7 @@ private:
     // group members always hold the same value (connected by moves), so replacing them with
     // a single representative is semantically correct.
     template<Bank bank>
-    void validateCoalescing(const Vector<AffinityGroup>& groups, const TmpGroupMap<bank>& tmpToGroup)
+    void validateCoalescing(const Vector<AffinityGroup<bank>>& groups, const TmpGroupMap<bank>& tmpToGroup)
     {
         if (!Options::airValidateGreedRegAlloc())
             return;
@@ -1743,7 +1801,7 @@ private:
     }
 
     template<Bank bank>
-    void createGroupRepresentatives(Vector<AffinityGroup>& groups)
+    void createGroupRepresentatives(Vector<AffinityGroup<bank>>& groups)
     {
         for (auto& group : groups) {
             if (group.isEmpty())
@@ -1751,6 +1809,8 @@ private:
 
             m_stats[bank].numGroupsCreated++;
             m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(group.size()));
+            m_stats[bank].numTmpListSingletons += group.numSingletons();
+            m_stats[bank].numTmpListMultiElement += group.numMultiElement();
 
             Tmp representative = m_code.newTmp(bank);
             Width useWidth = Width8;
@@ -1790,7 +1850,7 @@ private:
     // Phase 3: Replace member Tmps with representative in all instructions.
     // Nop self-Moves and adjust useDefCost for removed moves.
     template<Bank bank>
-    void rewriteCoalescedTmps(const Vector<AffinityGroup>& groups, const TmpGroupMap<bank>& tmpToGroup)
+    void rewriteCoalescedTmps(const Vector<AffinityGroup<bank>>& groups, const TmpGroupMap<bank>& tmpToGroup)
     {
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
@@ -1801,7 +1861,7 @@ private:
                     auto idx = tmpToGroup[tmp];
                     if (idx == noGroup)
                         return;
-                    const AffinityGroup& group = groups[idx];
+                    const AffinityGroup<bank>& group = groups[idx];
                     ASSERT(!group.isEmpty() && group.m_representative);
                     tmp = group.m_representative;
                 });
