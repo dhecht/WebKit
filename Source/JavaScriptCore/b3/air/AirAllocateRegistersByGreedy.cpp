@@ -1344,7 +1344,10 @@ private:
         static constexpr unsigned cacheLinesPerNode = 3;
         using LivenessIntervalSet = IntervalSet<Point, EncodedTmpList, cacheLinesPerNode>;
 
-        LivenessMap() = default;
+        LivenessMap()
+        {
+            m_singletonScratch.append(Tmp());
+        }
         LivenessMap(LivenessMap&&) = default;
         LivenessMap& operator=(LivenessMap&&) = default;
 
@@ -1356,34 +1359,16 @@ private:
                 addInterval(interval, tmp, encoded);
         }
 
-        IterationStatus forEachTmpIn(EncodedTmpList encoded, const Invocable<IterationStatus(Tmp)> auto& func) const
-        {
-            if (isSingleton(encoded)) [[likely]]
-                return func(decodeSingleton(encoded));
-            for (Tmp tmp : m_tmpLists[decodeIndex(encoded)]) {
-                if (func(tmp) == IterationStatus::Done)
-                    return IterationStatus::Done;
-            }
-            return IterationStatus::Continue;
-        }
-
-        unsigned tmpListSize(EncodedTmpList encoded) const
-        {
-            if (isSingleton(encoded)) [[likely]]
-                return 1;
-            return m_tmpLists[decodeIndex(encoded)].size();
-        }
-
-        // Calls func with the EncodedTmpList for any intervals in this map that overlap with the given range.
-        IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(EncodedTmpList)> auto& func) const
+        // Calls func with the TmpList for any intervals in this map that overlaps with the given range.
+        IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
             for (auto interval : range.intervals()) {
                 while (true) {
                     auto entry = m_intervals.find(interval);
                     if (!entry)
                         break;
-                    auto [overlappingInterval, encodedList] = *entry;
-                    if (func(encodedList) == IterationStatus::Done)
+                    auto [overlappingInterval, listIdx] = *entry;
+                    if (func(decodeTmpList(listIdx)) == IterationStatus::Done)
                         return IterationStatus::Done;
                     if (interval.end() <= overlappingInterval.end())
                         break;
@@ -1393,28 +1378,23 @@ private:
             return IterationStatus::Continue;
         }
 
-        // Calls func with EncodedTmpLists for each pair of overlapping intervals in a and b.
-        // The first EncodedTmpList always corresponds to a, the second to b.
-        static IterationStatus forEachPairwiseOverlap(const LivenessMap& a, const LivenessMap& b, const Invocable<IterationStatus(EncodedTmpList, EncodedTmpList)> auto& func)
+        // Calls func with both TmpLists for each pair of overlapping intervals in a and b.
+        static IterationStatus forEachPairwiseOverlap(const LivenessMap& a, const LivenessMap& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
         {
             const LivenessMap* smaller = &a;
             const LivenessMap* larger = &b;
-            bool swapped = false;
-            if (a.m_numIntervals > b.m_numIntervals) {
+            if (a.m_numIntervals > b.m_numIntervals)
                 std::swap(smaller, larger);
-                swapped = true;
-            }
 
-            for (auto [interval, smallerEncoded] : smaller->m_intervals) {
+            for (auto [interval, listIdx] : smaller->m_intervals) {
+                const auto& smallerList = smaller->decodeTmpList(listIdx);
                 while (true) {
                     auto entry = larger->m_intervals.find(interval);
                     if (!entry)
                         break;
-                    auto [overlapInterval, largerEncoded] = *entry;
-                    auto status = swapped
-                        ? func(largerEncoded, smallerEncoded)
-                        : func(smallerEncoded, largerEncoded);
-                    if (status == IterationStatus::Done)
+                    auto [overlapInterval, overlapListIdx] = *entry;
+                    const auto& largerList = larger->decodeTmpList(overlapListIdx);
+                    if (func(smallerList, largerList) == IterationStatus::Done)
                         return IterationStatus::Done;
                     if (interval.end() <= overlapInterval.end())
                         break;
@@ -1428,8 +1408,8 @@ private:
         {
             LiveRange result;
             Interval current = { };
-            for (auto [interval, encodedList] : m_intervals) {
-                UNUSED_PARAM(encodedList);
+            for (auto [interval, listIdx] : m_intervals) {
+                UNUSED_PARAM(listIdx);
                 if (!current)
                     current = interval;
                 else if (interval.begin() <= current.end())
@@ -1448,9 +1428,9 @@ private:
         size_t numMultiElement() const { return m_numMultiElement; }
 
     private:
-        void insertInterval(const Interval& interval, EncodedTmpList encodedList)
+        void insertInterval(const Interval& interval, EncodedTmpList listIdx)
         {
-            m_intervals.insert(interval, encodedList);
+            m_intervals.insert(interval, listIdx);
             m_numIntervals++;
         }
 
@@ -1473,7 +1453,7 @@ private:
                     break;
                 }
 
-                auto [overlapInterval, overlapEncodedList] = *entry;
+                auto [overlapInterval, overlapListIdx] = *entry;
                 // Gap before the overlapping interval.
                 if (interval.begin() < overlapInterval.begin())
                     insertInterval({ interval.begin(), overlapInterval.begin() }, encoded);
@@ -1483,26 +1463,25 @@ private:
 
                 // Part before our interval keeps the original list.
                 if (overlapInterval.begin() < interval.begin())
-                    insertInterval({ overlapInterval.begin(), interval.begin() }, overlapEncodedList);
+                    insertInterval({ overlapInterval.begin(), interval.begin() }, overlapListIdx);
 
                 // Overlapping part gets tmp added.
                 Interval combined = { std::max(interval.begin(), overlapInterval.begin()), std::min(interval.end(), overlapInterval.end()) };
-                insertInterval(combined, cloneAndAdd(overlapEncodedList, tmp));
+                insertInterval(combined, cloneAndAdd(overlapListIdx, tmp));
 
                 if (interval.end() <= overlapInterval.end()) {
                     // Part after overlap keeps the original list.
                     if (interval.end() < overlapInterval.end())
-                        insertInterval({ interval.end(), overlapInterval.end() }, overlapEncodedList);
+                        insertInterval({ interval.end(), overlapInterval.end() }, overlapListIdx);
                     break;
                 }
                 interval = { overlapInterval.end(), interval.end() };
             }
         }
 
-        EncodedTmpList cloneAndAdd(EncodedTmpList encoded, Tmp tmp)
+        EncodedTmpList cloneAndAdd(EncodedTmpList listIdx, Tmp tmp)
         {
-            TmpList newList;
-            forEachTmpIn(encoded, [&](Tmp t) { newList.append(t); return IterationStatus::Continue; });
+            TmpList newList = decodeTmpList(listIdx);
             ASSERT(!newList.contains(tmp));
             newList.append(tmp);
             EncodedTmpList newIdx = encodeIndex(m_tmpLists.size());
@@ -1511,8 +1490,18 @@ private:
             return newIdx;
         }
 
+        const TmpList& decodeTmpList(EncodedTmpList idx) const
+        {
+            if (isSingleton(idx)) [[likely]] {
+                m_singletonScratch[0] = decodeSingleton(idx);
+                return m_singletonScratch;
+            }
+            return m_tmpLists[decodeIndex(idx)];
+        }
+
         LivenessIntervalSet m_intervals;
         Vector<TmpList> m_tmpLists;
+        mutable TmpList m_singletonScratch;
         size_t m_numIntervals { 0 };
         size_t m_numSingletons { 0 };
         size_t m_numMultiElement { 0 };
@@ -1559,24 +1548,14 @@ private:
         size_t numSingletons() const { return m_liveness.numSingletons(); }
         size_t numMultiElement() const { return m_liveness.numMultiElement(); }
 
-        using EncodedTmpList = typename LivenessMap<bank>::EncodedTmpList;
+        using TmpList = typename LivenessMap<bank>::TmpList;
 
-        IterationStatus forEachTmpIn(EncodedTmpList encoded, const Invocable<IterationStatus(Tmp)> auto& func) const
-        {
-            return m_liveness.forEachTmpIn(encoded, func);
-        }
-
-        unsigned tmpListSize(EncodedTmpList encoded) const
-        {
-            return m_liveness.tmpListSize(encoded);
-        }
-
-        IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(EncodedTmpList)> auto& func) const
+        IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
         {
             return m_liveness.forEachOverlap(range, func);
         }
 
-        static IterationStatus forEachPairwiseOverlap(const AffinityGroup& a, const AffinityGroup& b, const Invocable<IterationStatus(EncodedTmpList, EncodedTmpList)> auto& func)
+        static IterationStatus forEachPairwiseOverlap(const AffinityGroup& a, const AffinityGroup& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
         {
             return LivenessMap<bank>::forEachPairwiseOverlap(a.m_liveness, b.m_liveness, func);
         }
@@ -1617,16 +1596,21 @@ private:
         const auto& group = groups[groupIndex];
         TmpData& singletonData = m_map.get<bank>(singleton);
 
-        auto status = group.forEachOverlap(singletonData.liveRange, [&](auto encodedList) {
-            if (group.tmpListSize(encodedList) > singletonData.coalescables.size())
-                return IterationStatus::Done; // Pigeonhole principle
-            return group.forEachTmpIn(encodedList, [&](Tmp member) {
-                if (!isInCoalescables<bank>(member, singletonData.coalescables))
+        bool conflict = false;
+        group.forEachOverlap(singletonData.liveRange, [&](const auto& tmpList) {
+            if (tmpList.size() > singletonData.coalescables.size()) {
+                conflict = true; // Pigeonhole principle
+                return IterationStatus::Done;
+            }
+            for (Tmp member : tmpList) {
+                if (!isInCoalescables<bank>(member, singletonData.coalescables)) {
+                    conflict = true;
                     return IterationStatus::Done;
-                return IterationStatus::Continue;
-            });
+                }
+            }
+            return IterationStatus::Continue;
         });
-        if (status == IterationStatus::Done)
+        if (conflict)
             return false;
 
         groups[groupIndex].addMember(singleton, singletonData.liveRange);
@@ -1641,19 +1625,24 @@ private:
         const auto& group0 = groups[groupIndex0];
         const auto& group1 = groups[groupIndex1];
 
-        auto status = AffinityGroup<bank>::forEachPairwiseOverlap(group0, group1, [&](auto encodedListA, auto encodedListB) {
-            return group0.forEachTmpIn(encodedListA, [&](Tmp memberTmp) {
+        bool conflict = false;
+        AffinityGroup<bank>::forEachPairwiseOverlap(group0, group1, [&](const auto& tmpListA, const auto& tmpListB) {
+            for (Tmp memberTmp : tmpListA) {
                 const auto& coalescables = m_map.get<bank>(memberTmp).coalescables;
-                if (group1.tmpListSize(encodedListB) > coalescables.size())
-                    return IterationStatus::Done; // Pigeonhole principle
-                return group1.forEachTmpIn(encodedListB, [&](Tmp otherTmp) {
-                    if (!isInCoalescables<bank>(otherTmp, coalescables))
+                if (tmpListB.size() > coalescables.size()) {
+                    conflict = true; // Pigeonhole principle
+                    return IterationStatus::Done;
+                }
+                for (Tmp otherTmp : tmpListB) {
+                    if (!isInCoalescables<bank>(otherTmp, coalescables)) {
+                        conflict = true;
                         return IterationStatus::Done;
-                    return IterationStatus::Continue;
-                });
-            });
+                    }
+                }
+            }
+            return IterationStatus::Continue;
         });
-        if (status == IterationStatus::Done)
+        if (conflict)
             return false;
 
         auto getLiveRange = [&](Tmp tmp) -> const LiveRange& {
