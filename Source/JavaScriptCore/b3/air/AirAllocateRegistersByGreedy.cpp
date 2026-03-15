@@ -54,9 +54,6 @@ namespace JSC { namespace B3 { namespace Air {
 
 namespace Greedy {
 
-// Experiments
-static constexpr bool eagerGroupsExhaustiveSearch = false;
-
 static constexpr float unspillableCost = std::numeric_limits<float>::infinity();
 static constexpr float fastTmpSpillCost = std::numeric_limits<float>::max();
 static constexpr float maxSpillableSpillCost = std::numeric_limits<float>::max();
@@ -83,7 +80,7 @@ static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 // conflicts, e.g. when a late use is followed by an early def. Two "gap" points, Pre & Post,
 // exist for each instruction to allow distinguishing e.g. a Tmp being live into a block from
 // a Tmp becoming live due to an early def by the first instruction of the block
-// (and sinilarly for block exits and late use).
+// (and similarly for block exits and late use).
 //
 // Interval: contiguous set of points, represented by a half open interval [begin, end).
 //
@@ -98,13 +95,21 @@ static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 // the register at each Point. Tmps and their associated Intervals can be assigned and
 // evicted to/from the RegisterRange as the register allocation algorithm progresses.
 //
+// AffinityGroup: a set of Tmps connected by move instructions where simultaneously-live
+// members are guaranteed to hold the same value (due to the connecting moves), so their
+// live ranges may overlap and they can still be coalesced into a single representative Tmp.
+//
+// LivenessMap: for an AffinityGroup, tracks which member Tmps are live at each point.
+// Used to accelerate conflict detection during coalescing.
+//
 // Algorithm:
 //
 // 1. Initialization:
 //   a. Define where Points are located in the IR.
 //   b. Run liveness analysis and build a LiveRange for each Tmp (including fixed registers).
 //   c. Run analysis to determine the cost to spill each Tmp.
-//   d. Build metadata related to Tmp coalescing. Eagerly group Tmps that can be coalesced.
+//   d. Coalesce Tmps by building affinity groups from move instructions and replacing
+//      each group's members with a single representative Tmp.
 // 2. Register allocation:
 //   a. Process each Tmp in order of priority. Priority is mostly related to the "stage" of the
 //      Tmp, whether a Tmp has a preferred register, and the size of a Tmp's LiveRange. The idea
@@ -115,9 +120,9 @@ static bool verbose() { return Options::airGreedyRegAllocVerbose(); }
 //     - First, simply try to find space where the LiveRange can fit in a RegisterRange.
 //     - If that's not successful, we may evict LiveRanges in favor of a LiveRange with higher
 //       spill cost. The evicted LiveRanges will requeued for further processing.
-//     - If that's not successful, we may split up eagerly coalesced Tmps and process each
-//       subgroup individually. We also try other forms of splitting LiveRanges, which will
-//       produce new Tmps/LiveRanges, some of which may be assignable to registers.
+//     - If that's not successful, we may split LiveRanges, e.g. around register clobbers or
+//       at intra-block boundaries, producing new Tmps/LiveRanges, some of which may be
+//       assignable to registers.
 //     - Finally, if all else fails, the Tmp is spilled and new Tmps for the spill/fill fixups
 //       are queued for processing.
 // 3. Finalization: fixup IR code is inserted to handle Tmps' split ranges and spills.
@@ -319,7 +324,6 @@ enum class Stage : uint8_t {
     Coalesced,
     Spilled,
     Replaced,
-    SplitGroup,
 };
 
 class TmpPriority {
@@ -547,15 +551,8 @@ struct TmpData {
     void dump(PrintStream& out) const
     {
         out.print("{stage = ", stage, " liveRange = ", liveRange, ", preferredReg = ", preferredReg,
-            ", coalescables = ", listDump(coalescables), ", parentGroup = ", parentGroup, ", subGroup0 = ", subGroup0, ", subGroup1 = ", subGroup1,
-            ", useDefCost = ", useDefCost, ", spillability = ", spillability, ", assigned = ", assigned, ", spillSlot = ", pointerDump(spillSlot),
-            ", splitMetadataIndex = ", splitMetadataIndex, "}");
-    }
-
-    bool isGroup()
-    {
-        ASSERT(!subGroup0 == !subGroup1);
-        return !!subGroup0;
+            ", coalescables = ", listDump(coalescables), ", useDefCost = ", useDefCost, ", spillability = ", spillability,
+            ", assigned = ", assigned, ", spillSlot = ", pointerDump(spillSlot), ", splitMetadataIndex = ", splitMetadataIndex, "}");
     }
 
     float spillCost()
@@ -585,18 +582,14 @@ struct TmpData {
         ASSERT(!(spillSlot && assigned));
         ASSERT(!!assigned == (stage == Stage::Assigned));
         ASSERT(liveRange.intervals().isEmpty() == !liveRange.size());
-        ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled || !parentGroup);
+        ASSERT_IMPLIES(spillSlot, stage == Stage::Spilled);
         ASSERT_IMPLIES(stage == Stage::Spilled, spillCost() != unspillableCost);
-        ASSERT_IMPLIES(stage == Stage::Spilled, !isGroup()); // Should have been split
-        ASSERT_IMPLIES(coalescables.size(), !isGroup()); // Only bottom-most should have coalescables
     }
 
     LiveRange liveRange;
     Vector<CoalescableWith> coalescables;
     StackSlot* spillSlot { nullptr };
     float useDefCost { 0.0f };
-    Tmp parentGroup;
-    Tmp subGroup0, subGroup1;
     uint32_t splitMetadataIndex : 31 { 0 };
     uint32_t hasColdUse : 1 { 0 };
     Stage stage { Stage::New };
@@ -690,8 +683,8 @@ public:
         initSpillCosts<GP>();
         initSpillCosts<FP>();
         coalesceWithPinnedRegisters();
-        finalizeGroups<GP>();
-        finalizeGroups<FP>();
+        coalesceTmps<GP>();
+        coalesceTmps<FP>();
 
         dataLogLnIf(verbose(), "State before greedy register allocation:\n", *this);
 
@@ -901,46 +894,9 @@ private:
         return Interval();
     }
 
-    // Returns the root of the spill-group tree. All Tmps in the tree are known to not interfere and
-    // will share the same spill slot.
-    template<Bank bank>
-    Tmp groupForSpill(Tmp tmp)
-    {
-        ASSERT(m_map.get<bank>(tmp).stage == Stage::Spilled);
-        while (Tmp parent = m_map.get<bank>(tmp).parentGroup)
-            tmp = parent;
-        return tmp;
-    }
-
-    // Returns the root of the register-subgroup tree. All Tmps in this subtree are candidates for
-    // coalescing into the same register assignment.
-    template<Bank bank>
-    Tmp groupForReg(Tmp tmp)
-    {
-        Tmp parent = m_map.get<bank>(tmp).parentGroup;
-        while (parent && m_map[parent].stage != Stage::SplitGroup) {
-            ASSERT(!m_map[tmp].assigned); // Only the root of the register-group should have an assignment
-            tmp = parent;
-            parent = m_map.get<bank>(tmp).parentGroup;
-        }
-        return tmp;
-    }
-
-    Tmp groupForReg(Tmp tmp)
-    {
-        ASSERT(tmp.isGP() || tmp.isFP());
-        return tmp.isGP() ? groupForReg<GP>(tmp) : groupForReg<FP>(tmp);
-    }
-
-    template<Bank bank>
     Reg assignedReg(Tmp tmp)
     {
-        return m_map.get<bank>(groupForReg<bank>(tmp)).assigned;
-    }
-
-    Reg assignedReg(Tmp tmp)
-    {
-        return m_map[groupForReg(tmp)].assigned;
+        return m_map[tmp].assigned;
     }
 
     // Returns the stack slot a Tmp should use if spilled. Otherwise, returns nullptr.
@@ -949,7 +905,7 @@ private:
     {
         TmpData& tmpData = m_map.get<bank>(tmp);
         if (tmpData.stage == Stage::Spilled) {
-            ASSERT(tmpData.spillSlot && tmpData.spillSlot == m_map.get<bank>(groupForSpill<bank>(tmp)).spillSlot);
+            ASSERT(tmpData.spillSlot);
             return tmpData.spillSlot;
         }
         return nullptr;
@@ -999,31 +955,25 @@ private:
 
         auto checkConflicts = [&](BasicBlock* block, const typename TmpLiveness<bank>::LocalCalc& localCalc) {
             for (Tmp a : localCalc.live()) {
-                Tmp aGrp = groupForReg<bank>(a);
-                Reg aReg = assignedReg<bank>(a);
+                Reg aReg = assignedReg(a);
                 if (!aReg)
                     continue;
                 for (Tmp b : localCalc.live()) {
-                    Tmp bGrp = groupForReg<bank>(b);
-                    Reg bReg = assignedReg<bank>(b);
-                    if (aGrp == bGrp) {
-                        // Coalesced a & b so they better have the same register.
-                        if (aReg != bReg)
-                            fail(block, a, b);
-                    } else {
-                        // a & b interfere so b must either have been spilled or assigned a different register.
-                        if (!bReg)
-                            continue;
-                        if (aReg == bReg) {
-                            if (m_code.isPinned(aReg)) {
-                                // It's okay if both Tmps were coalseced to the same pinned register.
-                                TmpData& regData = m_map[Tmp(aReg)];
-                                if (regData.coalescables.containsIf([a](auto& with) { return with.tmp == a; })
-                                    && regData.coalescables.containsIf([b](auto& with) { return with.tmp == b; }))
-                                    continue;
-                            }
-                            fail(block, a, b);
+                    if (a == b)
+                        continue;
+                    Reg bReg = assignedReg(b);
+                    // a & b interfere so b must either have been spilled or assigned a different register.
+                    if (!bReg)
+                        continue;
+                    if (aReg == bReg) {
+                        if (m_code.isPinned(aReg)) {
+                            // It's okay if both Tmps were coalesced to the same pinned register.
+                            TmpData& regData = m_map[Tmp(aReg)];
+                            if (regData.coalescables.containsIf([a](auto& with) { return with.tmp == a; })
+                                && regData.coalescables.containsIf([b](auto& with) { return with.tmp == b; }))
+                                continue;
                         }
+                        fail(block, a, b);
                     }
                 }
             }
@@ -1303,27 +1253,6 @@ private:
 #endif
     }
 
-    template<typename Func, size_t inlineCapacity>
-    IterationStatus forEachTmpInGroup(Tmp grp, Vector<Tmp, inlineCapacity>& worklist, const Func& func)
-    {
-        ASSERT(worklist.isEmpty());
-        worklist.append(grp);
-
-        while (!worklist.isEmpty()) {
-            Tmp tmp = worklist.takeLast();
-            TmpData& data = m_map[tmp];
-
-            if (data.isGroup()) {
-                worklist.append(data.subGroup1);
-                worklist.append(data.subGroup0);
-            } else if (func(tmp) == IterationStatus::Done) {
-                worklist.shrink(0);
-                return IterationStatus::Done;
-            }
-        }
-        return IterationStatus::Continue;
-    }
-
     void coalesceWithPinnedRegisters()
     {
         // If a Tmp is in a pinned register's coalescables set, that means the
@@ -1343,11 +1272,404 @@ private:
         });
     }
 
-    template <Bank bank>
-    void finalizeGroups()
+    // Binary search a sorted coalescables vector to check if 'target' is coalescable.
+    template<Bank bank>
+    static bool isInCoalescables(Tmp tmp, const Vector<TmpData::CoalescableWith>& coalescables)
     {
-        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::finalizeGroups"_s);
+        auto it = std::lower_bound(coalescables.begin(), coalescables.end(), tmp,
+            [](const auto& edge, Tmp t) {
+                return edge.tmp.tmpIndex(bank) < t.tmpIndex(bank);
+            });
+        return it != coalescables.end() && it->tmp == tmp;
+    }
 
+    // Maps intervals to lists of Tmps live during that interval.
+    //
+    // Example: Tmp A live [0,10), Tmp B live [5,15):
+    //   [0, 5)  -> {A}
+    //   [5, 10) -> {A, B}
+    //   [10,15) -> {B}
+    template<Bank bank>
+    class LivenessMap {
+        WTF_MAKE_NONCOPYABLE(LivenessMap);
+    public:
+        using TmpList = Vector<Tmp, 4>;
+
+        LivenessMap()
+        : m_singletonScratch({ Tmp() })
+        {
+        }
+        LivenessMap(LivenessMap&&) = default;
+        LivenessMap& operator=(LivenessMap&&) = default;
+
+        void add(Tmp tmp, const LiveRange& range)
+        {
+            EncodedTmpList encodedList = encodeSingleton(tmp);
+            for (auto& interval : range.intervals())
+                addInterval(interval, encodedList);
+        }
+
+        void merge(LivenessMap&& other)
+        {
+            if (other.m_numIntervals > m_numIntervals)
+                std::swap(*this, other);
+
+            // Bulk-move other's multi-element TmpLists into ours, recording the base offset
+            // so we can translate EncodedTmpList indices.
+            size_t baseIndex = m_tmpLists.size();
+            m_tmpLists.appendVector(WTF::move(other.m_tmpLists));
+
+            for (auto [interval, encodedList] : other.m_intervals) {
+                EncodedTmpList translated = isSingleton(encodedList) ?
+                    encodedList : encodeIndex(decodeIndex(encodedList) + baseIndex);
+                addInterval(interval, translated);
+            }
+            other = LivenessMap();
+        }
+
+        // Calls func with the TmpList for any intervals in this map that overlaps with the given range.
+        IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
+        {
+            for (auto interval : range.intervals()) {
+                while (true) {
+                    auto entry = m_intervals.find(interval);
+                    if (!entry)
+                        break;
+                    auto [overlappingInterval, overlappingList] = *entry;
+                    if (func(decodeTmpList(overlappingList)) == IterationStatus::Done)
+                        return IterationStatus::Done;
+                    if (interval.end() <= overlappingInterval.end())
+                        break;
+                    interval = { overlappingInterval.end(), interval.end() };
+                }
+            }
+            return IterationStatus::Continue;
+        }
+
+        // Calls func with both TmpLists for each pair of overlapping intervals in a and b.
+        static IterationStatus forEachPairwiseOverlap(const LivenessMap& a, const LivenessMap& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
+        {
+            const LivenessMap* smaller = &a;
+            const LivenessMap* larger = &b;
+            if (a.m_numIntervals > b.m_numIntervals)
+                std::swap(smaller, larger);
+
+            for (auto [interval, encodedList] : smaller->m_intervals) {
+                const auto& outerList = smaller->decodeTmpList(encodedList);
+                while (true) {
+                    auto entry = larger->m_intervals.find(interval);
+                    if (!entry)
+                        break;
+                    auto [overlapInterval, overlapEncodedList] = *entry;
+                    const auto& innerList = larger->decodeTmpList(overlapEncodedList);
+                    if (func(outerList, innerList) == IterationStatus::Done)
+                        return IterationStatus::Done;
+                    if (interval.end() <= overlapInterval.end())
+                        break;
+                    interval = { overlapInterval.end(), interval.end() };
+                }
+            }
+            return IterationStatus::Continue;
+        }
+
+        LiveRange buildLiveRange() const
+        {
+            LiveRange result;
+            Interval current = { };
+            for (auto [interval, listIdx] : m_intervals) {
+                UNUSED_PARAM(listIdx);
+                if (!current)
+                    current = interval;
+                else if (interval.begin() <= current.end())
+                    current |= interval;
+                else {
+                    result.append(current);
+                    current = interval;
+                }
+            }
+            if (current)
+                result.append(current);
+            return result;
+        }
+
+    private:
+        // EncodedTmpList is either a Tmp or an index into m_tmpLists.
+        struct EncodedTmpList {
+            uint32_t m_value { 0 };
+
+            void dump(PrintStream& out) const
+            {
+                if (m_value & isIndexBit)
+                    out.print("list#", m_value & (isIndexBit - 1));
+                else
+                    out.print(Tmp::tmpForIndex(bank, m_value));
+            }
+        };
+
+        static constexpr uint32_t isIndexBit = 1u << 31;
+        static constexpr uint32_t indexMask = isIndexBit - 1;
+
+        static bool isSingleton(EncodedTmpList idx) { return !(idx.m_value & isIndexBit); }
+
+        static EncodedTmpList encodeSingleton(Tmp tmp)
+        {
+            unsigned tIdx = tmp.tmpIndex();
+            ASSERT(tIdx < isIndexBit);
+            return { tIdx };
+        }
+
+        static Tmp decodeSingleton(EncodedTmpList encoded)
+        {
+            ASSERT(isSingleton(encoded));
+            return Tmp::tmpForIndex(bank, encoded.m_value);
+        }
+
+        static EncodedTmpList encodeIndex(size_t index)
+        {
+            ASSERT(index <= indexMask);
+            return { isIndexBit | static_cast<uint32_t>(index) };
+        }
+
+        static unsigned decodeIndex(EncodedTmpList encoded)
+        {
+            ASSERT(!isSingleton(encoded));
+            return encoded.m_value & indexMask;
+        }
+
+        const TmpList& decodeTmpList(EncodedTmpList encodedList) const
+        {
+            if (isSingleton(encodedList)) [[likely]] {
+                m_singletonScratch[0] = decodeSingleton(encodedList);
+                return m_singletonScratch;
+            }
+            return m_tmpLists[decodeIndex(encodedList)];
+        }
+
+        void insertInterval(const Interval& interval, EncodedTmpList listIdx)
+        {
+            m_intervals.insert(interval, listIdx);
+            m_numIntervals++;
+        }
+
+        void eraseInterval(const Interval& interval)
+        {
+            m_intervals.erase(interval);
+            m_numIntervals--;
+        }
+
+        void addInterval(Interval interval, EncodedTmpList tmpList)
+        {
+            while (true) {
+                auto entry = m_intervals.find(interval);
+
+                if (!entry) {
+                    // No overlap: insert remainder.
+                    insertInterval(interval, tmpList);
+                    break;
+                }
+
+                auto [overlapInterval, overlapList] = *entry;
+                // Gap before the overlapping interval.
+                if (interval.begin() < overlapInterval.begin())
+                    insertInterval({ interval.begin(), overlapInterval.begin() }, tmpList);
+
+                // Erase the existing interval; we'll re-insert split pieces.
+                eraseInterval(overlapInterval);
+
+                // Part before our interval keeps the original list.
+                if (overlapInterval.begin() < interval.begin())
+                    insertInterval({ overlapInterval.begin(), interval.begin() }, overlapList);
+
+                // Overlapping part gets both lists combined.
+                Interval combined = { std::max(interval.begin(), overlapInterval.begin()),
+                    std::min(interval.end(), overlapInterval.end()) };
+                insertInterval(combined, concatLists(overlapList, tmpList));
+
+                if (interval.end() <= overlapInterval.end()) {
+                    // Part after overlap keeps the original list.
+                    if (interval.end() < overlapInterval.end())
+                        insertInterval({ interval.end(), overlapInterval.end() }, overlapList);
+                    break;
+                }
+                interval = { overlapInterval.end(), interval.end() };
+            }
+        }
+
+        EncodedTmpList concatLists(EncodedTmpList a, EncodedTmpList b)
+        {
+            TmpList newList = decodeTmpList(a);
+            if (isSingleton(b))
+                newList.append(decodeSingleton(b));
+            else
+                newList.appendVector(m_tmpLists[decodeIndex(b)]);
+            EncodedTmpList result = encodeIndex(m_tmpLists.size());
+            m_tmpLists.append(WTF::move(newList));
+            return result;
+        }
+
+        static constexpr unsigned cacheLinesPerNode = 3;
+        using LivenessIntervalSet = IntervalSet<Point, EncodedTmpList, cacheLinesPerNode>;
+
+        LivenessIntervalSet m_intervals;
+        Vector<TmpList> m_tmpLists;
+        mutable TmpList m_singletonScratch;
+        size_t m_numIntervals { 0 };
+    };
+
+    // Represents a group of coalescable Tmps with their combined liveness information. Tmps within
+    // the group can have overlapping live-ranges as long as they are in each other's coalescables list.
+    template<Bank bank>
+    class AffinityGroup {
+        WTF_MAKE_NONCOPYABLE(AffinityGroup);
+    public:
+        AffinityGroup(Tmp tmp0, const LiveRange& range0, Tmp tmp1, const LiveRange& range1)
+        {
+            addMember(tmp0, range0);
+            addMember(tmp1, range1);
+        }
+        AffinityGroup(AffinityGroup&&) = default;
+        AffinityGroup& operator=(AffinityGroup&&) = default;
+
+        void addMember(Tmp tmp, const LiveRange& range)
+        {
+            m_members.append(tmp);
+            m_liveness.add(tmp, range);
+        }
+
+        // Merges the other group into this one.
+        void merge(AffinityGroup& other)
+        {
+            m_liveness.merge(WTF::move(other.m_liveness));
+            m_members.appendVector(other.m_members);
+            other.m_members.clear();
+        }
+
+        const Vector<Tmp>& members() const { return m_members; }
+        size_t size() const { return m_members.size(); }
+        bool isEmpty() const { return m_members.isEmpty(); }
+        LiveRange buildLiveRange() const { return m_liveness.buildLiveRange(); }
+
+        using TmpList = typename LivenessMap<bank>::TmpList;
+
+        IterationStatus forEachOverlap(const LiveRange& range, const Invocable<IterationStatus(const TmpList&)> auto& func) const
+        {
+            return m_liveness.forEachOverlap(range, func);
+        }
+
+        static IterationStatus forEachPairwiseOverlap(const AffinityGroup& a, const AffinityGroup& b, const Invocable<IterationStatus(const TmpList&, const TmpList&)> auto& func)
+        {
+            return LivenessMap<bank>::forEachPairwiseOverlap(a.m_liveness, b.m_liveness, func);
+        }
+
+        void dump(PrintStream& out) const
+        {
+            if (m_representative)
+                out.print(m_representative, " <= ");
+            out.print("{ ", listDump(m_members), " }");
+        }
+
+        Tmp m_representative; // Only set for non-empty groups at finalization
+
+    private:
+        Vector<Tmp> m_members;
+        LivenessMap<bank> m_liveness;
+    };
+
+    using GroupIndex = uint32_t;
+    template<Bank bank>
+    using TmpGroupMap = IndexMap<Tmp::Indexed<bank>, GroupIndex>;
+    static constexpr GroupIndex noGroup = std::numeric_limits<GroupIndex>::max();
+
+    template<Bank bank>
+    void coalesceSingletons(Tmp tmp0, Tmp tmp1, Vector<AffinityGroup<bank>>& groups, TmpGroupMap<bank>& tmpToGroup)
+    {
+        ASSERT(isInCoalescables<bank>(tmp1, m_map.get<bank>(tmp0).coalescables) && isInCoalescables<bank>(tmp0, m_map.get<bank>(tmp1).coalescables));
+        auto newIndex = groups.size();
+        groups.constructAndAppend(tmp0, m_map.get<bank>(tmp0).liveRange, tmp1, m_map.get<bank>(tmp1).liveRange);
+        tmpToGroup[tmp0] = newIndex;
+        tmpToGroup[tmp1] = newIndex;
+        dataLogLnIf(verbose(), "Created group ", newIndex, ": ", groups[newIndex]);
+    }
+
+    template<Bank bank>
+    bool tryCoalesceSingletonWithGroup(Tmp singleton, GroupIndex groupIndex, Vector<AffinityGroup<bank>>& groups, TmpGroupMap<bank>& tmpToGroup)
+    {
+        const auto& group = groups[groupIndex];
+        TmpData& singletonData = m_map.get<bank>(singleton);
+
+        bool conflict = false;
+        group.forEachOverlap(singletonData.liveRange, [&](const auto& tmpList) {
+            if (tmpList.size() > singletonData.coalescables.size()) {
+                conflict = true; // Pigeonhole principle
+                return IterationStatus::Done;
+            }
+            for (Tmp member : tmpList) {
+                if (!isInCoalescables<bank>(member, singletonData.coalescables)) {
+                    conflict = true;
+                    return IterationStatus::Done;
+                }
+            }
+            return IterationStatus::Continue;
+        });
+        if (conflict)
+            return false;
+
+        groups[groupIndex].addMember(singleton, singletonData.liveRange);
+        tmpToGroup[singleton] = groupIndex;
+        dataLogLnIf(verbose(), "Added ", singleton, " to group ", groupIndex);
+        return true;
+    }
+
+    template<Bank bank>
+    bool tryCoalesceGroups(GroupIndex groupIndex0, GroupIndex groupIndex1, Vector<AffinityGroup<bank>>& groups, TmpGroupMap<bank>& tmpToGroup)
+    {
+        const auto& group0 = groups[groupIndex0];
+        const auto& group1 = groups[groupIndex1];
+
+        bool conflict = false;
+        AffinityGroup<bank>::forEachPairwiseOverlap(group0, group1, [&](const auto& tmpListA, const auto& tmpListB) {
+            for (Tmp tmpA : tmpListA) {
+                const auto& coalescables = m_map.get<bank>(tmpA).coalescables;
+                if (tmpListB.size() > coalescables.size()) {
+                    conflict = true; // Pigeonhole principle
+                    return IterationStatus::Done;
+                }
+                for (Tmp tmpB : tmpListB) {
+                    if (!isInCoalescables<bank>(tmpB, coalescables)) {
+                        conflict = true;
+                        return IterationStatus::Done;
+                    }
+                }
+            }
+            return IterationStatus::Continue;
+        });
+        if (conflict)
+            return false;
+
+        for (Tmp member : groups[groupIndex1].members())
+            tmpToGroup[member] = groupIndex0;
+        groups[groupIndex0].merge(groups[groupIndex1]);
+        dataLogLnIf(verbose(), "Merged group ", groupIndex1, " into ", groupIndex0);
+        return true;
+    }
+
+    template<Bank bank>
+    void coalesceTmps()
+    {
+        CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::coalesceTmps"_s);
+
+        Vector<AffinityGroup<bank>> groups;
+        TmpGroupMap<bank> tmpToGroup(Tmp::indexEnd(m_code, bank), noGroup);
+
+        buildCoalescingGroups<bank>(groups, tmpToGroup);
+        validateCoalescing<bank>(groups, tmpToGroup);
+        createGroupRepresentatives<bank>(groups);
+        rewriteCoalescedTmps<bank>(groups, tmpToGroup);
+    }
+
+    template<Bank bank>
+    void buildCoalescingGroups(Vector<AffinityGroup<bank>>& groups, TmpGroupMap<bank>& tmpToGroup)
+    {
         struct Move {
             Tmp tmp0, tmp1;
             float cost;
@@ -1358,8 +1680,8 @@ private:
             }
         };
         Vector<Move> moves;
-        Vector<Tmp, 8> worklist0, worklist1;
 
+        // Sort coalescables by Tmp index for binary search in isInCoalescables.
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             ASSERT(!tmp.isReg());
             TmpData& data = m_map.get<bank>(tmp);
@@ -1367,103 +1689,194 @@ private:
                 ASSERT(assignedReg(tmp) && m_code.isPinned(assignedReg(tmp)));
                 return; // Already coalesced with a pinned register
             }
-            std::ranges::sort(data.coalescables, [this](const auto& a, const auto& b) {
-                    if (a.moveCost != b.moveCost)
-                        return a.moveCost > b.moveCost;
-                    // Favor coalescing shorter live ranges.
-                    auto aSize = m_map.get<bank>(a.tmp).liveRange.size();
-                    auto bSize = m_map.get<bank>(b.tmp).liveRange.size();
-                    if (aSize != bSize)
-                        return aSize < bSize;
-                    return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
+            std::ranges::sort(data.coalescables, [](const auto& a, const auto& b) {
+                return a.tmp.tmpIndex(bank) < b.tmp.tmpIndex(bank);
             });
-            for (auto& with : m_map[tmp].coalescables) {
+            for (auto& with : data.coalescables) {
                 if (tmp.tmpIndex(bank) < with.tmp.tmpIndex(bank))
                     moves.append({ tmp, with.tmp, with.moveCost });
             }
         });
 
         std::ranges::sort(moves, [](auto& a, auto& b) {
-                if (a.cost != b.cost)
-                    return a.cost > b.cost;
-                if (a.tmp0.tmpIndex(bank) != b.tmp1.tmpIndex(bank))
-                    return a.tmp0.tmpIndex(bank) < a.tmp0.tmpIndex(bank);
-                ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
-                return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
+            if (a.cost != b.cost)
+                return a.cost > b.cost;
+            if (a.tmp0.tmpIndex(bank) != b.tmp0.tmpIndex(bank))
+                return a.tmp0.tmpIndex(bank) < b.tmp0.tmpIndex(bank);
+            ASSERT(a.tmp1.tmpIndex(bank) != b.tmp1.tmpIndex(bank));
+            return a.tmp1.tmpIndex(bank) < b.tmp1.tmpIndex(bank);
         });
-
-        auto hasConflict = [this, &worklist0, &worklist1](Tmp group0, Tmp group1) {
-            bool conflicts = false;
-            forEachTmpInGroup(group0, worklist0, [&](Tmp tmp0) {
-                ASSERT(!conflicts);
-                TmpData& data0 = m_map.get<bank>(tmp0);
-                ASSERT(!data0.subGroup0 && !data0.subGroup1);
-                forEachTmpInGroup(group1, worklist1, [&](Tmp tmp1) {
-                    ASSERT(!conflicts);
-                    ASSERT(tmp0 != tmp1);
-                    TmpData& data1 = m_map.get<bank>(tmp1);
-                    if (!data0.coalescables.containsIf([tmp1](auto& with) { return with.tmp == tmp1; })
-                        && data0.liveRange.overlaps(data1.liveRange)) {
-                        conflicts = true;
-                        return IterationStatus::Done;
-                    }
-                    return IterationStatus::Continue;
-                });
-                return conflicts ? IterationStatus::Done : IterationStatus::Continue;
-            });
-            return conflicts;
-        };
-
-        auto addSubGroup = [this](Tmp group, TmpData& groupData, Tmp& subGroupField, Tmp subGroup) {
-            TmpData& subGroupData = m_map.get<bank>(subGroup);
-            subGroupField = subGroup;
-            subGroupData.parentGroup = group;
-            subGroupData.stage = Stage::Coalesced;
-
-            groupData.liveRange = LiveRange::merge(groupData.liveRange, subGroupData.liveRange);
-            groupData.useDefCost += subGroupData.useDefCost;
-            if (!groupData.preferredReg)
-                groupData.preferredReg = subGroupData.preferredReg;
-
-            Width defWidth, useWidth;
-            defWidth = std::max(m_tmpWidth.defWidth(group), m_tmpWidth.defWidth(subGroup));
-            useWidth = std::max(m_tmpWidth.useWidth(group), m_tmpWidth.useWidth(subGroup));
-            m_tmpWidth.setWidths(group, useWidth, defWidth);
-        };
 
         for (Move& move : moves) {
             dataLogLnIf(verbose(), "Processing move: ", move);
-            Tmp group0 = groupForReg<bank>(move.tmp0);
-            Tmp group1 = groupForReg<bank>(move.tmp1);
-            if (group0 == group1) {
-                dataLogLnIf(verbose(), "Already grouped transitively into ", group0);
+            auto groupIndex0 = tmpToGroup[move.tmp0];
+            auto groupIndex1 = tmpToGroup[move.tmp1];
+
+            if (groupIndex0 != noGroup && groupIndex0 == groupIndex1) {
+                dataLogLnIf(verbose(), "Already grouped");
                 continue;
             }
-            if (!hasConflict(group0, group1)) {
-                Tmp newGrp = m_code.newTmp(bank);
-                TmpData newGrpData;
-                m_tmpWidth.setWidths(newGrp, Width8, Width8);
 
-                addSubGroup(newGrp, newGrpData, newGrpData.subGroup0, group0);
-                addSubGroup(newGrp, newGrpData, newGrpData.subGroup1, group1);
-                newGrpData.validate();
-                m_map.append(newGrp, newGrpData);
-                dataLogLnIf(verbose(), "Created group ", newGrp, ": ", m_map.get<bank>(newGrp));
+            if (groupIndex0 == noGroup && groupIndex1 == noGroup)
+                coalesceSingletons<bank>(move.tmp0, move.tmp1, groups, tmpToGroup);
+            else if (groupIndex0 != noGroup && groupIndex1 != noGroup)
+                tryCoalesceGroups<bank>(groupIndex0, groupIndex1, groups, tmpToGroup);
+            else {
+                auto groupIndex = groupIndex0 != noGroup ? groupIndex0 : groupIndex1;
+                Tmp singleton = groupIndex0 != noGroup ? move.tmp1 : move.tmp0;
+                tryCoalesceSingletonWithGroup<bank>(singleton, groupIndex, groups, tmpToGroup);
             }
         }
-        if (verbose()) {
-            m_code.forEachTmp<bank>([&](Tmp tmp) {
-                TmpData& data = m_map.get<bank>(tmp);
-                if (!data.parentGroup && data.isGroup()) {
-                    dataLog("Group: ", tmp, " = { ");
-                    CommaPrinter comma;
-                    forEachTmpInGroup(tmp, worklist0, [&comma](Tmp member) {
-                        dataLog(comma, member);
-                        return IterationStatus::Continue;
-                    });
-                    dataLogLn(" }");
+    }
+
+    // Validate that coalescing groups are correct: at every non-move def of a group member,
+    // no other member of the same group should be live. This ensures simultaneously-live
+    // group members always hold the same value (connected by moves), so replacing them with
+    // a single representative is semantically correct.
+    template<Bank bank>
+    void validateCoalescing(const Vector<AffinityGroup<bank>>& groups, const TmpGroupMap<bank>& tmpToGroup)
+    {
+        if (!Options::airValidateGreedRegAlloc())
+            return;
+        bool anyFailures = false;
+
+        auto isSameGroupMove = [&](Inst& inst) {
+            if (!mayBeCoalescable(inst))
+                return false;
+            Tmp src = inst.args[0].tmp();
+            Tmp dst = inst.args[1].tmp();
+            if (src.isReg() || dst.isReg() || src.bank() != bank || dst.bank() != bank)
+                return false;
+            auto srcGroup = tmpToGroup[src];
+            return srcGroup != noGroup && srcGroup == tmpToGroup[dst];
+        };
+
+        auto checkDefs = [&](BasicBlock* block, unsigned instIndex, const typename TmpLiveness<bank>::LocalCalc& localCalc, bool earlyDefs) {
+            Inst& inst = block->at(instIndex);
+            if (isSameGroupMove(inst))
+                return;
+            inst.forEachTmp([&](Tmp& tmp, Arg::Role role, Bank b, Width) {
+                if (b != bank || tmp.isReg() || !Arg::isAnyDef(role))
+                    return;
+                if (earlyDefs ? !Arg::isEarlyDef(role) : !Arg::isLateDef(role))
+                    return;
+                auto groupIdx = tmpToGroup[tmp];
+                if (groupIdx == noGroup)
+                    return;
+                for (Tmp live : localCalc.live()) {
+                    if (live == tmp || live.isReg())
+                        continue;
+                    if (tmpToGroup[live] == groupIdx) {
+                        dataLogLn("AIR GREEDY COALESCING VALIDATION FAILURE");
+                        dataLogLn("   In BB", *block, " at inst ", instIndex, ": ", inst);
+                        dataLogLn("   Non-move ", earlyDefs ? "early" : "late", " def of group member ", tmp);
+                        dataLogLn("   But group member ", live, " is simultaneously live");
+                        dataLogLn("   Group: ", groups[groupIdx]);
+                        anyFailures = true;
+                    }
                 }
             });
+        };
+
+        TmpLiveness<bank> liveness(m_code);
+        for (BasicBlock* block : m_code) {
+            typename TmpLiveness<bank>::LocalCalc localCalc(liveness, block);
+            for (unsigned instIndex = block->size(); instIndex--;) {
+                // Before execute: live set at boundary instIndex+1. Check late defs.
+                checkDefs(block, instIndex, localCalc, false);
+                localCalc.execute(instIndex);
+                // After execute: live set at boundary instIndex. Check early defs.
+                checkDefs(block, instIndex, localCalc, true);
+            }
+        }
+        if (anyFailures) {
+            dataLogLn("IR:\n", m_code);
+            dataLogLn("State:\n", *this);
+            RELEASE_ASSERT_NOT_REACHED();
+        }
+    }
+
+    template<Bank bank>
+    void createGroupRepresentatives(Vector<AffinityGroup<bank>>& groups)
+    {
+        for (auto& group : groups) {
+            if (group.isEmpty())
+                continue;
+
+            m_stats[bank].numGroupsCreated++;
+            m_stats[bank].maxGroupSize = std::max(m_stats[bank].maxGroupSize, static_cast<unsigned>(group.size()));
+
+            Tmp representative = m_code.newTmp(bank);
+            Width useWidth = Width8;
+            Width defWidth = Width8;
+            float cost = 0;
+            Reg preferred;
+            bool hasColdUse = false;
+            for (Tmp member : group.members()) {
+                m_stats[bank].numGroupTmpsCoalesced++;
+                auto memberIdx = AbsoluteTmpMapper<bank>::absoluteIndex(member);
+                if (m_useCounts.isConstDef<bank>(memberIdx))
+                    m_stats[bank].numGroupConstDefMerged++;
+                TmpData& memberData = m_map.get<bank>(member);
+                useWidth = std::max(useWidth, m_tmpWidth.useWidth(member));
+                defWidth = std::max(defWidth, m_tmpWidth.defWidth(member));
+                cost += memberData.useDefCost;
+                if (!preferred)
+                    preferred = memberData.preferredReg;
+                hasColdUse |= memberData.hasColdUse;
+                memberData.stage = Stage::Coalesced;
+            }
+            m_tmpWidth.setWidths(representative, useWidth, defWidth);
+
+            m_map.append(representative, TmpData());
+            TmpData& representativeData = m_map.get<bank>(representative);
+            representativeData.useDefCost = cost;
+            representativeData.liveRange = group.buildLiveRange();
+            representativeData.preferredReg = preferred;
+            representativeData.hasColdUse = hasColdUse;
+            representativeData.validate();
+
+            group.m_representative = representative;
+            dataLogLnIf(verbose(), "Coalescing group: ", group);
+        }
+    }
+
+    // Phase 3: Replace member Tmps with representative in all instructions.
+    // Nop self-Moves and adjust useDefCost for removed moves.
+    template<Bank bank>
+    void rewriteCoalescedTmps(const Vector<AffinityGroup<bank>>& groups, const TmpGroupMap<bank>& tmpToGroup)
+    {
+        for (BasicBlock* block : m_code) {
+            for (Inst& inst : *block) {
+                bool maybeCoalescable = mayBeCoalescable(inst);
+                inst.forEachTmpFast([&](Tmp& tmp) {
+                    if (tmp.isReg() || tmp.bank() != bank)
+                        return;
+                    auto idx = tmpToGroup[tmp];
+                    if (idx == noGroup)
+                        return;
+                    const AffinityGroup<bank>& group = groups[idx];
+                    ASSERT(!group.isEmpty() && group.m_representative);
+                    tmp = group.m_representative;
+                });
+                if (maybeCoalescable && inst.args[0].tmp() == inst.args[1].tmp()) {
+                    Tmp tmp = inst.args[0].tmp();
+                    inst = Inst();
+                    m_stats[bank].numGroupMovesCoalesced++;
+                    if (!tmp.isReg()) {
+                        float freq = adjustedBlockFrequency(block);
+                        TmpData& tmpData = m_map.get<bank>(tmp);
+                        // Avoid computing NaN which can happen when tmpData.useDefCost is inf and freq or 2*freq is Inf.
+                        // And if useDefCost became Inf (usually due high nesting depth) subtracting not necessarily the right thing anyway.
+                        if (std::isfinite(tmpData.useDefCost)) {
+                            tmpData.useDefCost -= freq; // For args[0]
+                            tmpData.useDefCost -= freq; // For args[1]
+                            if (tmpData.useDefCost < 0)
+                                tmpData.useDefCost = 0;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1502,7 +1915,7 @@ private:
             auto index = AbsoluteTmpMapper<bank>::absoluteIndex(tmp);
             float useDefCost = m_useCounts.numWarmUsesAndDefs<bank>(index);
             if (m_useCounts.isConstDef<bank>(index))
-                useDefCost /= 2; // Can rematerialize rather than spill in many cases.
+                useDefCost *= 0.1; // Can rematerialize rather than spill in many cases.
             tmpData.useDefCost = useDefCost;
 
             if (cannotSpillInPlace.contains(tmp)
@@ -1551,8 +1964,9 @@ private:
         ASSERT(!tmp.isReg());
         ASSERT(&tmpData == &m_map[tmp]);
         ASSERT(m_map[tmp].liveRange.size()); // 0-size ranges don't need a register and spillCost() depends on size() != 0
+        ASSERT(tmpData.stage != Stage::Coalesced && tmpData.stage != Stage::Spilled && tmpData.stage != Stage::Replaced);
         ASSERT(stage == Stage::Unspillable || stage == Stage::TryAllocate || stage == Stage::TrySplit || stage == Stage::Spill);
-        ASSERT(groupForReg(tmp) == tmp); // Only the roots of register-groups should be enqueued
+        ASSERT(m_map[tmp].stage != Stage::Coalesced); // Only the roots of register-groups should be enqueued
         tmpData.validate();
 
         tmpData.stage = stage;
@@ -1583,7 +1997,7 @@ private:
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             ASSERT(!tmp.isReg());
             TmpData& tmpData = m_map.get<bank>(tmp);
-            if (tmpData.parentGroup)
+            if (tmpData.stage == Stage::Coalesced)
                 return;
             if (tmpData.liveRange.intervals().isEmpty())
                 return;
@@ -1647,7 +2061,7 @@ private:
         // If we couldn't allocate tmp, allow it to split next time.
         Stage nextStage = Stage::TrySplit;
         // If we already know splitting won't be profitable, skip it.
-        if (!tmpData.isGroup() && tmpData.liveRange.size() < splitMinRangeSize)
+        if (tmpData.liveRange.size() < splitMinRangeSize)
             nextStage = Stage::Spill;
         setStageAndEnqueue(tmp, tmpData, nextStage);
     }
@@ -1679,8 +2093,7 @@ private:
     bool tryAllocate(Tmp tmp, TmpData& tmpData)
     {
         ASSERT(&m_map.get<bank>(tmp) == &tmpData);
-        ASSERT(!assignedReg<bank>(tmp));
-        ASSERT(groupForReg<bank>(tmp) == tmp);
+        ASSERT(!assignedReg(tmp));
 
         Width width = widthForConflicts<bank>(tmp);
 
@@ -1694,45 +2107,12 @@ private:
             return false;
         };
 
-        ScalarRegisterSet alreadyAttempted;
-        if (eagerGroupsExhaustiveSearch) {
-            Vector<Tmp, 8> worklist;
-            // FIXME: this will check coalescables within the group, which is wasteful and common.
-            // But without doing this, we won't try to coalescables between partially split groups.
-            IterationStatus status = forEachTmpInGroup(tmp, worklist, [&](Tmp member) {
-                for (auto& with : m_map.get<bank>(member).coalescables) {
-                    Reg r = assignedReg<bank>(with.tmp);
-                    if (r) {
-                        if (tryAllocateToReg(r))
-                            return IterationStatus::Done;
-                        alreadyAttempted.add(r, IgnoreVectors);
-                    }
-                }
-                return IterationStatus::Continue;
-            });
-            if (status == IterationStatus::Done) {
-                ASSERT(tmpData.assigned);
-                return true;
-            }
-        } else {
-            for (auto& with : tmpData.coalescables) {
-                Reg r = m_map.get<bank>(with.tmp).assigned;
-                if (r) {
-                    if (tryAllocateToReg(r))
-                        return true;
-                    alreadyAttempted.add(r, IgnoreVectors);
-                }
-            }
-        }
-        ASSERT(!assignedReg<bank>(tmp));
-
         if (tmpData.preferredReg) {
             if (tryAllocateToReg(tmpData.preferredReg))
                 return true;
-            alreadyAttempted.add(tmpData.preferredReg, IgnoreVectors);
         }
         for (Reg r : m_allowedRegistersInPriorityOrder[bank]) {
-            if (alreadyAttempted.contains(r, IgnoreVectors))
+            if (r == tmpData.preferredReg)
                 continue;
             if (tryAllocateToReg(r))
                 return true;
@@ -1825,7 +2205,6 @@ private:
     {
         ASSERT(tmpData.stage != Stage::Assigned && tmpData.stage != Stage::Spilled);
         ASSERT(&m_map[tmp] == &tmpData);
-        ASSERT(groupForReg(tmp) == tmp);
         tmpData.stage = Stage::Assigned;
         tmpData.assigned = reg;
         dataLogLnIf(verbose(), "Assigned ", tmp, " to ", reg);
@@ -1850,7 +2229,6 @@ private:
         ASSERT(tmpData.stage == Stage::Assigned);
         ASSERT(tmpData.spillCost() != unspillableCost);
         ASSERT(tmpData.assigned == reg);
-        ASSERT(groupForReg(tmp) == tmp);
         m_regRanges[reg].evict(tmpData.liveRange);
         tmpData.stage = Stage::New;
         tmpData.assigned = Reg();
@@ -1862,24 +2240,9 @@ private:
     bool trySplit(Tmp tmp, TmpData& tmpData)
     {
         ASSERT(tmpData.spillCost() != unspillableCost); // Should have evicted.
-        if (trySplitGroup<bank>(tmp, tmpData))
-            return true;
         if (trySplitAroundClobbers<bank>(tmp, tmpData))
             return true;
         return trySplitIntraBlock<bank>(tmp, tmpData);
-    }
-
-    template<Bank bank>
-    bool trySplitGroup(Tmp tmp, TmpData& tmpData)
-    {
-        if (!tmpData.isGroup())
-            return false;
-        tmpData.stage = Stage::SplitGroup;
-        setStageAndEnqueue(tmpData.subGroup0, m_map.get<bank>(tmpData.subGroup0), Stage::TryAllocate);
-        setStageAndEnqueue(tmpData.subGroup1, m_map.get<bank>(tmpData.subGroup1), Stage::TryAllocate);
-        dataLogLnIf(verbose(), "Split (group) ", tmp);
-        tmpData.validate();
-        return true;
     }
 
     template<Bank bank>
@@ -2064,6 +2427,7 @@ private:
 
         SplitMetadata* metadata = nullptr;
         Vector<Tmp*, 8> tmpPtrs;
+        Vector<std::pair<Tmp*, Point>, 4> coldUsePtrs;
         size_t cursor = 0;
 
         size_t numIntervals = tmpData.liveRange.intervals().size();
@@ -2076,15 +2440,21 @@ private:
                 Point lastDefPoint = 0;
                 Interval cluster = { };
                 tmpPtrs.shrink(0);
+                coldUsePtrs.shrink(0);
 
                 remaining = forEachUseDefWithin(tmp, remaining, cursor, [&](Point point, Inst& inst) {
                     inst.forEachTmp([&](Tmp& t, Arg::Role role, Bank, Width) {
-                        if (t == tmp && !Arg::isColdUse(role)) {
+                        if (t == tmp) {
                             Point early = point + PointOffsets::Early;
-                            tmpPtrs.append(&t);
-                            if (Arg::isAnyDef(role))
-                                lastDefPoint = early; // Remember where the fixup store to spill is needed
-                            cluster |= intervalForTiming(early, Arg::timing(role));
+                            Interval timingInterval = intervalForTiming(early, Arg::timing(role));
+                            if (Arg::isColdUse(role))
+                                coldUsePtrs.append({ &t, timingInterval.begin() });
+                            else {
+                                tmpPtrs.append(&t);
+                                if (Arg::isAnyDef(role))
+                                    lastDefPoint = early; // Remember where the fixup store to spill is needed
+                                cluster |= timingInterval;
+                            }
                         }
                     });
                 });
@@ -2108,11 +2478,19 @@ private:
 
                     BasicBlock* block = findBlockContainingPoint(cluster.begin());
                     Tmp clusterTmp = newTmp(tmp, tmpPtrs.size() * adjustedBlockFrequency(block), cluster);
+                    TmpData& clusterData = m_map.get<bank>(clusterTmp);
                     m_stats[bank].numSplitIntraBlockClusterTmps++;
                     for (auto& ptr : tmpPtrs)
                         *ptr = clusterTmp; // Within this cluster, use clusterTmp rather than Tmp
+                    for (auto& [ptr, point] : coldUsePtrs) {
+                        // Include coldUses only when they are within the warm cluster
+                        if (cluster.contains(point)) {
+                            *ptr = clusterTmp;
+                            clusterData.hasColdUse = true;
+                        }
+                    }
                     metadata->splits.append({ clusterTmp, lastDefPoint });
-                    setStageAndEnqueue(clusterTmp, m_map.get<bank>(clusterTmp), Stage::TryAllocate);
+                    setStageAndEnqueue(clusterTmp, clusterData, Stage::TryAllocate);
                 }
             } while (remaining);
         }
@@ -2144,8 +2522,6 @@ private:
     {
         RELEASE_ASSERT(tmpData.spillCost() != unspillableCost);
         ASSERT(tmpData.assigned == Reg());
-        ASSERT(!tmpData.isGroup()); // Should have been split
-        ASSERT(groupForReg(tmp) == tmp);
         tmpData.stage = Stage::Spilled;
 
         m_stats[tmp.bank()].numSpilledTmps++;
@@ -2204,24 +2580,14 @@ private:
         return move;
     }
 
-    template<Bank bank>
-    StackSlot* ensureGroupSpillSlot(Tmp tmp)
-    {
-        Tmp group = groupForSpill<bank>(tmp);
-        TmpData& groupData = m_map.get<bank>(group);
-
-        if (!groupData.spillSlot)
-            groupData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(group)), StackSlotKind::Spill);
-        return groupData.spillSlot;
-    }
-
     template <Bank bank>
     void emitSpillCodeAndEnqueueNewTmps()
     {
         m_code.forEachTmp<bank>([&](Tmp tmp) {
             TmpData& tmpData = m_map.get<bank>(tmp);
             if (tmpData.stage == Stage::Spilled && !tmpData.spillSlot) {
-                tmpData.spillSlot = ensureGroupSpillSlot<bank>(tmp);
+                if (!tmpData.spillSlot)
+                    tmpData.spillSlot = m_code.addStackSlot(stackSlotMinimumWidth(m_tmpWidth.requiredWidth(tmp)), StackSlotKind::Spill);
                 ASSERT(spillSlot<bank>(tmp));
                 m_stats[bank].numSpillStackSlots++;
             }
