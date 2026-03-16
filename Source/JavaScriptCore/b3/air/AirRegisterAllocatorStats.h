@@ -64,6 +64,8 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numGroupsCreated)                     \
     macro(numGroupMovesCoalesced)               \
     macro(numGroupConstDefMerged)               \
+    macro(numGroupConstDefPreserved)            \
+    macro(numGroupConstDefPropagated)           \
     macro(maxGroupSize)                         \
     macro(numInsts)                             \
 
