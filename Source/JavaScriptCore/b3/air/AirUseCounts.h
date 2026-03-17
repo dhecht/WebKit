@@ -231,15 +231,26 @@ public:
             return !m_fpHasMultipleDefs.get(absoluteIndex);
     }
 
+    template<Bank bank>
+    bool isRegisteredConstDef(unsigned absoluteIndex) const
+    {
+        if constexpr (bank == GP)
+            return m_gpRegisteredConstDefs.get(absoluteIndex);
+        else
+            return m_fpRegisteredConstDefs.get(absoluteIndex);
+    }
+
     void registerGPConstDef(unsigned absoluteIndex, int64_t value)
     {
         m_gpConstDefs.set(absoluteIndex);
+        m_gpRegisteredConstDefs.set(absoluteIndex);
         m_gpConstants.set(absoluteIndex, value);
     }
 
     void registerFPConstDef(unsigned absoluteIndex, v128_t value, Width width)
     {
         m_fpConstDefs.set(absoluteIndex);
+        m_fpRegisteredConstDefs.set(absoluteIndex);
         m_fpConstants.set(absoluteIndex, value);
         m_fpConstantWidths.set(absoluteIndex, width);
     }
@@ -260,6 +271,8 @@ private:
     BitVector m_fpConstDefs;
     BitVector m_gpHasMultipleDefs;
     BitVector m_fpHasMultipleDefs;
+    BitVector m_gpRegisteredConstDefs;
+    BitVector m_fpRegisteredConstDefs;
     HashMap<unsigned, int64_t> m_gpConstants;
     HashMap<unsigned, v128_t> m_fpConstants;
     HashMap<unsigned, Width> m_fpConstantWidths;

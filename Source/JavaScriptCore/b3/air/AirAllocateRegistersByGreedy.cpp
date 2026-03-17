@@ -2748,6 +2748,8 @@ private:
                                 arg = imm;
                                 if (inst.isValidForm()) {
                                     m_stats[bank].numRematerializeConst++;
+                                    if (m_useCounts.isRegisteredConstDef<bank>(tmpIndex))
+                                        m_stats[bank].numGroupConstDefRematerialized++;
                                     dataLogLnIf(verbose(), "Rematerialized (direct imm), BB", *block, " arg=", oldArg, ", inst=", inst);
                                     return;
                                 }
@@ -2844,12 +2846,16 @@ private:
                                 if (Arg::isValidImmForm(value) && isValidForm(Move, Arg::Imm, Arg::Tmp)) {
                                     m_insertionSets[block].insert(instIndex, spillLoad, Move, inst.origin, Arg::imm(value), tmp);
                                     m_stats[bank].numRematerializeConst++;
+                                    if (m_useCounts.isRegisteredConstDef<bank>(tmpIndex))
+                                        m_stats[bank].numGroupConstDefRematerialized++;
                                     dataLogLnIf(verbose(), "Rematerialized (imm) BB", *block, " ", originalTmp, ": ", tmp, " <- ", WTF::RawHex(value));
                                     return true;
                                 }
                                 RELEASE_ASSERT(isValidForm(Move, Arg::BigImm, Arg::Tmp));
                                 m_insertionSets[block].insert(instIndex, spillLoad, Move, inst.origin, Arg::bigImm(value), tmp);
                                 m_stats[bank].numRematerializeConst++;
+                                if (m_useCounts.isRegisteredConstDef<bank>(tmpIndex))
+                                    m_stats[bank].numGroupConstDefRematerialized++;
                                 dataLogLnIf(verbose(), "Rematerialized (bigImm) BB", *block, " ", originalTmp, ": ", tmp, " <- ", WTF::RawHex(value));
                                 return true;
                             } else {
@@ -2880,6 +2886,8 @@ private:
                                 if (imm && isValidForm(constMove, imm.kind(), Arg::Tmp)) {
                                     m_insertionSets[block].insert(instIndex, spillLoad, constMove, inst.origin, imm, tmp);
                                     m_stats[bank].numRematerializeConst++;
+                                    if (m_useCounts.isRegisteredConstDef<bank>(tmpIndex))
+                                        m_stats[bank].numGroupConstDefRematerialized++;
                                     dataLogLnIf(verbose(), "Rematerialized (FP) BB", *block, " ", originalTmp, ": ", tmp);
                                     return true;
                                 }
