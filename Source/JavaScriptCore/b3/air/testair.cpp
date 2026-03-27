@@ -3348,6 +3348,7 @@ void testSplitAroundLoopCriticalEdge()
     }
 
     // Step 2: Fast tmps consume registers in root (pre-loop pressure).
+    // Add them into sum so the optimizer can't eliminate them.
     Vector<Tmp> fastTmps;
     for (unsigned i = 0; i < numFastTmps; ++i) {
         Tmp ft = code.newTmp(GP);
@@ -3355,15 +3356,15 @@ void testSplitAroundLoopCriticalEdge()
         fastTmps.append(ft);
         loadConstant(root, static_cast<intptr_t>(100 + i), ft);
     }
-    for (unsigned i = 0; i < numFastTmps; ++i)
-        root->append(Add64, nullptr, fastTmps[i], fastTmps[i]);
 
     Tmp counter = code.newTmp(GP);
     Tmp arg = code.newTmp(GP);
     Tmp sum = code.newTmp(GP);
+    root->append(Move, nullptr, Arg::imm(0), sum);
+    for (unsigned i = 0; i < numFastTmps; ++i)
+        root->append(Add64, nullptr, fastTmps[i], sum);
     root->append(Move, nullptr, Tmp(GPRInfo::argumentGPR0), arg);
     loadConstant(root, static_cast<intptr_t>(5), counter);
-    root->append(Move, nullptr, Arg::imm(0), sum);
 
     // CFG wiring: create the critical edge.
     if (criticalEntry) {
@@ -3393,10 +3394,11 @@ void testSplitAroundLoopCriticalEdge()
     body->setSuccessors(header);
 
     // Step 4: Fast tmps consume registers in exit (post-loop pressure).
+    // Add them into sum so the optimizer can't eliminate them.
     for (unsigned i = 0; i < numFastTmps; ++i)
         loadConstant(exit, static_cast<intptr_t>(200 + i), fastTmps[i]);
     for (unsigned i = 0; i < numFastTmps; ++i)
-        exit->append(Add64, nullptr, fastTmps[i], fastTmps[i]);
+        exit->append(Add64, nullptr, fastTmps[i], sum);
 
     // Step 5: Read tmps and loop result.
     for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
@@ -3404,11 +3406,15 @@ void testSplitAroundLoopCriticalEdge()
     exit->append(Move, nullptr, sum, Tmp(GPRInfo::returnValueGPR));
     exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
 
-    // arg=1: loop runs, sum = 5 * (1+2+3+4) = 50, + tmps = 60
-    // arg=0: skip to altExit (-1) or exit (sum=0 + tmps = 10)
+    // Pre-loop fast tmps: 100+101+...+106 = 721
+    // Loop (5 iters): 5 * (1+2+3+4) = 50
+    // Post-loop tmps: 1+2+3+4 = 10
+    // Post-loop fast tmps: 200+201+...+206 = 1421
+    // arg=1 total: 721 + 50 + 10 + 1421 = 2202
+    // arg=0: skip to altExit (-1) or exit (721 + 0 + 10 + 1421 = 2152)
     auto compilation = compile(proc);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == 60);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == (criticalEntry ? -1 : 10));
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == 2202);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == (criticalEntry ? -1 : 2152));
 }
 
 #define PREFIX "O", Options::defaultB3OptLevel(), ": "
