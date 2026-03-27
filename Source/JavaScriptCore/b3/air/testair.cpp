@@ -2962,6 +2962,453 @@ void testStorePairClobberMemoryLoad()
 #endif
 #endif
 
+// Test loop-aware live range splitting in the greedy register allocator.
+// Parameters control the allocation outcome and structural properties of across-loop tmps:
+//   nonLoopSpilled: whether the outside-loop portion should end up spilled
+//   loopSpilled: whether the inside-loop portion should end up spilled
+//   hasDef: whether the tmp has a def inside the loop body
+//   liveAtHeader: whether the tmp is live at the loop header entry (true = defined before loop, false = defined in header)
+//   liveAtExit: whether the tmp is used after the loop
+void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, bool liveAtHeader, bool liveAtExit)
+{
+    // Disable at O0 since the allocator behaves differently.
+    if (!Options::defaultB3OptLevel())
+        return;
+
+    // Both-spilled is the early-return case; other params don't matter.
+    bool bothSpilled = nonLoopSpilled && loopSpilled;
+
+    // Determine number of registers to make available and number of across-loop tmps.
+    // Strategy: pin registers to control pressure, and use in-loop uses to steer which side gets priority.
+    unsigned numRegs;
+    unsigned numAcrossLoopTmps;
+    bool hasInLoopUses; // whether tmps are used inside the loop (affects which side gets higher spill cost)
+
+    if (bothSpilled) {
+        // Very few registers, many tmps → both sides run out.
+        numRegs = 3; // 1 for counter, 2 for allocation
+        numAcrossLoopTmps = 8;
+        hasInLoopUses = true;
+    } else if (nonLoopSpilled && !loopSpilled) {
+        // In-loop uses at high freq → loopTmp high priority. Few regs so nonLoopTmps spill.
+        numRegs = 4;
+        numAcrossLoopTmps = 6;
+        hasInLoopUses = true;
+    } else if (!nonLoopSpilled && loopSpilled) {
+        // loopTmp has no uses beyond what hasDef provides, and the high block frequency
+        // means the non-loop side (low freq, few uses) is actually cheaper to keep in a register.
+        // With enough regs for the nonLoopTmps but not for loopTmps too, the loopTmps spill.
+        numRegs = 6;
+        numAcrossLoopTmps = 4;
+        hasInLoopUses = false; // loopTmp gets low priority
+    } else {
+        // Both get registers. Enough regs for everything.
+        numRegs = 12;
+        numAcrossLoopTmps = 3;
+        hasInLoopUses = true;
+    }
+
+    B3::Procedure proc;
+    Code& code = proc.code();
+
+    // Pin registers to limit allocatable set.
+    {
+        Vector<Reg> allRegs = code.regsInPriorityOrder(GP);
+        for (size_t i = numRegs; i < allRegs.size(); ++i)
+            code.pinRegister(allRegs[i]);
+    }
+
+    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+
+    BasicBlock* root = code.addBlock();           // freq = 1
+    BasicBlock* header = code.addBlock(10.0);     // loop header, high freq
+    BasicBlock* body = code.addBlock(10.0);       // loop body, high freq
+    BasicBlock* exit = code.addBlock();           // freq = 1
+
+    // --- Create across-loop tmps ---
+    Vector<Tmp> tmps;
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        tmps.append(code.newTmp(GP));
+
+    Tmp counter = code.newTmp(GP);
+    Tmp result = code.newTmp(GP);
+
+    // --- Root block: define tmps, jump to header ---
+    if (liveAtHeader) {
+        // Define tmps before the loop → they'll be live through the header.
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+            loadConstant(root, static_cast<intptr_t>(i + 1), tmps[i]);
+    }
+    root->append(Move, nullptr, Arg::imm(5), counter); // 5 loop iterations
+    root->append(Jump, nullptr);
+    root->setSuccessors(header);
+
+    // --- Header block: optional defs (for liveAtHeader=false), branch to body or exit ---
+    if (!liveAtHeader) {
+        // Define tmps at start of header → NOT live-in to header (disjoint ranges).
+        // Use counter as a base to prevent constant folding.
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
+            header->append(Move, nullptr, counter, tmps[i]);
+            header->append(Add64, nullptr, Arg::imm(i + 1), tmps[i]);
+        }
+    }
+    header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
+    header->setSuccessors(body, exit);
+
+    // --- Body block: optional uses/defs of tmps, clobber patchpoint, decrement counter ---
+
+    // Clobber patchpoint: creates register pressure inside the loop.
+    {
+        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
+        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
+        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
+
+        if (hasInLoopUses) {
+            // Add patchpoint uses for each tmp → forces them to be in registers at this point.
+            for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
+                B3::Value* dummyValue = proc.addConstant(B3::Origin(), B3::pointerType(), 0);
+                patchpoint->append(dummyValue, B3::ValueRep::SomeRegister);
+            }
+        }
+
+        Inst inst(Patch, patchpoint, Arg::special(patchpointSpecial));
+        if (hasInLoopUses) {
+            for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+                inst.args.append(tmps[i]);
+        }
+        body->append(WTF::move(inst));
+    }
+
+    if (hasDef) {
+        // Define tmps inside the loop body. Use counter so the def depends on runtime state.
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+            body->append(Add64, nullptr, counter, tmps[i]);
+    }
+
+    body->append(Sub32, nullptr, Arg::imm(1), counter);
+    body->append(Jump, nullptr);
+    body->setSuccessors(header); // back-edge
+
+    // --- Exit block: optionally use tmps, return result ---
+    if (liveAtExit) {
+        // Sum all tmps into result.
+        exit->append(Move, nullptr, Arg::imm(0), result);
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+            exit->append(Add64, nullptr, tmps[i], result);
+        exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
+    } else {
+        // Don't use tmps after the loop. Return counter (should be 0).
+        exit->append(Move, nullptr, counter, Tmp(GPRInfo::returnValueGPR));
+    }
+    exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
+
+    // --- Compute expected result ---
+    int64_t expected;
+    if (liveAtExit) {
+        expected = 0;
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
+            int64_t val;
+            if (liveAtHeader)
+                val = static_cast<int64_t>(i + 1);
+            else {
+                // Defined in header: counter + (i+1). Last header execution is with counter=1
+                // (since Branch32 GreaterThan 0 goes to body when counter >= 1, and exits when counter == 0).
+                // When the loop exits, counter == 0, so the header defs are computed with counter at that iteration.
+                // Actually: header runs, checks counter > 0. If false, goes to exit. So the last header
+                // execution that reaches exit has counter == 0. The defs in header compute tmps[i] = 0 + (i+1) = i+1.
+                val = static_cast<int64_t>(i + 1);
+            }
+            if (hasDef) {
+                // The loop body adds counter to each tmp on each iteration.
+                // Iterations run with counter = 5, 4, 3, 2, 1 (body decrements after the add).
+                // Wait — the body does Add64(counter, tmps[i]) then Sub32(1, counter).
+                // So on each iteration: tmps[i] += counter_before_decrement.
+                // For liveAtHeader=true: initial val = i+1, then += 5+4+3+2+1 = 15
+                // For liveAtHeader=false: header sets val = counter + (i+1) each iteration.
+                //   The header runs 6 times (counter=5,4,3,2,1,0), but body runs 5 times (counter=5,4,3,2,1).
+                //   Each header execution redefines the tmp. The last header before exit has counter=0,
+                //   so tmp = 0 + (i+1) = i+1. But body also does tmp += counter for iterations where
+                //   counter=5,4,3,2,1. Between the header def and the next header def, body runs once.
+                //   So: header(counter=5): tmp = 5+(i+1) → body: tmp += 5 → header(counter=4): tmp = 4+(i+1) → ...
+                //   The header REDEFINES tmp each iteration, so the final value is from the last header
+                //   execution that reaches exit: counter=0, tmp = 0 + (i+1) = i+1.
+                //   But wait, the body also adds counter to tmp AFTER the last body execution.
+                //   Last body: counter=1, tmp = 1+(i+1) + 1 = ... no, let me trace more carefully.
+                //
+                //   Iteration 1: header(counter=5) → defs tmp=(5+i+1) → body: tmp+= 5 → tmp=(10+i+1), counter→4
+                //   Iteration 2: header(counter=4) → defs tmp=(4+i+1) → body: tmp+= 4 → tmp=(8+i+1), counter→3
+                //   Iteration 3: header(counter=3) → defs tmp=(3+i+1) → body: tmp+= 3 → tmp=(6+i+1), counter→2
+                //   Iteration 4: header(counter=2) → defs tmp=(2+i+1) → body: tmp+= 2 → tmp=(4+i+1), counter→1
+                //   Iteration 5: header(counter=1) → defs tmp=(1+i+1) → body: tmp+= 1 → tmp=(2+i+1), counter→0
+                //   Final:       header(counter=0) → defs tmp=(0+i+1) = i+1 → branch to exit
+                //   So final tmp = i+1 (header redefines it with counter=0 on exit).
+                val = static_cast<int64_t>(i + 1);
+            }
+            expected += val;
+        }
+        if (!liveAtHeader && hasDef) {
+            // With liveAtHeader=false, the header redefines on every entry including the exit path.
+            // hasDef also adds in body, but header redefines. Final val = 0 + (i+1) = i+1.
+            // Already computed above.
+        }
+        if (liveAtHeader && hasDef) {
+            // initial val = i+1, body adds counter on each of 5 iterations: +=5+4+3+2+1=15.
+            expected = 0;
+            for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+                expected += static_cast<int64_t>(i + 1) + 15;
+        }
+    } else {
+        // Returning counter, which should be 0.
+        expected = 0;
+    }
+
+    auto runResult = compileAndRun<int64_t>(proc);
+    CHECK(runResult == expected);
+}
+
+void testSplitAroundLoopNoInLoopUses()
+{
+    // Tmps defined before loop, not used/defined inside, used after.
+    // loopTmp has spillCost=0 → spills. Tests the simple case where no
+    // tmp rewrite happens inside the loop (no uses to rename).
+    if (!Options::defaultB3OptLevel())
+        return;
+
+    B3::Procedure proc;
+    Code& code = proc.code();
+
+    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+
+    BasicBlock* root = code.addBlock();
+    BasicBlock* header = code.addBlock(10.0);
+    BasicBlock* body = code.addBlock(10.0);
+    BasicBlock* exit = code.addBlock();
+
+    unsigned numTmps = 20;
+    Vector<Tmp> tmps;
+    for (unsigned i = 0; i < numTmps; ++i) {
+        Tmp tmp = code.newTmp(GP);
+        tmps.append(tmp);
+        loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
+    }
+
+    Tmp counter = code.newTmp(GP);
+    root->append(Move, nullptr, Arg::imm(5), counter);
+    root->append(Jump, nullptr);
+    root->setSuccessors(header);
+
+    header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
+    header->setSuccessors(body, exit);
+
+    // Body: just a clobber patchpoint (no uses of our tmps) and counter decrement.
+    {
+        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
+        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
+        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
+        body->append(Patch, patchpoint, Arg::special(patchpointSpecial));
+    }
+    body->append(Sub32, nullptr, Arg::imm(1), counter);
+    body->append(Jump, nullptr);
+    body->setSuccessors(header);
+
+    // Exit: sum all tmps.
+    Tmp result = code.newTmp(GP);
+    exit->append(Move, nullptr, Arg::imm(0), result);
+    for (unsigned i = 0; i < numTmps; ++i)
+        exit->append(Add64, nullptr, tmps[i], result);
+    exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
+    exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
+
+    // Expected: sum of 1..20 = 210
+    int64_t expected = numTmps * (numTmps + 1) / 2;
+    CHECK(compileAndRun<int64_t>(proc) == expected);
+}
+
+void testSplitAroundLoopDisabled()
+{
+    // Same as testSplitAroundLoopNoInLoopUses but with loop splitting disabled.
+    // Verifies the option gate works and fallback to spilling is correct.
+    if (!Options::defaultB3OptLevel())
+        return;
+
+    auto original = Options::airGreedyRegAllocSplitAroundLoops();
+    Options::airGreedyRegAllocSplitAroundLoops() = false;
+
+    B3::Procedure proc;
+    Code& code = proc.code();
+
+    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+
+    BasicBlock* root = code.addBlock();
+    BasicBlock* header = code.addBlock(10.0);
+    BasicBlock* body = code.addBlock(10.0);
+    BasicBlock* exit = code.addBlock();
+
+    unsigned numTmps = 20;
+    Vector<Tmp> tmps;
+    for (unsigned i = 0; i < numTmps; ++i) {
+        Tmp tmp = code.newTmp(GP);
+        tmps.append(tmp);
+        loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
+    }
+
+    Tmp counter = code.newTmp(GP);
+    root->append(Move, nullptr, Arg::imm(5), counter);
+    root->append(Jump, nullptr);
+    root->setSuccessors(header);
+
+    header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
+    header->setSuccessors(body, exit);
+
+    {
+        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
+        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
+        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
+        body->append(Patch, patchpoint, Arg::special(patchpointSpecial));
+    }
+    body->append(Sub32, nullptr, Arg::imm(1), counter);
+    body->append(Jump, nullptr);
+    body->setSuccessors(header);
+
+    Tmp result = code.newTmp(GP);
+    exit->append(Move, nullptr, Arg::imm(0), result);
+    for (unsigned i = 0; i < numTmps; ++i)
+        exit->append(Add64, nullptr, tmps[i], result);
+    exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
+    exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
+
+    int64_t expected = numTmps * (numTmps + 1) / 2;
+    CHECK(compileAndRun<int64_t>(proc) == expected);
+
+    Options::airGreedyRegAllocSplitAroundLoops() = original;
+}
+
+void testSplitAroundLoopCriticalEdgeEntry()
+{
+    // Loop where a non-loop predecessor of the header has multiple successors (critical entry edge).
+    // The algorithm should bail out on this loop. Verify code is still correct.
+    if (!Options::defaultB3OptLevel())
+        return;
+
+    B3::Procedure proc;
+    Code& code = proc.code();
+
+    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+
+    BasicBlock* root = code.addBlock();
+    BasicBlock* header = code.addBlock(10.0);
+    BasicBlock* body = code.addBlock(10.0);
+    BasicBlock* exit = code.addBlock();
+    BasicBlock* altExit = code.addBlock();  // alternate target from root (creates critical edge)
+
+    unsigned numTmps = 20;
+    Vector<Tmp> tmps;
+    for (unsigned i = 0; i < numTmps; ++i) {
+        Tmp tmp = code.newTmp(GP);
+        tmps.append(tmp);
+        loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
+    }
+
+    Tmp counter = code.newTmp(GP);
+    Tmp arg = code.newTmp(GP);
+    root->append(Move, nullptr, Tmp(GPRInfo::argumentGPR0), arg);
+    root->append(Move, nullptr, Arg::imm(5), counter);
+    // Critical edge: root has TWO successors, one of which is the loop header.
+    root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
+    root->setSuccessors(header, altExit);
+
+    altExit->append(Move, nullptr, Arg::imm(-1), Tmp(GPRInfo::returnValueGPR));
+    altExit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
+
+    header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
+    header->setSuccessors(body, exit);
+
+    {
+        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
+        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
+        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
+        body->append(Patch, patchpoint, Arg::special(patchpointSpecial));
+    }
+    body->append(Sub32, nullptr, Arg::imm(1), counter);
+    body->append(Jump, nullptr);
+    body->setSuccessors(header);
+
+    Tmp result = code.newTmp(GP);
+    exit->append(Move, nullptr, Arg::imm(0), result);
+    for (unsigned i = 0; i < numTmps; ++i)
+        exit->append(Add64, nullptr, tmps[i], result);
+    exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
+    exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
+
+    int64_t expected = numTmps * (numTmps + 1) / 2;
+    auto compilation = compile(proc);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == expected);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == -1);
+}
+
+void testSplitAroundLoopCriticalEdgeExit()
+{
+    // Loop where an exit successor has a predecessor from outside the loop (critical exit edge).
+    // The algorithm should bail out on this loop. Verify code is still correct.
+    if (!Options::defaultB3OptLevel())
+        return;
+
+    B3::Procedure proc;
+    Code& code = proc.code();
+
+    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+
+    BasicBlock* root = code.addBlock();
+    BasicBlock* preheader = code.addBlock();
+    BasicBlock* header = code.addBlock(10.0);
+    BasicBlock* body = code.addBlock(10.0);
+    BasicBlock* exit = code.addBlock();  // shared: reached from both loop and root
+
+    unsigned numTmps = 20;
+    Vector<Tmp> tmps;
+    for (unsigned i = 0; i < numTmps; ++i) {
+        Tmp tmp = code.newTmp(GP);
+        tmps.append(tmp);
+        loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
+    }
+
+    Tmp counter = code.newTmp(GP);
+    Tmp arg = code.newTmp(GP);
+    root->append(Move, nullptr, Tmp(GPRInfo::argumentGPR0), arg);
+    root->append(Move, nullptr, Arg::imm(5), counter);
+    // Root branches: either enter loop via preheader, or skip to exit (creating critical exit edge).
+    root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
+    root->setSuccessors(preheader, exit);
+
+    preheader->append(Jump, nullptr);
+    preheader->setSuccessors(header);
+
+    header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
+    header->setSuccessors(body, exit); // exit has predecessors from both loop (header) and non-loop (root)
+
+    {
+        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
+        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
+        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
+        body->append(Patch, patchpoint, Arg::special(patchpointSpecial));
+    }
+    body->append(Sub32, nullptr, Arg::imm(1), counter);
+    body->append(Jump, nullptr);
+    body->setSuccessors(header);
+
+    Tmp result = code.newTmp(GP);
+    exit->append(Move, nullptr, Arg::imm(0), result);
+    for (unsigned i = 0; i < numTmps; ++i)
+        exit->append(Add64, nullptr, tmps[i], result);
+    exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
+    exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
+
+    int64_t expected = numTmps * (numTmps + 1) / 2;
+    auto compilation = compile(proc);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == expected);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == expected);
+}
+
 #define PREFIX "O", Options::defaultB3OptLevel(), ": "
 
 #define RUN(test) do {                                 \
@@ -3089,6 +3536,35 @@ void run(const char* filter)
     RUN(testStorePairClobberMemoryLoad());
 #endif
 #endif
+
+    // Loop-aware splitting tests: parameterized matrix.
+    // testSplitAroundLoop(nonLoopSpilled, loopSpilled, hasDef, liveAtHeader, liveAtExit)
+    //                                                                           Entry      Exit
+    RUN(testSplitAroundLoop(false, true,  false, true,  true));  // #1  reg→slot  slot→reg
+    RUN(testSplitAroundLoop(false, true,  true,  true,  true));  // #2  reg→slot  slot→reg
+    RUN(testSplitAroundLoop(false, true,  false, true,  false)); // #3  reg→slot  skip(exit)
+    RUN(testSplitAroundLoop(false, true,  true,  true,  false)); // #4  reg→slot  skip(exit)
+    RUN(testSplitAroundLoop(false, false, false, true,  true));  // #5  reg→reg   reg→reg
+    RUN(testSplitAroundLoop(false, false, true,  true,  true));  // #6  reg→reg   reg→reg
+    RUN(testSplitAroundLoop(false, false, false, true,  false)); // #7  reg→reg   skip(exit)
+    RUN(testSplitAroundLoop(false, false, true,  true,  false)); // #8  reg→reg   skip(exit)
+    RUN(testSplitAroundLoop(true,  false, false, true,  true));  // #9  slot→reg  skip(spill&&!def)
+    RUN(testSplitAroundLoop(true,  false, true,  true,  true));  // #10 slot→reg  reg→slot
+    RUN(testSplitAroundLoop(true,  false, false, true,  false)); // #11 slot→reg  skip
+    RUN(testSplitAroundLoop(true,  false, true,  true,  false)); // #12 slot→reg  skip(exit)
+    RUN(testSplitAroundLoop(false, true,  true,  false, true));  // #13 skip(hdr) slot→reg
+    RUN(testSplitAroundLoop(false, true,  true,  false, false)); // #14 skip(hdr) skip
+    RUN(testSplitAroundLoop(false, false, true,  false, true));  // #15 skip(hdr) reg→reg
+    RUN(testSplitAroundLoop(false, false, true,  false, false)); // #16 skip(hdr) skip
+    RUN(testSplitAroundLoop(true,  false, true,  false, true));  // #17 skip(hdr) reg→slot
+    RUN(testSplitAroundLoop(true,  false, true,  false, false)); // #18 skip(hdr) skip
+    RUN(testSplitAroundLoop(true,  true,  true,  true,  true));  // #19 early return (both spilled)
+
+    // Loop-aware splitting: standalone tests.
+    RUN(testSplitAroundLoopNoInLoopUses());
+    RUN(testSplitAroundLoopDisabled());
+    RUN(testSplitAroundLoopCriticalEdgeEntry());
+    RUN(testSplitAroundLoopCriticalEdgeExit());
 
     if (tasks.isEmpty())
         usage();
