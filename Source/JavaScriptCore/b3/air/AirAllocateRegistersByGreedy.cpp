@@ -2545,8 +2545,10 @@ private:
 
         Tmp loopTmp = addSplitTmp(tmp, 0, {});
 
+        // Note: addSplitTmp() above may have resized m_map, invalidating the tmpData parameter.
+        TmpData& origData = m_map.get<bank>(tmp);
         TmpData& loopData = m_map.get<bank>(loopTmp);
-        loopData.liveRange = LiveRange::subtract(tmpData.liveRange, outsideLoopRange);
+        loopData.liveRange = LiveRange::subtract(origData.liveRange, outsideLoopRange);
         ASSERT(loopData.liveRange.size());
 
         Point defPoint = 0;
@@ -2570,8 +2572,6 @@ private:
             } while (interval);
         }
 
-        // Note: addSplitTmp() above may have resized m_map, invalidating the tmpData reference.
-        TmpData& origData = m_map.get<bank>(tmp);
         origData.liveRange = WTF::move(outsideLoopRange);
         if (std::isinf(loopData.useDefCost))
             origData.useDefCost = 0; // Exact cost unknown, but favor allocating the loop tmp.
