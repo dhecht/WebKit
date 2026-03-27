@@ -2975,9 +2975,6 @@ void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, boo
     if (!Options::defaultB3OptLevel())
         return;
 
-    // Both-spilled is the early-return case; other params don't matter.
-    bool bothSpilled = nonLoopSpilled && loopSpilled;
-
     // Determine number of registers to make available and number of across-loop tmps.
     // Strategy: pin registers to control pressure, and use in-loop uses to steer which side gets priority.
     unsigned numRegs;
@@ -2985,27 +2982,22 @@ void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, boo
 
     // All matrix tests have in-loop uses so the tmp rewrite (originalTmp → loopTmp) is verified.
     // testSplitAroundLoopNoInLoopUses covers the no-uses case separately.
+    //
+    // To steer which side spills, we create fast tmps (near-infinite spill cost) that are
+    // live in the region where we want to force the across-loop tmps out of registers.
+    // Fast tmps always win register allocation, so they consume registers in their region
+    // without affecting the splitting logic for the across-loop tmps (which remain Spillable).
+    unsigned numFastTmpsOutsideLoop = 0; // Consume regs in root+exit → nonLoopTmp spills
+    unsigned numFastTmpsInsideLoop = 0;  // Consume regs in loop body → loopTmp spills
 
-    if (bothSpilled) {
-        // Very few registers, many tmps → both sides run out.
-        numRegs = 3; // 1 for counter, 2 for allocation
-        numAcrossLoopTmps = 8;
-    } else if (nonLoopSpilled && !loopSpilled) {
-        // In-loop uses at high freq → loopTmp high priority. Few regs so nonLoopTmps spill.
-        numRegs = 4;
-        numAcrossLoopTmps = 6;
-    } else if (!nonLoopSpilled && loopSpilled) {
-        // Both sides have in-loop uses, but many more tmps than registers.
-        // After splitting, 2*numAcrossLoopTmps tmps compete for numRegs registers.
-        // The loopTmps (high-freq uses) get priority, so some nonLoopTmps spill too,
-        // but there should be enough pressure that some loopTmps also spill.
-        numRegs = 4;
-        numAcrossLoopTmps = 8;
-    } else {
-        // Both get registers. Enough regs for everything.
-        numRegs = 12;
-        numAcrossLoopTmps = 3;
-    }
+    // numRegs must be >= numAcrossLoopTmps so the in-loop patchpoint is satisfiable.
+    numRegs = 8;
+    numAcrossLoopTmps = 4;
+
+    if (nonLoopSpilled)
+        numFastTmpsOutsideLoop = numRegs - 1;
+    if (loopSpilled)
+        numFastTmpsInsideLoop = numRegs - numAcrossLoopTmps;
 
     B3::Procedure proc;
     Code& code = proc.code();
@@ -3029,15 +3021,34 @@ void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, boo
     for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
         tmps.append(code.newTmp(GP));
 
+    // Create fast tmps to consume registers in specific regions and force spilling.
+    // Fast tmps have near-infinite spill cost so the allocator always keeps them in registers.
+    // Outside-loop fast tmps: live only in root and exit (block-local defs/uses).
+    // Inside-loop fast tmps: live only in the loop body (block-local defs/uses).
+    Vector<Tmp> fastTmpsOutside;
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i) {
+        Tmp ft = code.newTmp(GP);
+        code.addFastTmp(ft);
+        fastTmpsOutside.append(ft);
+    }
+    Vector<Tmp> fastTmpsInside;
+    for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i) {
+        Tmp ft = code.newTmp(GP);
+        code.addFastTmp(ft);
+        fastTmpsInside.append(ft);
+    }
+
     Tmp counter = code.newTmp(GP);
     Tmp result = code.newTmp(GP);
 
-    // --- Root block: define tmps, jump to header ---
+    // --- Root block: define tmps, define outside-loop fast tmps, jump to header ---
     if (liveAtHeader) {
         // Define tmps before the loop → they'll be live through the header.
         for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
             loadConstant(root, static_cast<intptr_t>(i + 1), tmps[i]);
     }
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
+        loadConstant(root, static_cast<intptr_t>(100 + i), fastTmpsOutside[i]);
     root->append(Move, nullptr, Arg::imm(5), counter); // 5 loop iterations
     root->append(Jump, nullptr);
     root->setSuccessors(header);
@@ -3054,7 +3065,11 @@ void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, boo
     header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
     header->setSuccessors(body, exit);
 
-    // --- Body block: optional uses/defs of tmps, clobber patchpoint, decrement counter ---
+    // --- Body block: uses/defs of tmps, fast tmps, clobber patchpoint, decrement counter ---
+
+    // Inside-loop fast tmps: define at start of body, use at end → consume regs in the loop.
+    for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i)
+        body->append(Move, nullptr, counter, fastTmpsInside[i]);
 
     // Clobber patchpoint: creates register pressure inside the loop.
     // Always uses the across-loop tmps so that the rewrite (originalTmp → loopTmp) is exercised.
@@ -3080,11 +3095,19 @@ void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, boo
             body->append(Add64, nullptr, counter, tmps[i]);
     }
 
+    // Use inside-loop fast tmps (self-add to avoid affecting other tmps).
+    for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i)
+        body->append(Add64, nullptr, fastTmpsInside[i], fastTmpsInside[i]);
+
     body->append(Sub32, nullptr, Arg::imm(1), counter);
     body->append(Jump, nullptr);
     body->setSuccessors(header); // back-edge
 
-    // --- Exit block: optionally use tmps, return result ---
+    // --- Exit block: optionally use tmps, use outside-loop fast tmps, return result ---
+    // Use outside-loop fast tmps (self-add to avoid affecting result).
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
+        exit->append(Add64, nullptr, fastTmpsOutside[i], fastTmpsOutside[i]);
+
     if (liveAtExit) {
         // Sum all tmps into result.
         exit->append(Move, nullptr, Arg::imm(0), result);
