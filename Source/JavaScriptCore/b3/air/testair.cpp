@@ -3309,10 +3309,12 @@ void testSplitAroundLoopDisabled()
     Options::airGreedyRegAllocSplitAroundLoops() = original;
 }
 
-void testSplitAroundLoopCriticalEdgeEntry()
+template<bool criticalEntry>
+void testSplitAroundLoopCriticalEdge()
 {
-    // Loop where a non-loop predecessor of the header has multiple successors (critical entry edge).
-    // The algorithm should bail out on this loop. Verify code is still correct.
+    // Tests that loop splitting bails out when there's a critical edge, and code is still correct.
+    // criticalEntry=true: root has two successors (header + altExit) — critical entry edge.
+    // criticalEntry=false: exit has predecessors from both loop and non-loop — critical exit edge.
     //
     // Structure: tmps defined → fast tmps consume regs → loop uses tmps → fast tmps again → read tmps.
     // Loop splitting would help (keep tmps in regs during loop, spill outside), but critical edge prevents it.
@@ -3336,7 +3338,6 @@ void testSplitAroundLoopCriticalEdgeEntry()
     BasicBlock* header = code.addBlock(10.0);
     BasicBlock* body = code.addBlock(10.0);
     BasicBlock* exit = code.addBlock();
-    BasicBlock* altExit = code.addBlock();
 
     // Step 1: Define across-loop tmps.
     Vector<Tmp> tmps;
@@ -3355,7 +3356,7 @@ void testSplitAroundLoopCriticalEdgeEntry()
         loadConstant(root, static_cast<intptr_t>(100 + i), ft);
     }
     for (unsigned i = 0; i < numFastTmps; ++i)
-        root->append(Add64, nullptr, fastTmps[i], fastTmps[i]); // keep fast tmps alive
+        root->append(Add64, nullptr, fastTmps[i], fastTmps[i]);
 
     Tmp counter = code.newTmp(GP);
     Tmp arg = code.newTmp(GP);
@@ -3363,12 +3364,23 @@ void testSplitAroundLoopCriticalEdgeEntry()
     root->append(Move, nullptr, Tmp(GPRInfo::argumentGPR0), arg);
     loadConstant(root, static_cast<intptr_t>(5), counter);
     root->append(Move, nullptr, Arg::imm(0), sum);
-    // Critical edge: root has TWO successors, one of which is the loop header.
-    root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
-    root->setSuccessors(header, altExit);
 
-    altExit->append(Move, nullptr, Arg::imm(-1), Tmp(GPRInfo::returnValueGPR));
-    altExit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
+    // CFG wiring: create the critical edge.
+    if (criticalEntry) {
+        // root → header (loop entry) AND root → altExit: critical entry edge.
+        BasicBlock* altExit = code.addBlock();
+        root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
+        root->setSuccessors(header, altExit);
+        altExit->append(Move, nullptr, Arg::imm(-1), Tmp(GPRInfo::returnValueGPR));
+        altExit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
+    } else {
+        // root → preheader → header, root → exit: exit has non-loop predecessor.
+        BasicBlock* preheader = code.addBlock();
+        root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
+        root->setSuccessors(preheader, exit);
+        preheader->append(Jump, nullptr);
+        preheader->setSuccessors(header);
+    }
 
     // Step 3: Loop reads tmps and accumulates.
     header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
@@ -3392,91 +3404,11 @@ void testSplitAroundLoopCriticalEdgeEntry()
     exit->append(Move, nullptr, sum, Tmp(GPRInfo::returnValueGPR));
     exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
 
-    // Expected: sum from loop = 5 * (1+2+3+4) = 50, plus tmps = 50 + 10 = 60
+    // arg=1: loop runs, sum = 5 * (1+2+3+4) = 50, + tmps = 60
+    // arg=0: skip to altExit (-1) or exit (sum=0 + tmps = 10)
     auto compilation = compile(proc);
     CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == 60);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == -1);
-}
-
-void testSplitAroundLoopCriticalEdgeExit()
-{
-    // Loop where an exit successor has a predecessor from outside the loop (critical exit edge).
-    // The algorithm should bail out on this loop. Verify code is still correct.
-    if (!Options::defaultB3OptLevel())
-        return;
-
-    B3::Procedure proc;
-    Code& code = proc.code();
-
-    unsigned numRegs = 8;
-    unsigned numAcrossLoopTmps = 4;
-    unsigned numFastTmps = numRegs - 1;
-
-    {
-        Vector<Reg> allRegs = code.regsInPriorityOrder(GP);
-        for (size_t i = numRegs; i < allRegs.size(); ++i)
-            code.pinRegister(allRegs[i]);
-    }
-
-    BasicBlock* root = code.addBlock();
-    BasicBlock* preheader = code.addBlock();
-    BasicBlock* header = code.addBlock(10.0);
-    BasicBlock* body = code.addBlock(10.0);
-    BasicBlock* exit = code.addBlock();
-
-    Vector<Tmp> tmps;
-    for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
-        Tmp tmp = code.newTmp(GP);
-        tmps.append(tmp);
-        loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
-    }
-
-    Vector<Tmp> fastTmps;
-    for (unsigned i = 0; i < numFastTmps; ++i) {
-        Tmp ft = code.newTmp(GP);
-        code.addFastTmp(ft);
-        fastTmps.append(ft);
-        loadConstant(root, static_cast<intptr_t>(100 + i), ft);
-    }
-    for (unsigned i = 0; i < numFastTmps; ++i)
-        root->append(Add64, nullptr, fastTmps[i], fastTmps[i]);
-
-    Tmp counter = code.newTmp(GP);
-    Tmp arg = code.newTmp(GP);
-    Tmp sum = code.newTmp(GP);
-    root->append(Move, nullptr, Tmp(GPRInfo::argumentGPR0), arg);
-    loadConstant(root, static_cast<intptr_t>(5), counter);
-    root->append(Move, nullptr, Arg::imm(0), sum);
-    root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
-    root->setSuccessors(preheader, exit);
-
-    preheader->append(Jump, nullptr);
-    preheader->setSuccessors(header);
-
-    header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
-    header->setSuccessors(body, exit); // exit has predecessors from both loop (header) and non-loop (root)
-
-    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
-        body->append(Add64, nullptr, tmps[i], sum);
-    body->append(Sub32, nullptr, Arg::imm(1), counter);
-    body->append(Jump, nullptr);
-    body->setSuccessors(header);
-
-    for (unsigned i = 0; i < numFastTmps; ++i)
-        loadConstant(exit, static_cast<intptr_t>(200 + i), fastTmps[i]);
-    for (unsigned i = 0; i < numFastTmps; ++i)
-        exit->append(Add64, nullptr, fastTmps[i], fastTmps[i]);
-
-    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
-        exit->append(Add64, nullptr, tmps[i], sum);
-    exit->append(Move, nullptr, sum, Tmp(GPRInfo::returnValueGPR));
-    exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
-
-    // arg=1: loop runs, sum = 5*(1+2+3+4) = 50, + tmps = 60
-    // arg=0: skips to exit, sum=0 (never initialized in loop path), + tmps = 10
-    auto compilation = compile(proc);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == 60);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == 10);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == (criticalEntry ? -1 : 10));
 }
 
 #define PREFIX "O", Options::defaultB3OptLevel(), ": "
@@ -3633,8 +3565,8 @@ void run(const char* filter)
     // Loop-aware splitting: standalone tests.
     RUN(testSplitAroundLoopNoInLoopUses());
     RUN(testSplitAroundLoopDisabled());
-    RUN(testSplitAroundLoopCriticalEdgeEntry());
-    RUN(testSplitAroundLoopCriticalEdgeExit());
+    RUN((testSplitAroundLoopCriticalEdge<true>()));
+    RUN((testSplitAroundLoopCriticalEdge<false>()));
 
     if (tasks.isEmpty())
         usage();
