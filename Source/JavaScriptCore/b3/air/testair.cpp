@@ -2982,30 +2982,29 @@ void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, boo
     // Strategy: pin registers to control pressure, and use in-loop uses to steer which side gets priority.
     unsigned numRegs;
     unsigned numAcrossLoopTmps;
-    bool hasInLoopUses; // whether tmps are used inside the loop (affects which side gets higher spill cost)
+
+    // All matrix tests have in-loop uses so the tmp rewrite (originalTmp → loopTmp) is verified.
+    // testSplitAroundLoopNoInLoopUses covers the no-uses case separately.
 
     if (bothSpilled) {
         // Very few registers, many tmps → both sides run out.
         numRegs = 3; // 1 for counter, 2 for allocation
         numAcrossLoopTmps = 8;
-        hasInLoopUses = true;
     } else if (nonLoopSpilled && !loopSpilled) {
         // In-loop uses at high freq → loopTmp high priority. Few regs so nonLoopTmps spill.
         numRegs = 4;
         numAcrossLoopTmps = 6;
-        hasInLoopUses = true;
     } else if (!nonLoopSpilled && loopSpilled) {
-        // loopTmp has no uses beyond what hasDef provides, and the high block frequency
-        // means the non-loop side (low freq, few uses) is actually cheaper to keep in a register.
-        // With enough regs for the nonLoopTmps but not for loopTmps too, the loopTmps spill.
-        numRegs = 6;
-        numAcrossLoopTmps = 4;
-        hasInLoopUses = false; // loopTmp gets low priority
+        // Both sides have in-loop uses, but many more tmps than registers.
+        // After splitting, 2*numAcrossLoopTmps tmps compete for numRegs registers.
+        // The loopTmps (high-freq uses) get priority, so some nonLoopTmps spill too,
+        // but there should be enough pressure that some loopTmps also spill.
+        numRegs = 4;
+        numAcrossLoopTmps = 8;
     } else {
         // Both get registers. Enough regs for everything.
         numRegs = 12;
         numAcrossLoopTmps = 3;
-        hasInLoopUses = true;
     }
 
     B3::Procedure proc;
@@ -3058,24 +3057,20 @@ void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, boo
     // --- Body block: optional uses/defs of tmps, clobber patchpoint, decrement counter ---
 
     // Clobber patchpoint: creates register pressure inside the loop.
+    // Always uses the across-loop tmps so that the rewrite (originalTmp → loopTmp) is exercised.
     {
         B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
         patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
         patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
 
-        if (hasInLoopUses) {
-            // Add patchpoint uses for each tmp → forces them to be in registers at this point.
-            for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
-                B3::Value* dummyValue = proc.addConstant(B3::Origin(), B3::pointerType(), 0);
-                patchpoint->append(dummyValue, B3::ValueRep::SomeRegister);
-            }
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
+            B3::Value* dummyValue = proc.addConstant(B3::Origin(), B3::pointerType(), 0);
+            patchpoint->append(dummyValue, B3::ValueRep::SomeRegister);
         }
 
         Inst inst(Patch, patchpoint, Arg::special(patchpointSpecial));
-        if (hasInLoopUses) {
-            for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
-                inst.args.append(tmps[i]);
-        }
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+            inst.args.append(tmps[i]);
         body->append(WTF::move(inst));
     }
 
