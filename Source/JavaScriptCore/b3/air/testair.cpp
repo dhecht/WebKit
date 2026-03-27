@@ -2963,13 +2963,21 @@ void testStorePairClobberMemoryLoad()
 #endif
 
 // Test loop-aware live range splitting in the greedy register allocator.
-// Parameters control the allocation outcome and structural properties of across-loop tmps:
+// Template parameters control the allocation outcome and structural properties of across-loop tmps:
 //   nonLoopSpilled: whether the outside-loop portion should end up spilled
 //   loopSpilled: whether the inside-loop portion should end up spilled
 //   hasDef: whether the tmp has a def inside the loop body
 //   liveAtHeader: whether the tmp is live at the loop header entry (true = defined before loop, false = defined in header)
 //   liveAtExit: whether the tmp is used after the loop
-void testSplitAroundLoop(bool nonLoopSpilled, bool loopSpilled, bool hasDef, bool liveAtHeader, bool liveAtExit)
+//
+// 5 bools = 32 combinations. 19 are tested:
+//   - 8 excluded: liveAtHeader=false && hasDef=false is infeasible (the header is the only loop
+//     entry, and without a def there's no in-loop live range to split).
+//   - 6 collapsed into 1: nonLoop=spill && loop=spill hits the early-return path regardless of
+//     hasDef/liveAtHeader/liveAtExit, so only one representative is needed.
+//   32 - 8 - 6 + 1 = 19.
+template<bool nonLoopSpilled, bool loopSpilled, bool hasDef, bool liveAtHeader, bool liveAtExit>
+void testSplitAroundLoop()
 {
     // Disable at O0 since the allocator behaves differently.
     if (!Options::defaultB3OptLevel())
@@ -3556,27 +3564,27 @@ void run(const char* filter)
 #endif
 
     // Loop-aware splitting tests: parameterized matrix.
-    // testSplitAroundLoop(nonLoopSpilled, loopSpilled, hasDef, liveAtHeader, liveAtExit)
-    //                                                                           Entry      Exit
-    RUN(testSplitAroundLoop(false, true,  false, true,  true));  // #1  reg→slot  slot→reg
-    RUN(testSplitAroundLoop(false, true,  true,  true,  true));  // #2  reg→slot  slot→reg
-    RUN(testSplitAroundLoop(false, true,  false, true,  false)); // #3  reg→slot  skip(exit)
-    RUN(testSplitAroundLoop(false, true,  true,  true,  false)); // #4  reg→slot  skip(exit)
-    RUN(testSplitAroundLoop(false, false, false, true,  true));  // #5  reg→reg   reg→reg
-    RUN(testSplitAroundLoop(false, false, true,  true,  true));  // #6  reg→reg   reg→reg
-    RUN(testSplitAroundLoop(false, false, false, true,  false)); // #7  reg→reg   skip(exit)
-    RUN(testSplitAroundLoop(false, false, true,  true,  false)); // #8  reg→reg   skip(exit)
-    RUN(testSplitAroundLoop(true,  false, false, true,  true));  // #9  slot→reg  skip(spill&&!def)
-    RUN(testSplitAroundLoop(true,  false, true,  true,  true));  // #10 slot→reg  reg→slot
-    RUN(testSplitAroundLoop(true,  false, false, true,  false)); // #11 slot→reg  skip
-    RUN(testSplitAroundLoop(true,  false, true,  true,  false)); // #12 slot→reg  skip(exit)
-    RUN(testSplitAroundLoop(false, true,  true,  false, true));  // #13 skip(hdr) slot→reg
-    RUN(testSplitAroundLoop(false, true,  true,  false, false)); // #14 skip(hdr) skip
-    RUN(testSplitAroundLoop(false, false, true,  false, true));  // #15 skip(hdr) reg→reg
-    RUN(testSplitAroundLoop(false, false, true,  false, false)); // #16 skip(hdr) skip
-    RUN(testSplitAroundLoop(true,  false, true,  false, true));  // #17 skip(hdr) reg→slot
-    RUN(testSplitAroundLoop(true,  false, true,  false, false)); // #18 skip(hdr) skip
-    RUN(testSplitAroundLoop(true,  true,  true,  true,  true));  // #19 early return (both spilled)
+    // testSplitAroundLoop<nonLoopSpilled, loopSpilled, hasDef, liveAtHeader, liveAtExit>()
+    //                                                                        Entry fixup   Exit fixup
+    RUN((testSplitAroundLoop<false, true,  false, true,  true>()));  // #1    reg→slot      slot→reg
+    RUN((testSplitAroundLoop<false, true,  true,  true,  true>()));  // #2    reg→slot      slot→reg
+    RUN((testSplitAroundLoop<false, true,  false, true,  false>())); // #3    reg→slot      none
+    RUN((testSplitAroundLoop<false, true,  true,  true,  false>())); // #4    reg→slot      none
+    RUN((testSplitAroundLoop<false, false, false, true,  true>()));  // #5    reg→reg       reg→reg
+    RUN((testSplitAroundLoop<false, false, true,  true,  true>()));  // #6    reg→reg       reg→reg
+    RUN((testSplitAroundLoop<false, false, false, true,  false>())); // #7    reg→reg       none
+    RUN((testSplitAroundLoop<false, false, true,  true,  false>())); // #8    reg→reg       none
+    RUN((testSplitAroundLoop<true,  false, false, true,  true>()));  // #9    slot→reg      none
+    RUN((testSplitAroundLoop<true,  false, true,  true,  true>()));  // #10   slot→reg      reg→slot
+    RUN((testSplitAroundLoop<true,  false, false, true,  false>())); // #11   slot→reg      none
+    RUN((testSplitAroundLoop<true,  false, true,  true,  false>())); // #12   slot→reg      none
+    RUN((testSplitAroundLoop<false, true,  true,  false, true>()));  // #13   none          slot→reg
+    RUN((testSplitAroundLoop<false, true,  true,  false, false>())); // #14   none          none
+    RUN((testSplitAroundLoop<false, false, true,  false, true>()));  // #15   none          reg→reg
+    RUN((testSplitAroundLoop<false, false, true,  false, false>())); // #16   none          none
+    RUN((testSplitAroundLoop<true,  false, true,  false, true>()));  // #17   none          reg→slot
+    RUN((testSplitAroundLoop<true,  false, true,  false, false>())); // #18   none          none
+    RUN((testSplitAroundLoop<true,  true,  true,  true,  true>()));  // #19   none          none
 
     // Loop-aware splitting: standalone tests.
     RUN(testSplitAroundLoopNoInLoopUses());
