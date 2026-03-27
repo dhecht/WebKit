@@ -2382,6 +2382,26 @@ private:
 
     void analyzeLoop(const NaturalLoop& loop)
     {
+        // Build the loop's live range (set of block intervals) regardless of feasibility,
+        // so chooseLoopForSplit can compute overlap stats for invalid loops too.
+        // FIXME: skip this for invalid loops once we no longer need the stats.
+        Vector<Interval, 32> loopIntervals;
+        for (unsigned i = 0; i < loop.size(); i++) {
+            auto block = loop.at(i);
+            loopIntervals.constructAndAppend(positionOfHead(block), positionOfTail(block) + 1);
+        }
+        std::ranges::sort(loopIntervals, [](const Interval& a, const Interval& b) {
+            return a.begin() < b.begin();
+        });
+
+        LiveRange loopRange;
+        for (auto& interval : loopIntervals)
+            loopRange.append(interval);
+
+        m_loopRanges.resize(std::max(m_loopRanges.size(), static_cast<size_t>(loop.index() + 1)));
+        ASSERT(!m_loopRanges[loop.index()].size());
+        m_loopRanges[loop.index()] = WTF::move(loopRange);
+
         // Check feasibility of entry edges: each non-loop predecessor of the header
         // must have the header as its only successor (non-critical edge).
         BasicBlock* header = loop.header();
@@ -2409,24 +2429,6 @@ private:
                 }
             }
         }
-        ASSERT(!m_invalidLoops.get(loop.index()));
-
-        Vector<Interval, 32> loopIntervals;
-        for (unsigned i = 0; i < loop.size(); i++) {
-            auto block = loop.at(i);
-            loopIntervals.constructAndAppend(positionOfHead(block), positionOfTail(block) + 1);
-        }
-        std::ranges::sort(loopIntervals, [](const Interval& a, const Interval& b) {
-            return a.begin() < b.begin();
-        });
-
-        LiveRange loopRange;
-        for (auto& interval : loopIntervals)
-            loopRange.append(interval);
-
-        m_loopRanges.resize(std::max(m_loopRanges.size(), static_cast<size_t>(loop.index() + 1)));
-        ASSERT(!m_loopRanges[loop.index()].size());
-        m_loopRanges[loop.index()] = WTF::move(loopRange);
     }
 
     void ensureLoopAnalysis()
@@ -2486,7 +2488,6 @@ private:
                 LiveRange nonLoopRange = LiveRange::subtract(liveRange, loopRange);
                 if (!nonLoopRange.size())
                     continue; // liveRange contained entirely within this loop
-                // FIXME: do this check first after collecting stats
                 if (m_invalidLoops.get(loop->index())) {
                     // FIXME: break critical edges during fixup if this case is important
                     m_stats[bank].numSplitAroundLoopSkipCriticalEdge++;
