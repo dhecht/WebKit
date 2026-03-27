@@ -3057,7 +3057,7 @@ void testSplitAroundLoop()
     }
     for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
         loadConstant(root, static_cast<intptr_t>(100 + i), fastTmpsOutside[i]);
-    root->append(Move, nullptr, Arg::imm(5), counter); // 5 loop iterations
+    loadConstant(root, static_cast<intptr_t>(5), counter);
     root->append(Jump, nullptr);
     root->setSuccessors(header);
 
@@ -3219,7 +3219,7 @@ void testSplitAroundLoopNoInLoopUses()
     }
 
     Tmp counter = code.newTmp(GP);
-    root->append(Move, nullptr, Arg::imm(5), counter);
+    loadConstant(root, static_cast<intptr_t>(5), counter);
     root->append(Jump, nullptr);
     root->setSuccessors(header);
 
@@ -3279,7 +3279,7 @@ void testSplitAroundLoopDisabled()
     }
 
     Tmp counter = code.newTmp(GP);
-    root->append(Move, nullptr, Arg::imm(5), counter);
+    loadConstant(root, static_cast<intptr_t>(5), counter);
     root->append(Jump, nullptr);
     root->setSuccessors(header);
 
@@ -3313,32 +3313,56 @@ void testSplitAroundLoopCriticalEdgeEntry()
 {
     // Loop where a non-loop predecessor of the header has multiple successors (critical entry edge).
     // The algorithm should bail out on this loop. Verify code is still correct.
+    //
+    // Structure: tmps defined → fast tmps consume regs → loop uses tmps → fast tmps again → read tmps.
+    // Loop splitting would help (keep tmps in regs during loop, spill outside), but critical edge prevents it.
     if (!Options::defaultB3OptLevel())
         return;
 
     B3::Procedure proc;
     Code& code = proc.code();
 
-    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+    unsigned numRegs = 8;
+    unsigned numAcrossLoopTmps = 4;
+    unsigned numFastTmps = numRegs - 1;
+
+    {
+        Vector<Reg> allRegs = code.regsInPriorityOrder(GP);
+        for (size_t i = numRegs; i < allRegs.size(); ++i)
+            code.pinRegister(allRegs[i]);
+    }
 
     BasicBlock* root = code.addBlock();
     BasicBlock* header = code.addBlock(10.0);
     BasicBlock* body = code.addBlock(10.0);
     BasicBlock* exit = code.addBlock();
-    BasicBlock* altExit = code.addBlock();  // alternate target from root (creates critical edge)
+    BasicBlock* altExit = code.addBlock();
 
-    unsigned numTmps = 20;
+    // Step 1: Define across-loop tmps.
     Vector<Tmp> tmps;
-    for (unsigned i = 0; i < numTmps; ++i) {
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
         Tmp tmp = code.newTmp(GP);
         tmps.append(tmp);
         loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
     }
 
+    // Step 2: Fast tmps consume registers in root (pre-loop pressure).
+    Vector<Tmp> fastTmps;
+    for (unsigned i = 0; i < numFastTmps; ++i) {
+        Tmp ft = code.newTmp(GP);
+        code.addFastTmp(ft);
+        fastTmps.append(ft);
+        loadConstant(root, static_cast<intptr_t>(100 + i), ft);
+    }
+    for (unsigned i = 0; i < numFastTmps; ++i)
+        root->append(Add64, nullptr, fastTmps[i], fastTmps[i]); // keep fast tmps alive
+
     Tmp counter = code.newTmp(GP);
     Tmp arg = code.newTmp(GP);
+    Tmp sum = code.newTmp(GP);
     root->append(Move, nullptr, Tmp(GPRInfo::argumentGPR0), arg);
-    root->append(Move, nullptr, Arg::imm(5), counter);
+    loadConstant(root, static_cast<intptr_t>(5), counter);
+    root->append(Move, nullptr, Arg::imm(0), sum);
     // Critical edge: root has TWO successors, one of which is the loop header.
     root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
     root->setSuccessors(header, altExit);
@@ -3346,29 +3370,31 @@ void testSplitAroundLoopCriticalEdgeEntry()
     altExit->append(Move, nullptr, Arg::imm(-1), Tmp(GPRInfo::returnValueGPR));
     altExit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
 
+    // Step 3: Loop reads tmps and accumulates.
     header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
     header->setSuccessors(body, exit);
 
-    {
-        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
-        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
-        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
-        body->append(Patch, patchpoint, Arg::special(patchpointSpecial));
-    }
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        body->append(Add64, nullptr, tmps[i], sum);
     body->append(Sub32, nullptr, Arg::imm(1), counter);
     body->append(Jump, nullptr);
     body->setSuccessors(header);
 
-    Tmp result = code.newTmp(GP);
-    exit->append(Move, nullptr, Arg::imm(0), result);
-    for (unsigned i = 0; i < numTmps; ++i)
-        exit->append(Add64, nullptr, tmps[i], result);
-    exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
+    // Step 4: Fast tmps consume registers in exit (post-loop pressure).
+    for (unsigned i = 0; i < numFastTmps; ++i)
+        loadConstant(exit, static_cast<intptr_t>(200 + i), fastTmps[i]);
+    for (unsigned i = 0; i < numFastTmps; ++i)
+        exit->append(Add64, nullptr, fastTmps[i], fastTmps[i]);
+
+    // Step 5: Read tmps and loop result.
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        exit->append(Add64, nullptr, tmps[i], sum);
+    exit->append(Move, nullptr, sum, Tmp(GPRInfo::returnValueGPR));
     exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
 
-    int64_t expected = numTmps * (numTmps + 1) / 2;
+    // Expected: sum from loop = 5 * (1+2+3+4) = 50, plus tmps = 50 + 10 = 60
     auto compilation = compile(proc);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == expected);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == 60);
     CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == -1);
 }
 
@@ -3382,27 +3408,45 @@ void testSplitAroundLoopCriticalEdgeExit()
     B3::Procedure proc;
     Code& code = proc.code();
 
-    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+    unsigned numRegs = 8;
+    unsigned numAcrossLoopTmps = 4;
+    unsigned numFastTmps = numRegs - 1;
+
+    {
+        Vector<Reg> allRegs = code.regsInPriorityOrder(GP);
+        for (size_t i = numRegs; i < allRegs.size(); ++i)
+            code.pinRegister(allRegs[i]);
+    }
 
     BasicBlock* root = code.addBlock();
     BasicBlock* preheader = code.addBlock();
     BasicBlock* header = code.addBlock(10.0);
     BasicBlock* body = code.addBlock(10.0);
-    BasicBlock* exit = code.addBlock();  // shared: reached from both loop and root
+    BasicBlock* exit = code.addBlock();
 
-    unsigned numTmps = 20;
     Vector<Tmp> tmps;
-    for (unsigned i = 0; i < numTmps; ++i) {
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
         Tmp tmp = code.newTmp(GP);
         tmps.append(tmp);
         loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
     }
 
+    Vector<Tmp> fastTmps;
+    for (unsigned i = 0; i < numFastTmps; ++i) {
+        Tmp ft = code.newTmp(GP);
+        code.addFastTmp(ft);
+        fastTmps.append(ft);
+        loadConstant(root, static_cast<intptr_t>(100 + i), ft);
+    }
+    for (unsigned i = 0; i < numFastTmps; ++i)
+        root->append(Add64, nullptr, fastTmps[i], fastTmps[i]);
+
     Tmp counter = code.newTmp(GP);
     Tmp arg = code.newTmp(GP);
+    Tmp sum = code.newTmp(GP);
     root->append(Move, nullptr, Tmp(GPRInfo::argumentGPR0), arg);
-    root->append(Move, nullptr, Arg::imm(5), counter);
-    // Root branches: either enter loop via preheader, or skip to exit (creating critical exit edge).
+    loadConstant(root, static_cast<intptr_t>(5), counter);
+    root->append(Move, nullptr, Arg::imm(0), sum);
     root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
     root->setSuccessors(preheader, exit);
 
@@ -3412,27 +3456,27 @@ void testSplitAroundLoopCriticalEdgeExit()
     header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
     header->setSuccessors(body, exit); // exit has predecessors from both loop (header) and non-loop (root)
 
-    {
-        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
-        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
-        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
-        body->append(Patch, patchpoint, Arg::special(patchpointSpecial));
-    }
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        body->append(Add64, nullptr, tmps[i], sum);
     body->append(Sub32, nullptr, Arg::imm(1), counter);
     body->append(Jump, nullptr);
     body->setSuccessors(header);
 
-    Tmp result = code.newTmp(GP);
-    exit->append(Move, nullptr, Arg::imm(0), result);
-    for (unsigned i = 0; i < numTmps; ++i)
-        exit->append(Add64, nullptr, tmps[i], result);
-    exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
+    for (unsigned i = 0; i < numFastTmps; ++i)
+        loadConstant(exit, static_cast<intptr_t>(200 + i), fastTmps[i]);
+    for (unsigned i = 0; i < numFastTmps; ++i)
+        exit->append(Add64, nullptr, fastTmps[i], fastTmps[i]);
+
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        exit->append(Add64, nullptr, tmps[i], sum);
+    exit->append(Move, nullptr, sum, Tmp(GPRInfo::returnValueGPR));
     exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
 
-    int64_t expected = numTmps * (numTmps + 1) / 2;
+    // arg=1: loop runs, sum = 5*(1+2+3+4) = 50, + tmps = 60
+    // arg=0: skips to exit, sum=0 (never initialized in loop path), + tmps = 10
     auto compilation = compile(proc);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == expected);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == expected);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == 60);
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == 10);
 }
 
 #define PREFIX "O", Options::defaultB3OptLevel(), ": "
