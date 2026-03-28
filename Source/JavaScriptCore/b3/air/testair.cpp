@@ -2967,40 +2967,29 @@ void testStorePairClobberMemoryLoad()
 //   nonLoopSpilled: whether the outside-loop portion should end up spilled
 //   loopSpilled: whether the inside-loop portion should end up spilled
 //   hasDef: whether the tmp has a def inside the loop body
-//   liveAtHeader: whether the tmp is live at the loop header entry (true = defined before loop, false = defined in header)
-//   liveAtExit: whether the tmp is used after the loop
+//   liveAtHeader: whether the tmp is live across the loop entry edge
+//   liveAtExit: whether the tmp is live across the loop exit edge
+//
+// The tmp always has three regions of activity:
+//   Pre-loop (root): defined via loadConstant. If !liveAtHeader, also used here (separate range).
+//   Loop (body): read into sum. If hasDef, also modified (tmp += counter).
+//                If !liveAtHeader, fresh def at start of body (range not connected to pre-loop).
+//   Post-loop (exit): If liveAtExit, value flows from loop. If !liveAtExit, redefined here (separate range).
 //
 // 5 bools = 32 combinations. 19 are tested:
-//   - 8 excluded: liveAtHeader=false && hasDef=false is infeasible (the header is the only loop
-//     entry, and without a def there's no in-loop live range to split).
+//   - 8 excluded: liveAtHeader=false && hasDef=false is infeasible (no def means no in-loop range).
 //   - 6 collapsed into 1: nonLoop=spill && loop=spill hits the early-return path regardless of
 //     hasDef/liveAtHeader/liveAtExit, so only one representative is needed.
 //   32 - 8 - 6 + 1 = 19.
 template<bool nonLoopSpilled, bool loopSpilled, bool hasDef, bool liveAtHeader, bool liveAtExit>
 void testSplitAroundLoop()
 {
-    // Disable at O0 since the allocator behaves differently.
-    if (!Options::defaultB3OptLevel())
-        return;
+    unsigned numRegs = 8;
+    unsigned numAcrossLoopTmps = 4;
 
-    // Determine number of registers to make available and number of across-loop tmps.
-    // Strategy: pin registers to control pressure, and use in-loop uses to steer which side gets priority.
-    unsigned numRegs;
-    unsigned numAcrossLoopTmps;
-
-    // All matrix tests have in-loop uses so the tmp rewrite (originalTmp → loopTmp) is verified.
-    // testSplitAroundLoopNoInLoopUses covers the no-uses case separately.
-    //
-    // To steer which side spills, we create fast tmps (near-infinite spill cost) that are
-    // live in the region where we want to force the across-loop tmps out of registers.
-    // Fast tmps always win register allocation, so they consume registers in their region
-    // without affecting the splitting logic for the across-loop tmps (which remain Spillable).
+    // Fast tmps consume registers in specific regions to steer which side spills.
     unsigned numFastTmpsOutsideLoop = 0; // Consume regs in root+exit → nonLoopTmp spills
     unsigned numFastTmpsInsideLoop = 0;  // Consume regs in loop body → loopTmp spills
-
-    // numRegs must be >= numAcrossLoopTmps so the in-loop patchpoint is satisfiable.
-    numRegs = 8;
-    numAcrossLoopTmps = 4;
 
     if (nonLoopSpilled)
         numFastTmpsOutsideLoop = numRegs - 1;
@@ -3017,22 +3006,16 @@ void testSplitAroundLoop()
             code.pinRegister(allRegs[i]);
     }
 
-    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+    BasicBlock* root = code.addBlock();
+    BasicBlock* header = code.addBlock(10.0);
+    BasicBlock* body = code.addBlock(10.0);
+    BasicBlock* exit = code.addBlock();
 
-    BasicBlock* root = code.addBlock();           // freq = 1
-    BasicBlock* header = code.addBlock(10.0);     // loop header, high freq
-    BasicBlock* body = code.addBlock(10.0);       // loop body, high freq
-    BasicBlock* exit = code.addBlock();           // freq = 1
-
-    // --- Create across-loop tmps ---
+    // --- Create tmps ---
     Vector<Tmp> tmps;
     for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
         tmps.append(code.newTmp(GP));
 
-    // Create fast tmps to consume registers in specific regions and force spilling.
-    // Fast tmps have near-infinite spill cost so the allocator always keeps them in registers.
-    // Outside-loop fast tmps: live only in root and exit (block-local defs/uses).
-    // Inside-loop fast tmps: live only in the loop body (block-local defs/uses).
     Vector<Tmp> fastTmpsOutside;
     for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i) {
         Tmp ft = code.newTmp(GP);
@@ -3047,146 +3030,128 @@ void testSplitAroundLoop()
     }
 
     Tmp counter = code.newTmp(GP);
-    Tmp result = code.newTmp(GP);
+    Tmp sum = code.newTmp(GP);
 
-    // --- Root block: define tmps, define outside-loop fast tmps, jump to header ---
-    if (liveAtHeader) {
-        // Define tmps before the loop → they'll be live through the header.
+    // --- Root: define tmps, optional pre-loop use, fast tmps, counter ---
+    root->append(Move, nullptr, Arg::imm(0), sum);
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        loadConstant(root, static_cast<intptr_t>(i + 1), tmps[i]);
+    if (!liveAtHeader) {
+        // Pre-loop use: creates a separate pre-loop live range (not connected to loop range).
         for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
-            loadConstant(root, static_cast<intptr_t>(i + 1), tmps[i]);
+            root->append(Add64, nullptr, tmps[i], sum);
     }
-    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i) {
         loadConstant(root, static_cast<intptr_t>(100 + i), fastTmpsOutside[i]);
+        root->append(Add64, nullptr, fastTmpsOutside[i], sum);
+    }
     loadConstant(root, static_cast<intptr_t>(5), counter);
     root->append(Jump, nullptr);
     root->setSuccessors(header);
 
-    // --- Header block: optional defs (for liveAtHeader=false), branch to body or exit ---
-    if (!liveAtHeader) {
-        // Define tmps at start of header → NOT live-in to header (disjoint ranges).
-        // Use counter as a base to prevent constant folding.
-        for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
-            header->append(Move, nullptr, counter, tmps[i]);
-            header->append(Add64, nullptr, Arg::imm(i + 1), tmps[i]);
-        }
-    }
+    // --- Header: branch to body or exit ---
     header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
     header->setSuccessors(body, exit);
 
-    // --- Body block: uses/defs of tmps, fast tmps, clobber patchpoint, decrement counter ---
-
-    // Inside-loop fast tmps: define at start of body, use at end → consume regs in the loop.
+    // --- Body: fast tmps inside, optional fresh def, read tmps, optional modify, decrement ---
     for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i)
         body->append(Move, nullptr, counter, fastTmpsInside[i]);
 
-    // Clobber patchpoint: creates register pressure inside the loop.
-    // Always uses the across-loop tmps so that the rewrite (originalTmp → loopTmp) is exercised.
-    {
-        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
-        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
-        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
-
+    if (!liveAtHeader) {
+        // Fresh def in body: not connected to pre-loop range.
         for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
-            B3::Value* dummyValue = proc.addConstant(B3::Origin(), B3::pointerType(), 0);
-            patchpoint->append(dummyValue, B3::ValueRep::SomeRegister);
+            body->append(Move, nullptr, counter, tmps[i]);
+            body->append(Add64, nullptr, Arg::imm(i + 1), tmps[i]);
         }
-
-        Inst inst(Patch, patchpoint, Arg::special(patchpointSpecial));
-        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
-            inst.args.append(tmps[i]);
-        body->append(WTF::move(inst));
     }
 
+    // Read tmps in body (accumulate into sum).
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        body->append(Add64, nullptr, tmps[i], sum);
+
     if (hasDef) {
-        // Define tmps inside the loop body. Use counter so the def depends on runtime state.
+        // Modify tmps in body.
         for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
             body->append(Add64, nullptr, counter, tmps[i]);
     }
 
-    // Use inside-loop fast tmps (self-add to avoid affecting other tmps).
     for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i)
-        body->append(Add64, nullptr, fastTmpsInside[i], fastTmpsInside[i]);
+        body->append(Add64, nullptr, fastTmpsInside[i], sum);
 
     body->append(Sub32, nullptr, Arg::imm(1), counter);
     body->append(Jump, nullptr);
-    body->setSuccessors(header); // back-edge
+    body->setSuccessors(header);
 
-    // --- Exit block: optionally use tmps, use outside-loop fast tmps, return result ---
-    // Use outside-loop fast tmps (self-add to avoid affecting result).
-    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
-        exit->append(Add64, nullptr, fastTmpsOutside[i], fastTmpsOutside[i]);
-
-    if (liveAtExit) {
-        // Sum all tmps into result.
-        exit->append(Move, nullptr, Arg::imm(0), result);
+    // --- Exit: optional redef, read tmps, fast tmps, return sum ---
+    if (!liveAtExit) {
+        // Post-loop redef: creates a separate post-loop live range (not connected to loop range).
         for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
-            exit->append(Add64, nullptr, tmps[i], result);
-        exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
-    } else {
-        // Don't use tmps after the loop. Return counter (should be 0).
-        exit->append(Move, nullptr, counter, Tmp(GPRInfo::returnValueGPR));
+            loadConstant(exit, static_cast<intptr_t>(i + 1), tmps[i]);
     }
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        exit->append(Add64, nullptr, tmps[i], sum);
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i) {
+        loadConstant(exit, static_cast<intptr_t>(200 + i), fastTmpsOutside[i]);
+        exit->append(Add64, nullptr, fastTmpsOutside[i], sum);
+    }
+    exit->append(Move, nullptr, sum, Tmp(GPRInfo::returnValueGPR));
     exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
 
     // --- Compute expected result ---
-    int64_t expected;
-    if (liveAtExit) {
-        expected = 0;
-        for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
-            int64_t val;
-            if (liveAtHeader)
-                val = static_cast<int64_t>(i + 1);
-            else {
-                // Defined in header: counter + (i+1). Last header execution is with counter=1
-                // (since Branch32 GreaterThan 0 goes to body when counter >= 1, and exits when counter == 0).
-                // When the loop exits, counter == 0, so the header defs are computed with counter at that iteration.
-                // Actually: header runs, checks counter > 0. If false, goes to exit. So the last header
-                // execution that reaches exit has counter == 0. The defs in header compute tmps[i] = 0 + (i+1) = i+1.
-                val = static_cast<int64_t>(i + 1);
-            }
-            if (hasDef) {
-                // The loop body adds counter to each tmp on each iteration.
-                // Iterations run with counter = 5, 4, 3, 2, 1 (body decrements after the add).
-                // Wait — the body does Add64(counter, tmps[i]) then Sub32(1, counter).
-                // So on each iteration: tmps[i] += counter_before_decrement.
-                // For liveAtHeader=true: initial val = i+1, then += 5+4+3+2+1 = 15
-                // For liveAtHeader=false: header sets val = counter + (i+1) each iteration.
-                //   The header runs 6 times (counter=5,4,3,2,1,0), but body runs 5 times (counter=5,4,3,2,1).
-                //   Each header execution redefines the tmp. The last header before exit has counter=0,
-                //   so tmp = 0 + (i+1) = i+1. But body also does tmp += counter for iterations where
-                //   counter=5,4,3,2,1. Between the header def and the next header def, body runs once.
-                //   So: header(counter=5): tmp = 5+(i+1) → body: tmp += 5 → header(counter=4): tmp = 4+(i+1) → ...
-                //   The header REDEFINES tmp each iteration, so the final value is from the last header
-                //   execution that reaches exit: counter=0, tmp = 0 + (i+1) = i+1.
-                //   But wait, the body also adds counter to tmp AFTER the last body execution.
-                //   Last body: counter=1, tmp = 1+(i+1) + 1 = ... no, let me trace more carefully.
-                //
-                //   Iteration 1: header(counter=5) → defs tmp=(5+i+1) → body: tmp+= 5 → tmp=(10+i+1), counter→4
-                //   Iteration 2: header(counter=4) → defs tmp=(4+i+1) → body: tmp+= 4 → tmp=(8+i+1), counter→3
-                //   Iteration 3: header(counter=3) → defs tmp=(3+i+1) → body: tmp+= 3 → tmp=(6+i+1), counter→2
-                //   Iteration 4: header(counter=2) → defs tmp=(2+i+1) → body: tmp+= 2 → tmp=(4+i+1), counter→1
-                //   Iteration 5: header(counter=1) → defs tmp=(1+i+1) → body: tmp+= 1 → tmp=(2+i+1), counter→0
-                //   Final:       header(counter=0) → defs tmp=(0+i+1) = i+1 → branch to exit
-                //   So final tmp = i+1 (header redefines it with counter=0 on exit).
-                val = static_cast<int64_t>(i + 1);
-            }
-            expected += val;
-        }
-        if (!liveAtHeader && hasDef) {
-            // With liveAtHeader=false, the header redefines on every entry including the exit path.
-            // hasDef also adds in body, but header redefines. Final val = 0 + (i+1) = i+1.
-            // Already computed above.
-        }
-        if (liveAtHeader && hasDef) {
-            // initial val = i+1, body adds counter on each of 5 iterations: +=5+4+3+2+1=15.
-            expected = 0;
-            for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
-                expected += static_cast<int64_t>(i + 1) + 15;
-        }
-    } else {
-        // Returning counter, which should be 0.
-        expected = 0;
+    // sum accumulates contributions from pre-loop, loop body, and post-loop.
+    int64_t expected = 0;
+
+    // Pre-loop fast tmps: 100+101+...+(100+N-1)
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
+        expected += static_cast<int64_t>(100 + i);
+
+    // Pre-loop tmps (only when !liveAtHeader): 1+2+3+4 = 10
+    if (!liveAtHeader) {
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+            expected += static_cast<int64_t>(i + 1);
     }
+
+    // Loop body: 5 iterations with counter=5,4,3,2,1.
+    {
+        int64_t tmpVals[4];
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+            tmpVals[i] = static_cast<int64_t>(i + 1);
+
+        for (int c = 5; c >= 1; --c) {
+            if (!liveAtHeader) {
+                // Fresh def: tmp = counter + (i+1)
+                for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+                    tmpVals[i] = c + static_cast<int64_t>(i + 1);
+            }
+            // Read: sum += tmp[i]
+            for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+                expected += tmpVals[i];
+            if (hasDef) {
+                // Modify: tmp[i] += counter
+                for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+                    tmpVals[i] += c;
+            }
+            // Inside fast tmps: sum += counter (each fast tmp was set to counter)
+            for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i)
+                expected += c;
+        }
+
+        // Post-loop tmps: value at exit.
+        if (liveAtExit) {
+            for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+                expected += tmpVals[i];
+        }
+    }
+
+    if (!liveAtExit) {
+        // Post-loop redef: 1+2+3+4 = 10
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+            expected += static_cast<int64_t>(i + 1);
+    }
+
+    // Post-loop fast tmps: 200+201+...+(200+N-1)
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
+        expected += static_cast<int64_t>(200 + i);
 
     auto runResult = compileAndRun<int64_t>(proc);
     CHECK(runResult == expected);
@@ -3197,9 +3162,6 @@ void testSplitAroundLoopNoInLoopUses()
     // Tmps defined before loop, not used/defined inside, used after.
     // loopTmp has spillCost=0 → spills. Tests the simple case where no
     // tmp rewrite happens inside the loop (no uses to rename).
-    if (!Options::defaultB3OptLevel())
-        return;
-
     B3::Procedure proc;
     Code& code = proc.code();
 
@@ -3254,9 +3216,6 @@ void testSplitAroundLoopDisabled()
 {
     // Same as testSplitAroundLoopNoInLoopUses but with loop splitting disabled.
     // Verifies the option gate works and fallback to spilling is correct.
-    if (!Options::defaultB3OptLevel())
-        return;
-
     auto original = Options::airGreedyRegAllocSplitAroundLoops();
     Options::airGreedyRegAllocSplitAroundLoops() = false;
 
@@ -3318,8 +3277,6 @@ void testSplitAroundLoopCriticalEdge()
     //
     // Structure: tmps defined → fast tmps consume regs → loop uses tmps → fast tmps again → read tmps.
     // Loop splitting would help (keep tmps in regs during loop, spill outside), but critical edge prevents it.
-    if (!Options::defaultB3OptLevel())
-        return;
 
     B3::Procedure proc;
     Code& code = proc.code();
