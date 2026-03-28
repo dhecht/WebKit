@@ -3296,6 +3296,12 @@ private:
         ASSERT(depth >= 1);
         unsigned exitPhase = aroundLoopExitBase + (maxLoopSplitDepth - depth);
 
+        Bank bank = nonLoopTmp.bank();
+        if (spillSlot(loopTmp))
+            m_stats[bank].numSplitAroundLoopLoopSpilled++;
+        if (spillSlot(nonLoopTmp))
+            m_stats[bank].numSplitAroundLoopNonLoopSpilled++;
+
         if (spillSlot(nonLoopTmp) && spillSlot(loopTmp)) {
             ASSERT(spillSlot(nonLoopTmp) == spillSlot(loopTmp));
             return; // Both spilled to same slot → no fixup needed.

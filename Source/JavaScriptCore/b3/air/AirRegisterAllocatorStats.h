@@ -61,7 +61,8 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numSplitIntraBlockLoad)               \
     macro(numSplitIntraBlockStore)              \
     macro(numSplitAroundLoop)                   \
-    macro(numSplitAroundLoopSpilled)            \
+    macro(numSplitAroundLoopLoopSpilled)        \
+    macro(numSplitAroundLoopNonLoopSpilled)     \
     macro(numSplitAroundLoopBailNoLoop)         \
     macro(numSplitAroundLoopBailAlreadySplitAroundClobbers)   \
     macro(numSplitAroundLoopBailLocalOnly)      \
