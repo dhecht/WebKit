@@ -162,6 +162,11 @@ class LiveRange {
 public:
     LiveRange() = default;
 
+    LiveRange(Interval interval) 
+    {
+        append(interval);
+    }
+
     inline void validate()
     {
 #if ASSERT_ENABLED
@@ -3346,9 +3351,17 @@ private:
                         continue;
                     if (!visitedExitSuccessors.add(succ.block()))
                         continue; // Already inserted fixup for this exit successor.
-                    if (!nonLoopLiveRange.contains(positionOfHead(succ.block())))
+                    Point exitHead = positionOfHead(succ.block());
+                    if (!nonLoopLiveRange.contains(exitHead))
                         continue; // not live at this exit so no fixup needed
                     m_insertionSets[succ.block()].insert(0, exitPhase, move, succ.block()->at(0).origin, loopArg, nonLoopArg);
+                    // The exit move reads loopTmp at this point. If loopTmp was further
+                    // split around inner loops, its range won't cover this exit. Extend
+                    // it so that inner fixups (processed later, since outer splits are
+                    // created first in m_splitMetadata) see loopTmp as live here and
+                    // emit their own exit moves to chain correctly.
+                    ASSERT(!loopLiveRange.contains(exitHead));
+                    loopLiveRange = LiveRange::merge(loopLiveRange, Interval(exitHead));
                 }
             }
         }
