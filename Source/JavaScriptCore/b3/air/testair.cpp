@@ -2994,7 +2994,7 @@ void testSplitAroundLoop()
     if (nonLoopSpilled)
         numFastTmpsOutsideLoop = numRegs - 1;
     if (loopSpilled)
-        numFastTmpsInsideLoop = numRegs - numAcrossLoopTmps;
+        numFastTmpsInsideLoop = numRegs - 1;
 
     B3::Procedure proc;
     Code& code = proc.code();
