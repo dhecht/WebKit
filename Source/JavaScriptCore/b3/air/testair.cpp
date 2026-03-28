@@ -2976,11 +2976,13 @@ void testStorePairClobberMemoryLoad()
 //                If !liveAtHeader, fresh def at start of body (range not connected to pre-loop).
 //   Post-loop (exit): If liveAtExit, value flows from loop. If !liveAtExit, redefined here (separate range).
 //
-// 5 bools = 32 combinations. 19 are tested:
+// 5 bools = 32 combinations. 18 are tested:
 //   - 8 excluded: liveAtHeader=false && hasDef=false is infeasible (no def means no in-loop range).
+//   - 1 excluded: nonLoopSpilled=true && !liveAtHeader && !liveAtExit — tmps are block-local to the
+//     body, nothing crosses loop boundaries, so nonLoopSpilled is meaningless.
 //   - 6 collapsed into 1: nonLoop=spill && loop=spill hits the early-return path regardless of
 //     hasDef/liveAtHeader/liveAtExit, so only one representative is needed.
-//   32 - 8 - 6 + 1 = 19.
+//   32 - 8 - 1 - 6 + 1 = 18.
 template<bool nonLoopSpilled, bool loopSpilled, bool hasDef, bool liveAtHeader, bool liveAtExit>
 void testSplitAroundLoop()
 {
@@ -3465,6 +3467,13 @@ void run(const char* filter)
     // Loop-aware splitting tests: parameterized matrix.
     // testSplitAroundLoop<nonLoopSpilled, loopSpilled, hasDef, liveAtHeader, liveAtExit>()
     //                                                                        Entry fixup   Exit fixup
+    // FIXME: Cases 5-8 and 15-16 (nonLoopSpilled=false, loopSpilled=false) don't exercise splitting —
+    // there's no register pressure so the allocator never splits. The intended reg→reg fixups never occur.
+    // To induce reg→reg, we'd need the original tmp to fail allocation (no single register free across
+    // its entire range) while both halves succeed with different registers after splitting. This is hard
+    // to achieve because the greedy allocator reuses registers freed by dead fast tmps.
+    // FIXME: Case 18 (nonLoopSpilled=true, liveAtHeader=false, liveAtExit=false) doesn't split because
+    // the tmps are block-local to the loop body — there's nothing across-loop to split.
     RUN((testSplitAroundLoop<false, true,  false, true,  true>()));  // #1    reg→slot      slot→reg
     RUN((testSplitAroundLoop<false, true,  true,  true,  true>()));  // #2    reg→slot      slot→reg
     RUN((testSplitAroundLoop<false, true,  false, true,  false>())); // #3    reg→slot      none
@@ -3482,8 +3491,7 @@ void run(const char* filter)
     RUN((testSplitAroundLoop<false, false, true,  false, true>()));  // #15   none          reg→reg
     RUN((testSplitAroundLoop<false, false, true,  false, false>())); // #16   none          none
     RUN((testSplitAroundLoop<true,  false, true,  false, true>()));  // #17   none          reg→slot
-    RUN((testSplitAroundLoop<true,  false, true,  false, false>())); // #18   none          none
-    RUN((testSplitAroundLoop<true,  true,  true,  true,  true>()));  // #19   none          none
+    RUN((testSplitAroundLoop<true,  true,  true,  true,  true>()));  // #18   none          none
 
     // Loop-aware splitting: standalone tests.
     RUN(testSplitAroundLoopNoInLoopUses());
