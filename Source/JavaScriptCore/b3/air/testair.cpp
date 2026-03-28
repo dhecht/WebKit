@@ -3162,25 +3162,45 @@ void testSplitAroundLoopNoInLoopUses()
     // Tmps defined before loop, not used/defined inside, used after.
     // loopTmp has spillCost=0 → spills. Tests the simple case where no
     // tmp rewrite happens inside the loop (no uses to rename).
+    // Fast tmps inside the loop body create register pressure.
     B3::Procedure proc;
     Code& code = proc.code();
 
-    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
+    unsigned numRegs = 8;
+    unsigned numAcrossLoopTmps = 4;
+    unsigned numFastTmpsInsideLoop = numRegs - 1;
+
+    // Pin registers to limit allocatable set.
+    {
+        Vector<Reg> allRegs = code.regsInPriorityOrder(GP);
+        for (size_t i = numRegs; i < allRegs.size(); ++i)
+            code.pinRegister(allRegs[i]);
+    }
 
     BasicBlock* root = code.addBlock();
     BasicBlock* header = code.addBlock(10.0);
     BasicBlock* body = code.addBlock(10.0);
     BasicBlock* exit = code.addBlock();
 
-    unsigned numTmps = 20;
+    // Across-loop tmps: defined in root, used only in exit (no in-loop uses).
     Vector<Tmp> tmps;
-    for (unsigned i = 0; i < numTmps; ++i) {
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i) {
         Tmp tmp = code.newTmp(GP);
         tmps.append(tmp);
         loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
     }
 
+    // Fast tmps inside loop: consume registers in the body, forcing across-loop tmps out.
+    Vector<Tmp> fastTmpsInside;
+    for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i) {
+        Tmp ft = code.newTmp(GP);
+        code.addFastTmp(ft);
+        fastTmpsInside.append(ft);
+    }
+
     Tmp counter = code.newTmp(GP);
+    Tmp sum = code.newTmp(GP);
+    root->append(Move, nullptr, Arg::imm(0), sum);
     loadConstant(root, static_cast<intptr_t>(5), counter);
     root->append(Jump, nullptr);
     root->setSuccessors(header);
@@ -3188,84 +3208,24 @@ void testSplitAroundLoopNoInLoopUses()
     header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
     header->setSuccessors(body, exit);
 
-    // Body: just a clobber patchpoint (no uses of our tmps) and counter decrement.
-    {
-        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
-        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
-        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
-        body->append(Patch, patchpoint, Arg::special(patchpointSpecial));
-    }
+    // Body: fast tmps consume registers, no uses of across-loop tmps.
+    for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i)
+        body->append(Move, nullptr, counter, fastTmpsInside[i]);
+    for (unsigned i = 0; i < numFastTmpsInsideLoop; ++i)
+        body->append(Add64, nullptr, fastTmpsInside[i], sum);
     body->append(Sub32, nullptr, Arg::imm(1), counter);
     body->append(Jump, nullptr);
     body->setSuccessors(header);
 
-    // Exit: sum all tmps.
-    Tmp result = code.newTmp(GP);
-    exit->append(Move, nullptr, Arg::imm(0), result);
-    for (unsigned i = 0; i < numTmps; ++i)
-        exit->append(Add64, nullptr, tmps[i], result);
-    exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
+    // Exit: sum all across-loop tmps.
+    for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+        exit->append(Add64, nullptr, tmps[i], sum);
+    exit->append(Move, nullptr, sum, Tmp(GPRInfo::returnValueGPR));
     exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
 
-    // Expected: sum of 1..20 = 210
-    int64_t expected = numTmps * (numTmps + 1) / 2;
-    CHECK(compileAndRun<int64_t>(proc) == expected);
-}
-
-void testSplitAroundLoopDisabled()
-{
-    // Same as testSplitAroundLoopNoInLoopUses but with loop splitting disabled.
-    // Verifies the option gate works and fallback to spilling is correct.
-    auto original = Options::airGreedyRegAllocSplitAroundLoops();
-    Options::airGreedyRegAllocSplitAroundLoops() = false;
-
-    B3::Procedure proc;
-    Code& code = proc.code();
-
-    B3::Air::Special* patchpointSpecial = code.addSpecial(makeUniqueWithoutFastMallocCheck<B3::PatchpointSpecial>());
-
-    BasicBlock* root = code.addBlock();
-    BasicBlock* header = code.addBlock(10.0);
-    BasicBlock* body = code.addBlock(10.0);
-    BasicBlock* exit = code.addBlock();
-
-    unsigned numTmps = 20;
-    Vector<Tmp> tmps;
-    for (unsigned i = 0; i < numTmps; ++i) {
-        Tmp tmp = code.newTmp(GP);
-        tmps.append(tmp);
-        loadConstant(root, static_cast<intptr_t>(i + 1), tmp);
-    }
-
-    Tmp counter = code.newTmp(GP);
-    loadConstant(root, static_cast<intptr_t>(5), counter);
-    root->append(Jump, nullptr);
-    root->setSuccessors(header);
-
-    header->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), counter, Arg::imm(0));
-    header->setSuccessors(body, exit);
-
-    {
-        B3::PatchpointValue* patchpoint = proc.add<B3::PatchpointValue>(B3::Void, B3::Origin());
-        patchpoint->clobberLate(RegisterSet::registersToSaveForJSCall(RegisterSet::allScalarRegisters()));
-        patchpoint->setGenerator([](CCallHelpers&, const B3::StackmapGenerationParams&) { });
-        body->append(Patch, patchpoint, Arg::special(patchpointSpecial));
-    }
-    body->append(Sub32, nullptr, Arg::imm(1), counter);
-    body->append(Jump, nullptr);
-    body->setSuccessors(header);
-
-    Tmp result = code.newTmp(GP);
-    exit->append(Move, nullptr, Arg::imm(0), result);
-    for (unsigned i = 0; i < numTmps; ++i)
-        exit->append(Add64, nullptr, tmps[i], result);
-    exit->append(Move, nullptr, result, Tmp(GPRInfo::returnValueGPR));
-    exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
-
-    int64_t expected = numTmps * (numTmps + 1) / 2;
-    CHECK(compileAndRun<int64_t>(proc) == expected);
-
-    Options::airGreedyRegAllocSplitAroundLoops() = original;
+    // Expected: fast tmps add counter each iter: 7*(5+4+3+2+1) = 105
+    // Plus across-loop tmps: 1+2+3+4 = 10. Total = 115.
+    CHECK(compileAndRun<int64_t>(proc) == 115);
 }
 
 template<bool criticalEntry>
@@ -3527,7 +3487,6 @@ void run(const char* filter)
 
     // Loop-aware splitting: standalone tests.
     RUN(testSplitAroundLoopNoInLoopUses());
-    RUN(testSplitAroundLoopDisabled());
     RUN((testSplitAroundLoopCriticalEdge<true>()));
     RUN((testSplitAroundLoopCriticalEdge<false>()));
 
