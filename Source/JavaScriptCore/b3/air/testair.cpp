@@ -3041,10 +3041,10 @@ void testSplitAroundLoop()
         for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
             root->append(Add64, nullptr, tmps[i], sum);
     }
-    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i) {
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
         loadConstant(root, static_cast<intptr_t>(100 + i), fastTmpsOutside[i]);
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
         root->append(Add64, nullptr, fastTmpsOutside[i], sum);
-    }
     loadConstant(root, static_cast<intptr_t>(5), counter);
     root->append(Jump, nullptr);
     root->setSuccessors(header);
@@ -3090,10 +3090,10 @@ void testSplitAroundLoop()
     }
     for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
         exit->append(Add64, nullptr, tmps[i], sum);
-    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i) {
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
         loadConstant(exit, static_cast<intptr_t>(200 + i), fastTmpsOutside[i]);
+    for (unsigned i = 0; i < numFastTmpsOutsideLoop; ++i)
         exit->append(Add64, nullptr, fastTmpsOutside[i], sum);
-    }
     exit->append(Move, nullptr, sum, Tmp(GPRInfo::returnValueGPR));
     exit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
 
