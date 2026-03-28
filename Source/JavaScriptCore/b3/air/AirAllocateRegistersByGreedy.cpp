@@ -31,6 +31,7 @@
 #include "AirArgInlines.h"
 #include "AirCode.h"
 #include "AirDominators.h"
+#include "AirEmitShuffle.h"
 #include "AirFixSpillsAfterTerminals.h"
 #include "AirPhaseInsertionSet.h"
 #include "AirInstInlines.h"
@@ -3209,6 +3210,38 @@ private:
                 break;
             }
         }
+        // Emit accumulated loop fixup moves. Multiple chains splitting around the same loop
+        // may need moves at the same block/position. Emitting them as a Shuffle lets
+        // AirLowerAfterRegAlloc resolve register cycles (e.g. x1↔x2 swaps) correctly.
+        // Sort so moves at the same (block, instIndex, phase) are adjacent.
+        std::sort(m_pendingLoopFixupMoves.begin(), m_pendingLoopFixupMoves.end(), [](const LoopFixupMove& a, const LoopFixupMove& b) {
+            if (a.block != b.block)
+                return a.block < b.block;
+            if (a.instIndex != b.instIndex)
+                return a.instIndex < b.instIndex;
+            return a.phase < b.phase;
+        });
+        for (unsigned i = 0; i < m_pendingLoopFixupMoves.size(); ) {
+            auto& first = m_pendingLoopFixupMoves[i];
+            unsigned j = i + 1;
+            while (j < m_pendingLoopFixupMoves.size()
+                && m_pendingLoopFixupMoves[j].block == first.block
+                && m_pendingLoopFixupMoves[j].instIndex == first.instIndex
+                && m_pendingLoopFixupMoves[j].phase == first.phase)
+                j++;
+            Value* origin = first.block->at(first.instIndex).origin;
+            if (j - i == 1) {
+                m_insertionSets[first.block].insert(first.instIndex, first.phase, moveFor(first.bank, first.width), origin, first.src, first.dst);
+            } else {
+                Inst shuffle(Shuffle, origin);
+                for (unsigned k = i; k < j; k++) {
+                    auto& m = m_pendingLoopFixupMoves[k];
+                    shuffle.append(m.src, m.dst, Arg::widthArg(m.width));
+                }
+                m_insertionSets[first.block].insertInst(first.instIndex, first.phase, WTF::move(shuffle));
+            }
+            i = j;
+        }
         for (BasicBlock* block : m_code)
             m_insertionSets[block].execute(block);
     }
@@ -3296,7 +3329,6 @@ private:
         bool hasDefInLoop = !!metadata.splits[0].lastDefPoint;
         const NaturalLoop& loop = *metadata.loop;
         BasicBlock* header = loop.header();
-        Opcode move = moveOpcode(nonLoopTmp);
         unsigned depth = m_naturalLoops->loopDepth(header);
         ASSERT(depth >= 1);
         unsigned exitPhase = aroundLoopExitBase + (maxLoopSplitDepth - depth);
@@ -3324,6 +3356,8 @@ private:
         LiveRange& loopLiveRange = m_map[loopTmp].liveRange;
         LiveRange& nonLoopLiveRange = m_map[nonLoopTmp].liveRange;
 
+        Width width = m_tmpWidth.requiredWidth(nonLoopTmp);
+
         // Entry fixup: if the original tmp was live into the header block, then need to transfer
         // from nonLoopTmp → loopTmp at end of each non-loop predecessor of the header.
         // Note that analyzeLoop already filtered loops where this is a critical edge.
@@ -3333,7 +3367,7 @@ private:
                     continue; // Skip back-edge predecessors.
                 ASSERT(pred->numSuccessors() == 1 && pred->successors()[0] == header);
                 unsigned termIndex = pred->size() - 1;
-                m_insertionSets[pred].insert(termIndex, aroundLoopEntryFixup, move, pred->at(termIndex).origin, nonLoopArg, loopArg);
+                m_pendingLoopFixupMoves.append({ nonLoopArg, loopArg, bank, width, pred, termIndex, aroundLoopEntryFixup });
             }
         }
 
@@ -3354,7 +3388,7 @@ private:
                     Point exitHead = positionOfHead(succ.block());
                     if (!nonLoopLiveRange.contains(exitHead))
                         continue; // not live at this exit so no fixup needed
-                    m_insertionSets[succ.block()].insert(0, exitPhase, move, succ.block()->at(0).origin, loopArg, nonLoopArg);
+                    m_pendingLoopFixupMoves.append({ loopArg, nonLoopArg, bank, width, succ.block(), 0u, exitPhase });
                     // The exit move reads loopTmp at this point. If loopTmp was further
                     // split around inner loops, its range won't cover this exit. Extend
                     // it so that inner fixups (processed later, since outer splits are
@@ -3475,6 +3509,17 @@ private:
     std::unique_ptr<NaturalLoops> m_naturalLoops;
     BitVector m_invalidLoops;
     Vector<LiveRange> m_loopRanges;
+
+    struct LoopFixupMove {
+        Arg src;
+        Arg dst;
+        Bank bank;
+        Width width;
+        BasicBlock* block;
+        unsigned instIndex;
+        unsigned phase;
+    };
+    Vector<LoopFixupMove> m_pendingLoopFixupMoves;
 };
 
 } // namespace JSC::B3::Air::Greedy
