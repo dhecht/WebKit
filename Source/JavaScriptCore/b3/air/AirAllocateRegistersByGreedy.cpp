@@ -2391,10 +2391,9 @@ private:
         ASSERT(tmpData.spillCost() != unspillableCost); // Should have evicted.
         if (trySplitAroundLoop<bank>(tmp, tmpData))
             return true;
-        // FIXME: try reversing these
-        if (trySplitAroundClobbers<bank>(tmp, tmpData))
+        if (trySplitIntraBlock<bank>(tmp, tmpData))
             return true;
-        return trySplitIntraBlock<bank>(tmp, tmpData);
+        return trySplitAroundClobbers<bank>(tmp, tmpData);
     }
 
     void analyzeLoop(const NaturalLoop& loop)
