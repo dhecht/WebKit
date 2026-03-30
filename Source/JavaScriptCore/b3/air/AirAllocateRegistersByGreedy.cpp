@@ -3335,11 +3335,6 @@ private:
         if (spillSlot(nonLoopTmp))
             m_stats[bank].numSplitAroundLoopNonLoopSpilled++;
 
-        if (spillSlot(nonLoopTmp) && spillSlot(loopTmp)) {
-            ASSERT(spillSlot(nonLoopTmp) == spillSlot(loopTmp));
-            return; // Both spilled to same slot → no fixup needed.
-        }
-
         auto argFor = [&](Tmp tmp) -> Arg {
             StackSlot* spilled = spillSlot(tmp);
             if (spilled)
@@ -3355,12 +3350,13 @@ private:
         // Entry fixup: if the original tmp was live into the header block, then need to transfer
         // from nonLoopTmp → loopTmp at end of each non-loop predecessor of the header.
         // Note that analyzeLoop already filtered loops where this is a critical edge.
-        if (loopLiveRange.contains(positionOfHead(header))) {
+        if (nonLoopArg != loopArg && loopLiveRange.contains(positionOfHead(header))) {
             for (BasicBlock* pred : header->predecessors()) {
                 if (m_naturalLoops->belongsTo(pred, loop))
                     continue; // Skip back-edge predecessors.
                 ASSERT(pred->numSuccessors() == 1 && pred->successors()[0] == header);
                 unsigned termIndex = pred->size() - 1;
+                ASSERT(!nonLoopArg.isStack() || !loopArg.isStack());
                 m_pendingLoopFixupMoves.append({ nonLoopArg, loopArg, bank, width, pred, termIndex, aroundLoopEntryFixup });
             }
         }
@@ -3395,7 +3391,10 @@ private:
                 }
                 if (destTmp) {
                     Arg destArg = argFor(destTmp);
-                    m_pendingLoopFixupMoves.append({ loopArg, destArg, bank, width, succ.block(), 0u, aroundLoopExitFixup });
+                    if (loopArg != destArg) {
+                        ASSERT(!loopArg.isStack() || !destArg.isStack());
+                        m_pendingLoopFixupMoves.append({ loopArg, destArg, bank, width, succ.block(), 0u, aroundLoopExitFixup });
+                    }
                 }
             }
         }
