@@ -65,16 +65,12 @@ static_assert(unspillableCost > maxSpillableSpillCost);
 
 // Phase constants used for the PhaseInsertionSet. Ensures that the fixup and spill/fill instructions
 // inserted in a particular gap ends up in the correct order.
-// Loop exit phases use depth-based ordering: deeper loops get lower phase values so they execute
-// first at shared exit blocks. This ensures the inner-to-outer relay chain is correct for nested loops.
 static constexpr unsigned maxLoopSplitDepth = 32;
+
 enum InsertionPhase : unsigned {
     spillStore,                            // 0
-    aroundLoopExitBase,                    // 1
-    // aroundLoopExit phases occupy aroundLoopExitBase ... maxLoopSplitDepth.
-    // Phase for loop at depth D = aroundLoopExitBase + (maxLoopSplitDepth - D).
-    // Deeper loops get lower phase → execute first.
-    splitMoveTo = maxLoopSplitDepth + 1,
+    aroundLoopExitFixup,                   // 1
+    splitMoveTo,
     splitMoveFrom,
     aroundLoopEntryFixup,
     spillLoad,
@@ -163,10 +159,6 @@ class LiveRange {
 public:
     LiveRange() = default;
 
-    LiveRange(Interval interval) 
-    {
-        append(interval);
-    }
 
     inline void validate()
     {
@@ -3195,6 +3187,14 @@ private:
 
     void insertFixupCode()
     {
+        // Build parent map for walking up split chains at multi-loop exits.
+        // Maps loopTmp → nonLoopTmp for each AroundLoop split.
+        HashMap<Tmp, Tmp> parentNonLoopTmp;
+        for (auto& metadata : m_splitMetadata) {
+            if (metadata.type == SplitMetadata::Type::AroundLoop)
+                parentNonLoopTmp.add(metadata.splits[0].tmp, metadata.originalTmp);
+        }
+
         for (auto& metadata : m_splitMetadata) {
             switch (metadata.type) {
             case SplitMetadata::Type::Invalid:
@@ -3206,7 +3206,7 @@ private:
                 insertSplitIntraBlockFixupCode(metadata);
                 break;
             case SplitMetadata::Type::AroundLoop:
-                insertSplitAroundLoopFixupCode(metadata);
+                insertSplitAroundLoopFixupCode(metadata, parentNonLoopTmp);
                 break;
             }
         }
@@ -3320,7 +3320,7 @@ private:
         }
     }
 
-    void insertSplitAroundLoopFixupCode(SplitMetadata& metadata)
+    void insertSplitAroundLoopFixupCode(SplitMetadata& metadata, const HashMap<Tmp, Tmp>& parentNonLoopTmp)
     {
         ASSERT(metadata.type == SplitMetadata::Type::AroundLoop);
 
@@ -3329,9 +3329,7 @@ private:
         bool hasDefInLoop = !!metadata.splits[0].lastDefPoint;
         const NaturalLoop& loop = *metadata.loop;
         BasicBlock* header = loop.header();
-        unsigned depth = m_naturalLoops->loopDepth(header);
-        ASSERT(depth >= 1);
-        unsigned exitPhase = aroundLoopExitBase + (maxLoopSplitDepth - depth);
+        unsigned exitPhase = aroundLoopExitFixup;
 
         Bank bank = nonLoopTmp.bank();
         if (spillSlot(loopTmp))
@@ -3386,16 +3384,25 @@ private:
                     if (!visitedExitSuccessors.add(succ.block()))
                         continue; // Already inserted fixup for this exit successor.
                     Point exitHead = positionOfHead(succ.block());
-                    if (!nonLoopLiveRange.contains(exitHead))
-                        continue; // not live at this exit so no fixup needed
+                    // If loopTmp isn't live at the exiting block (narrowed by inner splits),
+                    // the inner fixup will handle this multi-loop exit by walking up the chain.
+                    if (!loopLiveRange.contains(positionOfTail(loopBlock)))
+                        continue;
+                    if (!nonLoopLiveRange.contains(exitHead)) {
+                        // nonLoopTmp was further split and isn't live at this exit.
+                        // Walk up the chain to find the outermost nonLoopTmp that IS live.
+                        Tmp destTmp = nonLoopTmp;
+                        while (!m_map[destTmp].liveRange.contains(exitHead)) {
+                            auto it = parentNonLoopTmp.find(destTmp);
+                            if (it == parentNonLoopTmp.end())
+                                break;
+                            destTmp = it->value;
+                        }
+                        Arg destArg = argFor(destTmp);
+                        m_pendingLoopFixupMoves.append({ loopArg, destArg, bank, width, succ.block(), 0u, exitPhase });
+                        continue;
+                    }
                     m_pendingLoopFixupMoves.append({ loopArg, nonLoopArg, bank, width, succ.block(), 0u, exitPhase });
-                    // The exit move reads loopTmp at this point. If loopTmp was further
-                    // split around inner loops, its range won't cover this exit. Extend
-                    // it so that inner fixups (processed later, since outer splits are
-                    // created first in m_splitMetadata) see loopTmp as live here and
-                    // emit their own exit moves to chain correctly.
-                    ASSERT(!loopLiveRange.contains(exitHead));
-                    loopLiveRange = LiveRange::merge(loopLiveRange, Interval(exitHead));
                 }
             }
         }
