@@ -3326,10 +3326,8 @@ private:
 
         Tmp nonLoopTmp = metadata.originalTmp;
         Tmp loopTmp = metadata.splits[0].tmp;
-        bool hasDefInLoop = !!metadata.splits[0].lastDefPoint;
         const NaturalLoop& loop = *metadata.loop;
         BasicBlock* header = loop.header();
-        unsigned exitPhase = aroundLoopExitFixup;
 
         Bank bank = nonLoopTmp.bank();
         if (spillSlot(loopTmp))
@@ -3352,8 +3350,6 @@ private:
         Arg loopArg = argFor(loopTmp);
 
         LiveRange& loopLiveRange = m_map[loopTmp].liveRange;
-        LiveRange& nonLoopLiveRange = m_map[nonLoopTmp].liveRange;
-
         Width width = m_tmpWidth.requiredWidth(nonLoopTmp);
 
         // Entry fixup: if the original tmp was live into the header block, then need to transfer
@@ -3369,40 +3365,37 @@ private:
             }
         }
 
-        // Exit fixup: transfer loopTmp → nonLoopTmp at exit successors where nonLoopTmp is live.
-        // Needed if the loop def'd the tmp, or if nonLoopTmp is in a register (which may have
-        // been reused inside the loop while nonLoopTmp was not live).
-        // analyzeLoop() ensured the exit successor has only loop predecessors.
-        if (hasDefInLoop || !spillSlot(nonLoopTmp)) {
-            // FIXME: revisit this allocation
-            IndexSet<BasicBlock*> visitedExitSuccessors;
-            for (unsigned i = 0; i < loop.size(); i++) {
-                BasicBlock* loopBlock = loop.at(i);
-                for (auto& succ : loopBlock->successors()) {
-                    if (m_naturalLoops->belongsTo(succ.block(), loop))
-                        continue;
-                    if (!visitedExitSuccessors.add(succ.block()))
-                        continue; // Already inserted fixup for this exit successor.
-                    Point exitHead = positionOfHead(succ.block());
-                    // If loopTmp isn't live at the exiting block (narrowed by inner splits),
-                    // the inner fixup will handle this multi-loop exit by walking up the chain.
-                    if (!loopLiveRange.contains(positionOfTail(loopBlock)))
-                        continue;
-                    if (!nonLoopLiveRange.contains(exitHead)) {
-                        // nonLoopTmp was further split and isn't live at this exit.
-                        // Walk up the chain to find the outermost nonLoopTmp that IS live.
-                        Tmp destTmp = nonLoopTmp;
-                        while (!m_map[destTmp].liveRange.contains(exitHead)) {
-                            auto it = parentNonLoopTmp.find(destTmp);
-                            if (it == parentNonLoopTmp.end())
-                                break;
-                            destTmp = it->value;
-                        }
-                        Arg destArg = argFor(destTmp);
-                        m_pendingLoopFixupMoves.append({ loopArg, destArg, bank, width, succ.block(), 0u, exitPhase });
-                        continue;
+        // Exit fixup: analyzeLoop() ensured the exit successor has only loop predecessors so
+        // it's safe to emit the fixup code in the successor block.
+
+        // FIXME: can we skip the fixup if the dest is spilled and not def'ed (by any nesting level)?
+
+        // FIXME: revisit this allocation
+        IndexSet<BasicBlock*> visitedExitSuccessors;
+        for (unsigned i = 0; i < loop.size(); i++) {
+            BasicBlock* loopBlock = loop.at(i);
+            for (auto& succ : loopBlock->successors()) {
+                if (m_naturalLoops->belongsTo(succ.block(), loop))
+                    continue;
+                if (!visitedExitSuccessors.add(succ.block()))
+                    continue; // Already inserted fixup for this exit successor.
+                // If loopTmp isn't live at the exiting block (narrowed by inner splits),
+                // the inner fixup will handle this multi-loop exit by walking up the chain.
+                if (!loopLiveRange.contains(positionOfTail(loopBlock)))
+                    continue;
+                Point exitHead = positionOfHead(succ.block());
+                Tmp destTmp = nonLoopTmp;
+                while (!m_map[destTmp].liveRange.contains(exitHead)) {
+                    auto it = parentNonLoopTmp.find(destTmp);
+                    if (it == parentNonLoopTmp.end()) {
+                        destTmp = Tmp();
+                        break;
                     }
-                    m_pendingLoopFixupMoves.append({ loopArg, nonLoopArg, bank, width, succ.block(), 0u, exitPhase });
+                    destTmp = it->value;
+                }
+                if (destTmp) {
+                    Arg destArg = argFor(destTmp);
+                    m_pendingLoopFixupMoves.append({ loopArg, destArg, bank, width, succ.block(), 0u, aroundLoopExitFixup });
                 }
             }
         }
