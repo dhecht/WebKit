@@ -3511,6 +3511,8 @@ private:
 void allocateRegistersByGreedy(Code& code)
 {
     PhaseScope phaseScope(code, "allocateRegistersByGreedy"_s);
+    if (Options::airDumpPhaseStats())
+        dataLogLn("RegAlloc function: ", code.proc().name());
     dataLogIf(Greedy::verbose(), "Air before greedy register allocation:\n", code);
     Greedy::GreedyAllocator allocator(code);
     allocator.run();

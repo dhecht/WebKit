@@ -70,6 +70,12 @@ State::State(Graph& graph)
 
     proc = makeUniqueWithoutFastMallocCheck<Procedure>(/* usesSIMD = */ false);
 
+    {
+        StringPrintStream out;
+        graph.m_codeBlock->dumpSimpleName(out);
+        proc->setName(out.toCString());
+    }
+
     if (graph.m_vm.shouldBuilderPCToCodeOriginMapping() || Options::useIRDump() || Options::useSourceCodeDump())
         proc->setNeedsPCToOriginMap();
 

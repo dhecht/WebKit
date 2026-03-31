@@ -101,6 +101,9 @@ public:
     // This is a debugging hack. Sometimes while debugging B3 you need to break the abstraction
     // and get at the DFG Graph, or whatever data structure the frontend used to describe the
     // program. The FTL passes the DFG Graph.
+    void setName(CString name) { m_name = WTF::move(name); }
+    const CString& name() const { return m_name; }
+
     void setFrontendData(const void* value) { m_frontendData = value; }
     const void* frontendData() const { return m_frontendData; }
 
@@ -328,6 +331,7 @@ private:
     std::unique_ptr<Air::Code> m_code;
     RefPtr<SharedTask<void(PrintStream&, Origin)>> m_originPrinter;
     const void* m_frontendData;
+    CString m_name;
     PCToOriginMap m_pcToOriginMap;
     RefPtr<JSON::Array> m_ionGraphPasses;
     unsigned m_numEntrypoints { 1 };
