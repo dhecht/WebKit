@@ -3021,6 +3021,7 @@ private:
                                 arg = imm;
                                 if (inst.isValidForm()) {
                                     m_stats[bank].numRematerializeConst++;
+                                    m_stats[bank].weightedRematerializeConst += adjustedBlockFrequency(block);
                                     dataLogLnIf(verbose(), "Rematerialized (direct imm), BB", *block, " arg=", oldArg, ", inst=", inst);
                                     return;
                                 }
@@ -3051,6 +3052,7 @@ private:
                         }
                         arg = spilledArg;
                         m_stats[bank].numInPlaceSpill++;
+                        m_stats[bank].weightedInPlaceSpill += adjustedBlockFrequency(block);
                     });
 
                 if (didSpill && useMove32IfDidSpill)
@@ -3117,12 +3119,14 @@ private:
                                 if (Arg::isValidImmForm(value) && isValidForm(Move, Arg::Imm, Arg::Tmp)) {
                                     m_insertionSets[block].insert(instIndex, SpillLoad, Move, inst.origin, Arg::imm(value), tmp);
                                     m_stats[bank].numRematerializeConst++;
+                                    m_stats[bank].weightedRematerializeConst += adjustedBlockFrequency(block);
                                     dataLogLnIf(verbose(), "Rematerialized (imm) BB", *block, " ", originalTmp, ": ", tmp, " <- ", WTF::RawHex(value));
                                     return true;
                                 }
                                 RELEASE_ASSERT(isValidForm(Move, Arg::BigImm, Arg::Tmp));
                                 m_insertionSets[block].insert(instIndex, SpillLoad, Move, inst.origin, Arg::bigImm(value), tmp);
                                 m_stats[bank].numRematerializeConst++;
+                                m_stats[bank].weightedRematerializeConst += adjustedBlockFrequency(block);
                                 dataLogLnIf(verbose(), "Rematerialized (bigImm) BB", *block, " ", originalTmp, ": ", tmp, " <- ", WTF::RawHex(value));
                                 return true;
                             } else {
@@ -3153,6 +3157,7 @@ private:
                                 if (imm && isValidForm(constMove, imm.kind(), Arg::Tmp)) {
                                     m_insertionSets[block].insert(instIndex, SpillLoad, constMove, inst.origin, imm, tmp);
                                     m_stats[bank].numRematerializeConst++;
+                                    m_stats[bank].weightedRematerializeConst += adjustedBlockFrequency(block);
                                     dataLogLnIf(verbose(), "Rematerialized (FP) BB", *block, " ", originalTmp, ": ", tmp);
                                     return true;
                                 }
@@ -3164,6 +3169,7 @@ private:
                         if (!tryRematerialize()) {
                             m_insertionSets[block].insert(instIndex, SpillLoad, move, inst.origin, arg, tmp);
                             m_stats[bank].numLoadSpill++;
+                            m_stats[bank].weightedLoadSpill += adjustedBlockFrequency(block);
                         }
                     }
                     if (Arg::isAnyDef(role)) {
@@ -3178,6 +3184,7 @@ private:
                             ASSERT(!doKillInst);
                             m_insertionSets[block].insert(instIndex + 1, SpillStore, move, inst.origin, tmp, arg);
                             m_stats[bank].numStoreSpill++;
+                            m_stats[bank].weightedStoreSpill += adjustedBlockFrequency(block);
                         }
                     }
                 });
