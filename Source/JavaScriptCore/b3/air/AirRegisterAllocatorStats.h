@@ -33,52 +33,57 @@
 namespace JSC { namespace B3 { namespace Air {
 
 #define FOR_EACH_REGISTER_ALLOCATOR_STAT(macro) \
-    macro(numTmpsIn)                            \
-    macro(numFastTmps)                          \
-    macro(numUnspillableTmps)                   \
-    macro(numSpillTmps)                         \
-    macro(numTmpsOut)                           \
-    macro(numCoalescedRegisterMoves)            \
-    macro(numCoalescedStackSlotMoves)           \
-    macro(numCoalescedPinned)                   \
-    macro(numSpilledTmps)                       \
-    macro(numSpillStackSlots)                   \
-    macro(numLoadSpill)                         \
-    macro(numStoreSpill)                        \
-    macro(numInPlaceSpill)                      \
-    macro(numInPlaceSpillGiveUpSpillWidth)      \
-    macro(numMoveSpillSpillInsts)               \
-    macro(numRematerializeConst)                \
-    macro(maxLiveRangeSize)                     \
-    macro(maxLiveRangeIntervals)                \
-    macro(didSpill)                             \
-    macro(numSplitAroundClobbers)               \
-    macro(numSplitAroundClobberSpilled)         \
-    macro(numSplitIntraBlockNoCluster)          \
-    macro(numSplitIntraBlock)                   \
-    macro(numSplitIntraBlockClusterTmps)        \
-    macro(numSplitIntraBlockClusterTmpsSpilled) \
-    macro(numSplitIntraBlockLoad)               \
-    macro(numSplitIntraBlockStore)              \
-    macro(numSplitAroundLoop)                   \
-    macro(numSplitAroundLoopBothSpilled)        \
-    macro(numSplitAroundLoopLoopSpilled)        \
-    macro(numSplitAroundLoopNonLoopSpilled)     \
-    macro(numSplitAroundLoopBailNoLoop)         \
-    macro(numSplitAroundLoopBailAlreadySplitAroundClobbers)   \
-    macro(numSplitAroundLoopBailLocalOnly)      \
-    macro(numSplitAroundLoopBailTooSmall)       \
-    macro(numSplitAroundLoopBailConstDef)       \
-    macro(numSplitAroundLoopBailTooDeep)        \
-    macro(numSplitAroundLoopBailFixupCost)      \
-    macro(numSplitAroundLoopZeroCostSpilled)    \
-    macro(numSplitAroundLoopBailLoopTooLarge)   \
-    macro(numGroupTmpsCoalesced)                \
-    macro(numGroupsCreated)                     \
-    macro(numGroupMovesCoalesced)               \
-    macro(numGroupConstDefMerged)               \
-    macro(maxGroupSize)                         \
-    macro(numInsts)                             \
+    macro(numTmpsIn, unsigned)                            \
+    macro(numFastTmps, unsigned)                          \
+    macro(numUnspillableTmps, unsigned)                   \
+    macro(numSpillTmps, unsigned)                         \
+    macro(numTmpsOut, unsigned)                           \
+    macro(numCoalescedRegisterMoves, unsigned)            \
+    macro(numCoalescedStackSlotMoves, unsigned)           \
+    macro(numCoalescedPinned, unsigned)                   \
+    macro(numSpilledTmps, unsigned)                       \
+    macro(numSpillStackSlots, unsigned)                   \
+    macro(numLoadSpill, unsigned)                         \
+    macro(numStoreSpill, unsigned)                        \
+    macro(numInPlaceSpill, unsigned)                      \
+    macro(numInPlaceSpillGiveUpSpillWidth, unsigned)      \
+    macro(numMoveSpillSpillInsts, unsigned)               \
+    macro(numRematerializeConst, unsigned)                \
+    macro(weightedLoadSpill, float)                       \
+    macro(weightedStoreSpill, float)                      \
+    macro(weightedInPlaceSpill, float)                    \
+    macro(weightedRematerializeConst, float)              \
+    macro(weightedLoopSplitFixup, float)                  \
+    macro(maxLiveRangeSize, unsigned)                     \
+    macro(maxLiveRangeIntervals, unsigned)                \
+    macro(didSpill, unsigned)                             \
+    macro(numSplitAroundClobbers, unsigned)               \
+    macro(numSplitAroundClobberSpilled, unsigned)         \
+    macro(numSplitIntraBlockNoCluster, unsigned)          \
+    macro(numSplitIntraBlock, unsigned)                   \
+    macro(numSplitIntraBlockClusterTmps, unsigned)        \
+    macro(numSplitIntraBlockClusterTmpsSpilled, unsigned) \
+    macro(numSplitIntraBlockLoad, unsigned)               \
+    macro(numSplitIntraBlockStore, unsigned)              \
+    macro(numSplitAroundLoop, unsigned)                   \
+    macro(numSplitAroundLoopBothSpilled, unsigned)        \
+    macro(numSplitAroundLoopLoopSpilled, unsigned)        \
+    macro(numSplitAroundLoopNonLoopSpilled, unsigned)     \
+    macro(numSplitAroundLoopBailNoLoop, unsigned)         \
+    macro(numSplitAroundLoopBailAlreadySplitAroundClobbers, unsigned)   \
+    macro(numSplitAroundLoopBailLocalOnly, unsigned)      \
+    macro(numSplitAroundLoopBailTooSmall, unsigned)       \
+    macro(numSplitAroundLoopBailConstDef, unsigned)       \
+    macro(numSplitAroundLoopBailTooDeep, unsigned)        \
+    macro(numSplitAroundLoopBailFixupCost, unsigned)      \
+    macro(numSplitAroundLoopZeroCostSpilled, unsigned)    \
+    macro(numSplitAroundLoopBailLoopTooLarge, unsigned)   \
+    macro(numGroupTmpsCoalesced, unsigned)                \
+    macro(numGroupsCreated, unsigned)                     \
+    macro(numGroupMovesCoalesced, unsigned)               \
+    macro(numGroupConstDefMerged, unsigned)               \
+    macro(maxGroupSize, unsigned)                         \
+    macro(numInsts, unsigned)                             \
 
 class AirAllocateRegistersStats {
 public:

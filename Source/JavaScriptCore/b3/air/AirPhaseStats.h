@@ -37,8 +37,8 @@
 
 namespace JSC { namespace B3 { namespace Air {
 
-#define PHASE_STATS_MEMBER(name) unsigned name { 0 };
-#define PHASE_STATS_PRINT(name) out.print("\n   " #name ": ", name);
+#define PHASE_STATS_MEMBER(name, type) type name { };
+#define PHASE_STATS_PRINT(name, type) out.print("\n   " #name ": ", name);
 
 #define DEFINE_PHASE_STATS(className, forEachMacro)                     \
     WTF_FORBID_HEAP_ALLOCATION;                                         \

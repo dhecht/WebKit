@@ -32,11 +32,11 @@
 namespace JSC { namespace B3 { namespace Air {
 
 #define FOR_EACH_STACK_ALLOCATOR_STAT(macro) \
-    macro(numStackSlots)                     \
-    macro(stackSlotInterferenceSizeBytes)    \
-    macro(numStackSlotsCoalesceableMoves)    \
-    macro(numStackSlotsCoalesced)            \
-    macro(frameSize)                         \
+    macro(numStackSlots, unsigned)                     \
+    macro(stackSlotInterferenceSizeBytes, unsigned)    \
+    macro(numStackSlotsCoalesceableMoves, unsigned)    \
+    macro(numStackSlotsCoalesced, unsigned)            \
+    macro(frameSize, unsigned)                         \
 
 class AirStackAllocatorStats {
 public:
