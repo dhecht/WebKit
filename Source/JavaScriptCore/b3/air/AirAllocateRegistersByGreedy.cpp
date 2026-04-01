@@ -222,7 +222,7 @@ public:
         return false;
     }
 
-    bool NODELETE overlaps(LiveRange& other)
+    bool NODELETE overlaps(const LiveRange& other) const
     {
         auto otherIter = other.intervals().begin();
         auto otherEnd = other.intervals().end();
@@ -2421,9 +2421,13 @@ private:
         for (auto& interval : loopIntervals)
             loopRange.append(interval);
 
-        m_loopRanges.resize(std::max(m_loopRanges.size(), static_cast<size_t>(loop.index() + 1)));
-        ASSERT(!m_loopRanges[loop.index()].size());
-        m_loopRanges[loop.index()] = WTF::move(loopRange);
+        m_loopData.resize(std::max(m_loopData.size(), static_cast<size_t>(loop.index() + 1)));
+        ASSERT(!m_loopData[loop.index()].range.size());
+        m_loopData[loop.index()].range = WTF::move(loopRange);
+
+        // Collect boundary points for fast live-range-crosses-loop-boundary checks,
+        // alongside the critical edge validation.
+        Vector<Point, 8> boundaryPoints;
 
         // All edges into the loop must be non-critical so that entry fixup can be inserted.
         // FIXME: break critical edges if stats indicate it's helpful.
@@ -2435,10 +2439,14 @@ private:
                 m_invalidLoops.set(loop.index());
                 return;
             }
+            boundaryPoints.append(positionOfTail(pred));
         }
 
         // All exit successors must have only loop predecessors so that exit fixup can be inserted.
         // FIXME: break critical edge if stats indicate it's helpful.
+        // FIXME: Consider a visited set for exit successors to avoid redundant predecessor checks
+        // when multiple loop blocks exit to the same block. Measure whether IndexSet overhead
+        // is worth it vs. the current sort+dedup approach.
         for (unsigned i = 0; i < loop.size(); i++) {
             BasicBlock* loopBlock = loop.at(i);
             for (auto& succ : loopBlock->successors()) {
@@ -2450,7 +2458,18 @@ private:
                         return;
                     }
                 }
+                boundaryPoints.append(positionOfHead(succ.block()));
             }
+        }
+
+        std::ranges::sort(boundaryPoints);
+        LiveRange& boundaryRange = m_loopData[loop.index()].boundaryPoints;
+        Point prev = UINT_MAX;
+        for (Point point : boundaryPoints) {
+            if (point == prev)
+                continue;
+            prev = point;
+            boundaryRange.append(Interval(point));
         }
     }
 
@@ -2492,17 +2511,24 @@ private:
             for (auto* loop : std::views::reverse(nestedLoops)) {
                 ASSERT(!visitedLoops.get(loop->index()));
                 visitedLoops.set(loop->index());
-                const LiveRange& loopRange = m_loopRanges[loop->index()];
-                LiveRange nonLoopRange = LiveRange::subtract(liveRange, loopRange);
-                if (!nonLoopRange.size())
-                    continue; // liveRange contained entirely within this loop
-                if (m_invalidLoops.get(loop->index())) {
-                    // FIXME: break critical edges during fixup if this case is important
-                    m_stats[bank].numSplitAroundLoopSkipCriticalEdge++;
+
+                if (m_invalidLoops.get(loop->index()))
+                    continue;
+
+                // Fast check: does the live range cross any boundary of this loop?
+                // Check if the live range overlaps any boundary point (entry pred
+                // tails, exit succ heads). If not, the range is entirely within
+                // this loop (the "entirely outside" case can't arise since we only
+                // check loops containing a block from the live range).
+                auto& loopData = m_loopData[loop->index()];
+                bool crossesBoundary = liveRange.overlaps(loopData.boundaryPoints);
+                if (!crossesBoundary) {
+                    ASSERT(!LiveRange::subtract(liveRange, loopData.range).size());
                     continue;
                 }
+
                 resultLoop = loop;
-                resultNonLoopRange = WTF::move(nonLoopRange);
+                resultNonLoopRange = LiveRange::subtract(liveRange, loopData.range);
                 return IterationStatus::Done;
             }
             return IterationStatus::Continue;
@@ -3512,7 +3538,11 @@ private:
     std::unique_ptr<Dominators> m_dominators;
     std::unique_ptr<NaturalLoops> m_naturalLoops;
     BitVector m_invalidLoops;
-    Vector<LiveRange> m_loopRanges;
+    struct LoopData {
+        LiveRange range;
+        LiveRange boundaryPoints;
+    };
+    Vector<LoopData> m_loopData;
 };
 
 } // namespace JSC::B3::Air::Greedy
