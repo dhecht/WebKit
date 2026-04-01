@@ -844,6 +844,7 @@ public:
         out.println("Splits:\n", listDump(m_splitMetadata, "\n"));
         // TODO: dump UseDefLists (needs TmpMap iteration support)
         out.println("SpillSlotTable: ", pointerListDump(m_spillSlotTable));
+        out.println("Loops: ", pointerDump(m_naturalLoops.get()));
         out.println("Stats (GP):", m_stats[GP]);
         out.println("Stats (FP):", m_stats[FP]);
     }
