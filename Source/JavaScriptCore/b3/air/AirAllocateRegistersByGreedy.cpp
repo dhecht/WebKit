@@ -907,26 +907,34 @@ private:
     void forEachBlockInLiveRange(const LiveRange& liveRange, const Invocable<IterationStatus(BasicBlock*)> auto& func)
     {
         for (auto& interval : liveRange.intervals()) {
-            BasicBlock* block = findBlockContainingPoint(interval.begin());
+            size_t blockIdx = findBlockIndexContainingPoint(interval.begin());
             while (true) {
+                BasicBlock* block = m_code[blockIdx];
                 if (func(block) == IterationStatus::Done)
                     return;
-                Point nextHead = positionOfTail(block) + 1;
+                Point nextHead = m_tailPoints[blockIdx] + 1;
                 if (nextHead >= interval.end())
                     break;
-                block = findBlockContainingPoint(nextHead);
+                do {
+                    ++blockIdx;
+                } while (!m_code[blockIdx]);
             };
         }
     }
 
-    BasicBlock* findBlockContainingPoint(Point point)
+    size_t findBlockIndexContainingPoint(Point point)
     {
         auto iter = std::lower_bound(m_tailPoints.begin(), m_tailPoints.end(), point);
         ASSERT(iter != m_tailPoints.end()); // Should ask only about legal instruction boundaries.
         size_t blockIndex = std::distance(m_tailPoints.begin(), iter);
-        BasicBlock* block = m_code[blockIndex];
-        ASSERT(positionOfHead(block) <= point && point <= positionOfTail(block));
-        return block;
+        ASSERT(m_code[blockIndex]);
+        ASSERT(positionOfHead(m_code[blockIndex]) <= point && point <= m_tailPoints[blockIndex]);
+        return blockIndex;
+    }
+
+    BasicBlock* findBlockContainingPoint(Point point)
+    {
+        return m_code[findBlockIndexContainingPoint(point)];
     }
 
     Point NODELETE positionOfHead(BasicBlock* block) const
