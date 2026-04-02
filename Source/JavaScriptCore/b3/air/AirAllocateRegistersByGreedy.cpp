@@ -2407,27 +2407,9 @@ private:
 
     void analyzeLoop(const NaturalLoop& loop)
     {
-        // FIXME: skip this for invalid loops once we no longer need the stats.
-        Vector<Interval, 32> loopIntervals;
-        for (unsigned i = 0; i < loop.size(); i++) {
-            auto block = loop.at(i);
-            loopIntervals.constructAndAppend(positionOfHead(block), positionOfTail(block) + 1);
-        }
-        std::ranges::sort(loopIntervals, [](const Interval& a, const Interval& b) {
-            return a.begin() < b.begin();
-        });
-
-        LiveRange loopRange;
-        for (auto& interval : loopIntervals)
-            loopRange.append(interval);
-
-        m_loopData.resize(std::max(m_loopData.size(), static_cast<size_t>(loop.index() + 1)));
-        ASSERT(!m_loopData[loop.index()].range.size());
-        m_loopData[loop.index()].range = WTF::move(loopRange);
-
         // Collect boundary points for fast live-range-crosses-loop-boundary checks,
         // alongside the critical edge validation.
-        Vector<Point, 8> boundaryPoints;
+        Vector<Point, 16> boundaryPoints;
 
         // All edges into the loop must be non-critical so that entry fixup can be inserted.
         // FIXME: break critical edges if stats indicate it's helpful.
@@ -2462,15 +2444,31 @@ private:
             }
         }
 
+        m_loopData.resize(std::max(m_loopData.size(), static_cast<size_t>(loop.index() + 1)));
+        LoopData& loopData = m_loopData[loop.index()];
+        ASSERT(!loopData.range.size() && !loopData.boundary.size());
+
         std::ranges::sort(boundaryPoints);
-        LiveRange& boundaryRange = m_loopData[loop.index()].boundaryPoints;
+        LiveRange& boundary = loopData.boundary;
         Point prev = UINT_MAX;
         for (Point point : boundaryPoints) {
             if (point == prev)
                 continue;
             prev = point;
-            boundaryRange.append(Interval(point));
+            boundary.append(Interval(point));
         }
+
+        Vector<Interval, 32> loopIntervals;
+        for (unsigned i = 0; i < loop.size(); i++) {
+            auto block = loop.at(i);
+            loopIntervals.constructAndAppend(positionOfHead(block), positionOfTail(block) + 1);
+        }
+        std::ranges::sort(loopIntervals, [](const Interval& a, const Interval& b) {
+            return a.begin() < b.begin();
+        });
+        LiveRange& loopRange = loopData.range;
+        for (auto& interval : loopIntervals)
+            loopRange.append(interval);
     }
 
     void ensureLoopAnalysis()
@@ -2515,21 +2513,12 @@ private:
                 if (m_invalidLoops.get(loop->index()))
                     continue;
 
-                // Fast check: does the live range cross any boundary of this loop?
-                // Check if the live range overlaps any boundary point (entry pred
-                // tails, exit succ heads). If not, the range is entirely within
-                // this loop (the "entirely outside" case can't arise since we only
-                // check loops containing a block from the live range).
                 auto& loopData = m_loopData[loop->index()];
-                bool crossesBoundary = liveRange.overlaps(loopData.boundaryPoints);
-                if (!crossesBoundary) {
-                    ASSERT(!LiveRange::subtract(liveRange, loopData.range).size());
-                    continue;
+                if (liveRange.overlaps(loopData.boundary)) {
+                    resultLoop = loop;
+                    resultNonLoopRange = LiveRange::subtract(liveRange, loopData.range);
+                    return IterationStatus::Done;
                 }
-
-                resultLoop = loop;
-                resultNonLoopRange = LiveRange::subtract(liveRange, loopData.range);
-                return IterationStatus::Done;
             }
             return IterationStatus::Continue;
         });
@@ -2542,6 +2531,19 @@ private:
         if (!Options::airGreedyRegAllocSplitAroundLoops())
             return false;
 
+        if (tmpData.splitAroundClobbersMetadataIndex) {
+            // Already clobber-split; clobber fixup references originalTmp which would be stale after loop splitting.
+            m_stats[bank].numSplitAroundLoopBailAlreadySplitAroundClobbers++;
+            return false;
+        }
+        if (tmpData.liveRange.size() < splitMinRangeSize) {
+            m_stats[bank].numSplitAroundLoopBailTooSmall++;
+            return false;
+        }
+        if (isConstDef<bank>(tmp)) {
+            m_stats[bank].numSplitAroundLoopBailConstDef++;
+            return false; // Constant will be rematerialized
+        }
         if (isLiveRangeBlockLocal(tmpData.liveRange)) {
             m_stats[bank].numSplitAroundLoopBailLocalOnly++;
             return false;
@@ -2560,22 +2562,6 @@ private:
         if (m_naturalLoops->loopDepth(loop->header()) > maxLoopSplitDepth) {
             m_stats[bank].numSplitAroundLoopBailTooDeep++;
             return false;
-        }
-
-        // FIXME: move these earlier after collecting stats.
-        if (tmpData.splitAroundClobbersMetadataIndex) {
-            // Already clobber-split; clobber fixup references originalTmp which would be stale after loop splitting.
-            m_stats[bank].numSplitAroundLoopBailAlreadySplitAroundClobbers++;
-            return false;
-        }
-        if (tmpData.liveRange.size() < splitMinRangeSize) {
-            m_stats[bank].numSplitAroundLoopBailTooSmall++;
-            return false;
-        }
-
-        if (isConstDef<bank>(tmp)) {
-            m_stats[bank].numSplitAroundLoopBailConstDef++;
-            return false; // Constant will be rematerialized
         }
 
         ensureUseDefLists();
@@ -3540,7 +3526,7 @@ private:
     BitVector m_invalidLoops;
     struct LoopData {
         LiveRange range;
-        LiveRange boundaryPoints;
+        LiveRange boundary;
     };
     Vector<LoopData> m_loopData;
 };

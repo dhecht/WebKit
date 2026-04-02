@@ -74,7 +74,7 @@ namespace JSC { namespace B3 { namespace Air {
     macro(numSplitAroundLoopBailTooSmall, unsigned)       \
     macro(numSplitAroundLoopBailConstDef, unsigned)       \
     macro(numSplitAroundLoopBailTooDeep, unsigned)        \
-    macro(numSplitAroundLoopSkipCriticalEdge, unsigned)   \
+    macro(numSplitAroundLoopSkipDisjointRange, unsigned)  \
     macro(numGroupTmpsCoalesced, unsigned)                \
     macro(numGroupsCreated, unsigned)                     \
     macro(numGroupMovesCoalesced, unsigned)               \
