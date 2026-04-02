@@ -3289,7 +3289,9 @@ void testSplitAroundLoopCriticalEdge()
         BasicBlock* altExit = code.addBlock();
         root->append(Branch32, nullptr, Arg::relCond(MacroAssembler::GreaterThan), arg, Arg::imm(0));
         root->setSuccessors(header, altExit);
-        altExit->append(Move, nullptr, Arg::imm(-1), Tmp(GPRInfo::returnValueGPR));
+        altExit->append(Move, nullptr, Arg::imm(0), Tmp(GPRInfo::returnValueGPR));
+        for (unsigned i = 0; i < numAcrossLoopTmps; ++i)
+            altExit->append(Add64, nullptr, tmps[i], Tmp(GPRInfo::returnValueGPR));
         altExit->append(Ret64, nullptr, Tmp(GPRInfo::returnValueGPR));
     } else {
         // root → preheader → header, root → exit: exit has non-loop predecessor.
@@ -3328,10 +3330,10 @@ void testSplitAroundLoopCriticalEdge()
     // Post-loop tmps: 1+2+3+4 = 10
     // Post-loop fast tmps: 200+201+...+206 = 1421
     // arg=1 total: 721 + 50 + 10 + 1421 = 2202
-    // arg=0: skip to altExit (-1) or exit (721 + 0 + 10 + 1421 = 2152)
+    // arg=0: skip to altExit (1+2+3+4 = 10) or exit (721 + 0 + 10 + 1421 = 2152)
     auto compilation = compile(proc);
     CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(1)) == 2202);
-    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == (criticalEntry ? -1 : 2152));
+    CHECK(invoke<int64_t>(*compilation, static_cast<int64_t>(0)) == (criticalEntry ? 10 : 2152));
 }
 
 #define PREFIX "O", Options::defaultB3OptLevel(), ": "
