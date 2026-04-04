@@ -126,12 +126,12 @@ void prepareForGeneration(Code& code)
         logRegisterPressure(code);
     }
 
+    lowerAfterRegAlloc(code);
+
     // This replaces uses of spill slots with registers or constants if possible. It
     // does this by minimizing the amount that we perturb the already-chosen register
     // allocation. It may extend the live ranges of registers though.
     fixObviousSpills(code);
-
-    lowerAfterRegAlloc(code);
 
     // This does first-fit allocation of stack slots using an interference graph plus a
     // bunch of other optimizations.
