@@ -766,6 +766,8 @@ public:
         m_stats[GP].numTmpsIn = m_code.numTmps(GP);
         m_stats[FP].numTmpsIn = m_code.numTmps(FP);
 
+        dataLogLnIf(verbose() || shouldDumpFunction(), "Greedy register allocator: function ", m_code.proc().name(), " input IR:\n", m_code);
+
         // FIXME: reconsider use of padIntereference, https://bugs.webkit.org/show_bug.cgi?id=288122
         padInterference(m_code);
         buildRegisterSets();
@@ -777,7 +779,7 @@ public:
         coalesceTmps<GP>();
         coalesceTmps<FP>();
 
-        dataLogLnIf(verbose(), "State before greedy register allocation:\n", *this);
+        dataLogLnIf(verbose() || shouldDumpFunction(), "Greedy register allocator: function ", m_code.proc().name(), " state before allocate registers:\n", *this, "IR:\n", m_code);
 
         allocateRegisters<GP>();
         allocateRegisters<FP>();
@@ -787,6 +789,8 @@ public:
         validateAssignments<GP>();
         validateAssignments<FP>();
 
+        dataLogLnIf(verbose() || shouldDumpFunction(), "Greedy register allocator: function ", m_code.proc().name(), " about to assign registers:\n", *this, "IR:\n", m_code);
+
         assignRegisters();
         fixSpillsAfterTerminals(m_code);
 
@@ -794,6 +798,16 @@ public:
         m_stats[FP].didSpill += m_didSpill[FP];
         m_stats[GP].numTmpsOut = m_code.numTmps(GP);
         m_stats[FP].numTmpsOut = m_code.numTmps(FP);
+
+        dataLogLnIf(verbose() || shouldDumpFunction(), "Greedy register allocator: function ", m_code.proc().name(), " output IR:\n", m_code);
+    }
+
+    bool shouldDumpFunction() const
+    {
+        const char* filter = Options::airGreedyRegAllocDumpFunction();
+        if (!filter)
+            return false;
+        return m_code.proc().name().find(String::fromLatin1(filter)) != notFound;
     }
 
     void dump(PrintStream& out) const
@@ -3077,7 +3091,6 @@ private:
     void assignRegisters()
     {
         CompilerTimingScope timingScope("Air"_s, "GreedyRegAlloc::assignRegisters"_s);
-        dataLogLnIf(verbose(), "Greedy register allocator about to assign registers:\n", *this, "IR:\n", m_code);
 
         for (BasicBlock* block : m_code) {
             for (Inst& inst : *block) {
@@ -3145,7 +3158,7 @@ private:
     BlockWorklist m_fastBlocks;
     UseCounts m_useCounts;
     TmpWidth m_tmpWidth;
-    std::array<AirAllocateRegistersStats, numBanks> m_stats = { GP, FP };
+    std::array<AirAllocateRegistersStats, numBanks> m_stats = { { { GP, m_code.proc().name() }, { FP, m_code.proc().name() } } };
     std::array<bool, numBanks> m_didSpill { };
     bool m_needsEmitSpillCode { false };
     bool m_hasUseDefLists { false };
@@ -3156,10 +3169,8 @@ private:
 void allocateRegistersByGreedy(Code& code)
 {
     PhaseScope phaseScope(code, "allocateRegistersByGreedy"_s);
-    dataLogIf(Greedy::verbose(), "Air before greedy register allocation:\n", code);
     Greedy::GreedyAllocator allocator(code);
     allocator.run();
-    dataLogIf(Greedy::verbose(), "Air after greedy register allocation:\n", code);
 }
 
 } } } // namespace JSC::B3::Air

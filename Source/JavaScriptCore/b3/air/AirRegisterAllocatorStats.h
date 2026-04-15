@@ -69,8 +69,8 @@ namespace JSC { namespace B3 { namespace Air {
 
 class AirAllocateRegistersStats {
 public:
-    AirAllocateRegistersStats(Bank bank)
-        : m_bank(bank) { }
+    AirAllocateRegistersStats(Bank bank, const String& label = { })
+        : m_bank(bank) { setLabel(label); }
 
     ASCIILiteral name() const
     {

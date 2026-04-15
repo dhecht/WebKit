@@ -70,6 +70,8 @@ State::State(Graph& graph)
 
     proc = makeUniqueWithoutFastMallocCheck<Procedure>(/* usesSIMD = */ false);
 
+    proc->setName(graph.m_codeBlock->inferredNameWithHash());
+
     if (graph.m_vm.shouldBuilderPCToCodeOriginMapping() || Options::useIRDump() || Options::useSourceCodeDump())
         proc->setNeedsPCToOriginMap();
 
