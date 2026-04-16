@@ -35,6 +35,7 @@
 #include "AirFixSpillsAfterTerminals.h"
 #include "AirPhaseInsertionSet.h"
 #include "AirInstInlines.h"
+#include "AirEnsureDedicatedLoopEntryExitBlocks.h"
 #include "AirLiveness.h"
 #include "AirNaturalLoops.h"
 #include "AirPadInterference.h"
@@ -2430,39 +2431,30 @@ private:
 
     void analyzeLoop(const NaturalLoop& loop)
     {
-        // Collect boundary points for fast live-range-crosses-loop-boundary checks,
-        // alongside the critical edge validation.
+        // Collect boundary points for fast live-range-crosses-loop-boundary checks.
         Vector<Point, 16> boundaryPoints;
 
-        // All edges into the loop must be non-critical so that entry fixup can be inserted.
-        // FIXME: break critical edges if stats indicate it's helpful.
+        // ensureDedicatedLoopEntryExitBlocks() guarantees non-critical entry edges
+        // and dedicated exit blocks.
         BasicBlock* header = loop.header();
         for (BasicBlock* pred : header->predecessors()) {
             if (m_naturalLoops->belongsTo(pred, loop))
                 continue; // Back-edge predecessor, skip.
-            if (pred->numSuccessors() > 1) {
-                m_invalidLoops.set(loop.index());
-                return;
-            }
+            ASSERT(pred->numSuccessors() == 1 && pred->successor(0).block() == header);
             boundaryPoints.append(positionOfTail(pred));
         }
 
-        // All exit successors must have only loop predecessors so that exit fixup can be inserted.
-        // FIXME: break critical edge if stats indicate it's helpful.
-        // FIXME: Consider a visited set for exit successors to avoid redundant predecessor checks
-        // when multiple loop blocks exit to the same block. Measure whether IndexSet overhead
-        // is worth it vs. the current sort+dedup approach.
         for (unsigned i = 0; i < loop.size(); i++) {
             BasicBlock* loopBlock = loop.at(i);
             for (auto& succ : loopBlock->successors()) {
                 if (m_naturalLoops->belongsTo(succ.block(), loop))
                     continue;
-                for (BasicBlock* exitPred : succ.block()->predecessors()) {
-                    if (!m_naturalLoops->belongsTo(exitPred, loop)) {
-                        m_invalidLoops.set(loop.index());
-                        return;
-                    }
-                }
+#if ASSERT_ENABLED
+                // ensureDedicatedLoopEntryExitBlocks() ensured the exit successor has only loop
+                // predecessors so it's safe to emit the fixup code in the successor block.
+                for (BasicBlock* exitPred : succ.block()->predecessors())
+                    ASSERT(m_naturalLoops->belongsTo(exitPred, loop));
+#endif
                 boundaryPoints.append(positionOfHead(succ.block()));
             }
         }
@@ -2532,9 +2524,6 @@ private:
             for (auto* loop : std::views::reverse(nestedLoops)) {
                 ASSERT(!visitedLoops.get(loop->index()));
                 visitedLoops.set(loop->index());
-
-                if (m_invalidLoops.get(loop->index()))
-                    continue;
 
                 auto& loopData = m_loopData[loop->index()];
                 if (liveRange.overlaps(loopData.boundary)) {
@@ -3420,12 +3409,12 @@ private:
 
         // Entry fixup: unless both tmps spilled, if the original tmp was live into the header
         // block, then need to transfer from nonLoopTmp → loopTmp at end of each entry edge.
-        // Note that analyzeLoop already filtered loops where this is a critical edge.
         if (nonLoopArg != loopArg && loopLiveRange.contains(positionOfHead(header))) {
             for (BasicBlock* pred : header->predecessors()) {
                 if (m_naturalLoops->belongsTo(pred, loop))
                     continue; // Skip back-edge predecessors.
-                ASSERT(pred->numSuccessors() == 1 && pred->successors()[0] == header);
+                // ensureDedicatedLoopEntryExitBlocks() guarantees non-critical entry edges.
+                ASSERT(pred->numSuccessors() == 1 && pred->successor(0).block() == header);
                 ASSERT(!nonLoopArg.isStack() || !loopArg.isStack());
                 entryFixups.ensure(pred, [] { return Vector<ShufflePair>(); }).iterator->value.append(ShufflePair(nonLoopArg, loopArg, width));
             }
@@ -3435,9 +3424,6 @@ private:
         // the inner-most loopTmp to the nonLoopTmp of the exit successor (which can be
         // different from this split's nonLoopTmp in the case of breaking through multiple
         // levels of loops).
-        // analyzeLoop() ensured the exit successor has only loop predecessors so
-        // it's safe to emit the fixup code in the successor block.
-
         // FIXME: revisit this allocation
         IndexSet<BasicBlock*> visitedExitSuccessors;
         for (unsigned i = 0; i < loop.size(); i++) {
@@ -3451,6 +3437,12 @@ private:
                     continue;
                 if (!visitedExitSuccessors.add(succ.block()))
                     continue; // Already inserted fixup for this exit successor.
+#if ASSERT_ENABLED
+                // ensureDedicatedLoopEntryExitBlocks() ensured the exit successor has only loop
+                // predecessors so it's safe to emit the fixup code in the successor block.
+                for (BasicBlock* exitPred : succ.block()->predecessors())
+                    ASSERT(m_naturalLoops->belongsTo(exitPred, loop));
+#endif
                 Point exitHead = positionOfHead(succ.block());
                 // Find the nonLoopTmp that carries the value into succ block by traversing splits outward.
                 Tmp traverseLoopTmp = loopTmp;
@@ -3594,7 +3586,6 @@ private:
     bool m_hasUseDefLists { false };
     std::unique_ptr<Dominators> m_dominators;
     std::unique_ptr<NaturalLoops> m_naturalLoops;
-    BitVector m_invalidLoops;
     struct LoopData {
         LiveRange range;
         LiveRange boundary;
@@ -3607,6 +3598,8 @@ private:
 void allocateRegistersByGreedy(Code& code)
 {
     PhaseScope phaseScope(code, "allocateRegistersByGreedy"_s);
+    if (Options::airGreedyRegAllocSplitAroundLoops())
+        ensureDedicatedLoopEntryExitBlocks(code);
     Greedy::GreedyAllocator allocator(code);
     allocator.run();
 }

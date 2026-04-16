@@ -1568,6 +1568,7 @@
 		A40755D92D10CAE000DC55FF /* AirAllocateRegistersByGreedy.h in Headers */ = {isa = PBXBuildFile; fileRef = A40755D72D10CABA00DC55FF /* AirAllocateRegistersByGreedy.h */; };
 		A43531C12D6E40E200B01FE1 /* AirRegisterAllocatorStats.h in Headers */ = {isa = PBXBuildFile; fileRef = A43531C02D6E40E200B01FE1 /* AirRegisterAllocatorStats.h */; };
 		A4AC51DC2F35530600C06B89 /* AirPhaseStats.h in Headers */ = {isa = PBXBuildFile; fileRef = A4AC51DB2F35530600C06B89 /* AirPhaseStats.h */; };
+		A4C1EDBD2F913B7A007E4588 /* AirEnsureDedicatedLoopEntryExitBlocks.h in Headers */ = {isa = PBXBuildFile; fileRef = A4C1EDBA2F913B7A007E4588 /* AirEnsureDedicatedLoopEntryExitBlocks.h */; };
 		A4F6474C2F32D8E100CABA36 /* AirStackAllocatorStats.h in Headers */ = {isa = PBXBuildFile; fileRef = A4F6474B2F32D8C000CABA36 /* AirStackAllocatorStats.h */; };
 		A503FA1A188E0FB000110F14 /* JavaScriptCallFrame.h in Headers */ = {isa = PBXBuildFile; fileRef = A503FA14188E0FAF00110F14 /* JavaScriptCallFrame.h */; };
 		A503FA1E188E0FB000110F14 /* JSJavaScriptCallFramePrototype.h in Headers */ = {isa = PBXBuildFile; fileRef = A503FA18188E0FB000110F14 /* JSJavaScriptCallFramePrototype.h */; };
@@ -5236,6 +5237,8 @@
 		A40755D82D10CABA00DC55FF /* AirAllocateRegistersByGreedy.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = AirAllocateRegistersByGreedy.cpp; path = b3/air/AirAllocateRegistersByGreedy.cpp; sourceTree = "<group>"; };
 		A43531C02D6E40E200B01FE1 /* AirRegisterAllocatorStats.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = AirRegisterAllocatorStats.h; path = b3/air/AirRegisterAllocatorStats.h; sourceTree = "<group>"; };
 		A4AC51DB2F35530600C06B89 /* AirPhaseStats.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = AirPhaseStats.h; path = b3/air/AirPhaseStats.h; sourceTree = "<group>"; };
+		A4C1EDBA2F913B7A007E4588 /* AirEnsureDedicatedLoopEntryExitBlocks.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = AirEnsureDedicatedLoopEntryExitBlocks.h; path = b3/air/AirEnsureDedicatedLoopEntryExitBlocks.h; sourceTree = "<group>"; };
+		A4C1EDBB2F913B7A007E4588 /* AirEnsureDedicatedLoopEntryExitBlocks.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = AirEnsureDedicatedLoopEntryExitBlocks.cpp; path = b3/air/AirEnsureDedicatedLoopEntryExitBlocks.cpp; sourceTree = "<group>"; };
 		A4F6474B2F32D8C000CABA36 /* AirStackAllocatorStats.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = AirStackAllocatorStats.h; path = b3/air/AirStackAllocatorStats.h; sourceTree = "<group>"; };
 		A503FA13188E0FAF00110F14 /* JavaScriptCallFrame.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = JavaScriptCallFrame.cpp; sourceTree = "<group>"; };
 		A503FA14188E0FAF00110F14 /* JavaScriptCallFrame.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JavaScriptCallFrame.h; sourceTree = "<group>"; };
@@ -7108,6 +7111,8 @@
 				0F4570371BE44C910062A629 /* AirEliminateDeadCode.h */,
 				0F6183231C45BF070072450B /* AirEmitShuffle.cpp */,
 				0F6183241C45BF070072450B /* AirEmitShuffle.h */,
+				A4C1EDBB2F913B7A007E4588 /* AirEnsureDedicatedLoopEntryExitBlocks.cpp */,
+				A4C1EDBA2F913B7A007E4588 /* AirEnsureDedicatedLoopEntryExitBlocks.h */,
 				0F4DE1CC1C4C1B54004D6C11 /* AirFixObviousSpills.cpp */,
 				0F4DE1CD1C4C1B54004D6C11 /* AirFixObviousSpills.h */,
 				262D85B41C0D650F006ACB61 /* AirFixPartialRegisterStalls.cpp */,
@@ -10851,6 +10856,7 @@
 				E3FB5BEC2F0886090016B5F5 /* AirDominators.h in Headers */,
 				0F4570391BE44C910062A629 /* AirEliminateDeadCode.h in Headers */,
 				0F61832D1C45BF070072450B /* AirEmitShuffle.h in Headers */,
+				A4C1EDBD2F913B7A007E4588 /* AirEnsureDedicatedLoopEntryExitBlocks.h in Headers */,
 				0F4DE1CF1C4C1B54004D6C11 /* AirFixObviousSpills.h in Headers */,
 				262D85B71C0D650F006ACB61 /* AirFixPartialRegisterStalls.h in Headers */,
 				0F2AC5671E8A0B790001EE3F /* AirFixSpillsAfterTerminals.h in Headers */,
