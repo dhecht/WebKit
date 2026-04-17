@@ -2538,6 +2538,15 @@ private:
 
                 auto& loopData = m_loopData[loop->index()];
                 if (liveRange.overlaps(loopData.boundary)) {
+                    // Skip loops that are too large relative to the live range. Splitting
+                    // around a huge outer loop produces a loop portion barely smaller than the
+                    // original, which is unlikely to get a register. Fall through to try
+                    // smaller inner loops instead. Use loopData.range.size() as a cheap
+                    // upper bound on the loop portion size to avoid computing subtract.
+                    if (loopData.range.size() > liveRange.size() * Options::airGreedyRegAllocLoopSplitMaxLoopFraction()) {
+                        m_stats[bank].numSplitAroundLoopBailLoopTooLarge++;
+                        continue;
+                    }
                     resultLoop = loop;
                     resultNonLoopRange = LiveRange::subtract(liveRange, loopData.range);
                     return IterationStatus::Done;
