@@ -31,6 +31,7 @@
 #include "B3BasicBlock.h"
 #include "B3NaturalLoops.h"
 #include "B3Procedure.h"
+#include "Options.h"
 
 namespace JSC { namespace B3 {
 
@@ -39,7 +40,7 @@ bool estimateStaticExecutionCounts(Procedure& procedure)
     auto& naturalLoops = procedure.naturalLoops();
 
     for (BasicBlock* block : procedure) {
-        constexpr double base = 10.0;
+        double base = Options::staticExecutionCountBase();
         block->setFrequency(pow(base, naturalLoops.loopDepth(block)));
     }
 

@@ -32,6 +32,7 @@
 #include "DFGNaturalLoops.h"
 #include "DFGPhase.h"
 #include "JSCJSValueInlines.h"
+#include "Options.h"
 
 namespace JSC { namespace DFG {
 
@@ -52,7 +53,7 @@ public:
             if (!block)
                 continue;
 
-            block->executionCount = pow(10, m_graph.m_cpsNaturalLoops->loopDepth(block));
+            block->executionCount = pow(Options::staticExecutionCountBase(), m_graph.m_cpsNaturalLoops->loopDepth(block));
         }
         
         // Estimate branch weights based on execution counts. This isn't quite correct. It'll
