@@ -116,7 +116,7 @@ class Callee;
 }
 
 namespace GCClient {
-class Heap;
+class Mutator;
 }
 
 #define FOR_EACH_JSC_COMMON_ISO_SUBSPACE(v) \
@@ -673,7 +673,7 @@ private:
     class HeapThread;
     friend class HeapThread;
 
-    friend class GCClient::Heap;
+    friend class GCClient::Mutator;
 
     static constexpr size_t minExtraMemory = 256;
     
@@ -1251,21 +1251,21 @@ public:
 
 namespace GCClient {
 
-class Heap {
-    WTF_MAKE_NONCOPYABLE(Heap);
+class Mutator {
+    WTF_MAKE_NONCOPYABLE(Mutator);
 public:
-    Heap(JSC::Heap&);
-    ~Heap();
+    Mutator(JSC::Heap&);
+    ~Mutator();
 
     inline VM& vm() const;
-    JSC::Heap& server() { return m_server; }
+    JSC::Heap& heap() { return m_heap; }
 
-    // FIXME GlobalGC: need a GCClient::Heap::lastChanceToFinalize() and in there,
+    // FIXME GlobalGC: need a GCClient::Mutator::lastChanceToFinalize() and in there,
     // relinquish memory from the IsoSubspace LocalAllocators back to the server.
     // Currently, this is being handled by BlockDirectory::stopAllocatingForGood().
 
 private:
-    JSC::Heap& m_server;
+    JSC::Heap& m_heap;
 
 #define DECLARE_ISO_SUBSPACE(name, heapCellType, type) \
     IsoSubspace name;
@@ -1299,7 +1299,6 @@ private:
     IsoSubspace functionExecutableSpace;
     IsoSubspace programExecutableSpace;
     IsoSubspace unlinkedFunctionExecutableSpace;
-
 
     friend class JSC::VM;
 };

@@ -3477,8 +3477,8 @@ namespace GCClient {
 #define INIT_CLIENT_ISO_SUBSPACE(name, heapCellType, type) \
     , name(heap.name)
 
-Heap::Heap(JSC::Heap& heap)
-    : m_server(heap)
+Mutator::Mutator(JSC::Heap& heap)
+    : m_heap(heap)
     FOR_EACH_JSC_ISO_SUBSPACE(INIT_CLIENT_ISO_SUBSPACE)
     , INIT_CLIENT_ISO_SUBSPACE_FROM_SPACE_AND_SET(codeBlockSpace)
     , INIT_CLIENT_ISO_SUBSPACE_FROM_SPACE_AND_SET(functionExecutableSpace)
@@ -3487,18 +3487,18 @@ Heap::Heap(JSC::Heap& heap)
 {
 }
 
-Heap::~Heap() = default;
+Mutator::~Mutator() = default;
 
 #undef INIT_CLIENT_ISO_SUBSPACE
 #undef CLIENT_ISO_SUBSPACE_INIT_FROM_SPACE_AND_SET
 
 
 #define DEFINE_DYNAMIC_ISO_SUBSPACE_MEMBER_SLOW_IMPL(name, heapCellType, type) \
-    IsoSubspace* Heap::name##Slow() \
+    IsoSubspace* Mutator::name##Slow() \
     { \
         ASSERT(!m_##name); \
-        Locker locker { server().m_lock }; \
-        JSC::IsoSubspace& serverSpace = *server().name<SubspaceAccess::OnMainThread>(); \
+        Locker locker { heap().m_lock }; \
+        JSC::IsoSubspace& serverSpace = *heap().name<SubspaceAccess::OnMainThread>(); \
         auto space = makeUnique<IsoSubspace>(serverSpace); \
         WTF::storeStoreFence(); \
         m_##name = WTF::move(space); \
