@@ -81,7 +81,7 @@ bool RuntimeMethod::getOwnPropertySlot(JSObject* object, JSGlobalObject* exec, P
     return InternalFunction::getOwnPropertySlot(thisObject, exec, propertyName, slot);
 }
 
-GCClient::IsoSubspace* RuntimeMethod::subspaceForImpl(VM& vm)
+Mutator::IsoSubspace* RuntimeMethod::subspaceForImpl(VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->runtimeMethodSpace();
 }

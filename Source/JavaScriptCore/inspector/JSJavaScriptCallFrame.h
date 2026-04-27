@@ -37,7 +37,7 @@ public:
     static constexpr JSC::DestructionMode needsDestruction = JSC::NeedsDestruction;
 
     template<typename CellType, JSC::SubspaceAccess mode>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         return vm.javaScriptCallFrameSpace<mode>();
     }

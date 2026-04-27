@@ -36,7 +36,7 @@ public:
 
     static constexpr JSC::DestructionMode needsDestruction = JSC::DoesNotNeedDestruction;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         static_assert(CellType::destroy == JSC::JSCell::destroy, "JSDOMWindowProperties is not destructible actually");
         return subspaceForImpl(vm);
@@ -68,7 +68,7 @@ private:
     }
 
     void finishCreation(JSC::JSGlobalObject&);
-    static JSC::GCClient::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
+    static JSC::Mutator::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
 };
 
 } // namespace WebCore

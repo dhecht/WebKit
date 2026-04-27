@@ -76,7 +76,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestAsyncKeyValueIterablePrototype, Base);
         return &vm.plainObjectSpace();
@@ -203,7 +203,7 @@ public:
     using Base = TestAsyncKeyValueIterableIteratorBase;
     DECLARE_INFO;
 
-    template<typename, SubspaceAccess mode> static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    template<typename, SubspaceAccess mode> static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         if constexpr (mode == JSC::SubspaceAccess::Concurrently)
             return nullptr;
@@ -292,7 +292,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestAsyncKeyValueIterablePrototypeFunction_values, (J
 JSC_ANNOTATE_HOST_FUNCTION(TestAsyncKeyValueIterableIteratorBaseOnPromiseSettled, TestAsyncKeyValueIterableIteratorBase::onPromiseSettled);
 JSC_ANNOTATE_HOST_FUNCTION(TestAsyncKeyValueIterableIteratorBaseOnPromiseFulfilled, TestAsyncKeyValueIterableIteratorBase::onPromiseFulFilled);
 JSC_ANNOTATE_HOST_FUNCTION(TestAsyncKeyValueIterableIteratorBaseOnPromiseRejected, TestAsyncKeyValueIterableIteratorBase::onPromiseRejected);
-JSC::GCClient::IsoSubspace* JSTestAsyncKeyValueIterable::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestAsyncKeyValueIterable::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestAsyncKeyValueIterable, UseCustomHeapCellType::No>(vm, "JSTestAsyncKeyValueIterable"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestAsyncKeyValueIterable.get(); },

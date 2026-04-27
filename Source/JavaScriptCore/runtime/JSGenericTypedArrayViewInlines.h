@@ -940,7 +940,7 @@ template<typename Adaptor> inline const ClassInfo* JSGenericTypedArrayView<Adapt
 }
 
 template<typename Adaptor> template<typename, SubspaceAccess access>
-inline GCClient::IsoSubspace* JSGenericTypedArrayView<Adaptor>::subspaceFor(VM& vm)
+inline Mutator::IsoSubspace* JSGenericTypedArrayView<Adaptor>::subspaceFor(VM& vm)
 {
     switch (Adaptor::typeValue) {
     case TypeInt8:

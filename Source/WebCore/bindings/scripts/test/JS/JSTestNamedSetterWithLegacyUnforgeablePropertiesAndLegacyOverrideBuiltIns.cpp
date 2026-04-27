@@ -76,7 +76,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltInsPrototype, Base);
         return &vm.plainObjectSpace();
@@ -404,7 +404,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestNamedSetterWithLegacyUnforgeablePropertiesAndLega
     return IDLOperation<JSTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns>::call<jsTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltInsInstanceFunction_unforgeableOperationBody>(*lexicalGlobalObject, *callFrame, "unforgeableOperation");
 }
 
-JSC::GCClient::IsoSubspace* JSTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns, UseCustomHeapCellType::No>(vm, "JSTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestNamedSetterWithLegacyUnforgeablePropertiesAndLegacyOverrideBuiltIns.get(); },

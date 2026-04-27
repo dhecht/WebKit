@@ -453,7 +453,7 @@ private:
 
 public:
     Heap heap;
-    GCClient::Mutator mutator;
+    Mutator mutator;
 
     bool isInService() const { return m_isInService; }
 
@@ -472,25 +472,25 @@ public:
     ALWAYS_INLINE CompleteSubspace& destructibleObjectSpace() { return heap.destructibleObjectSpace; }
 #if ENABLE(WEBASSEMBLY)
     template<SubspaceAccess mode>
-    ALWAYS_INLINE GCClient::PreciseSubspace* webAssemblyInstanceSpace() { return heap.webAssemblyInstanceSpace<mode>(); }
+    ALWAYS_INLINE Mutator::PreciseSubspace* webAssemblyInstanceSpace() { return heap.webAssemblyInstanceSpace<mode>(); }
 #endif
 
 #define DEFINE_ISO_SUBSPACE_ACCESSOR(name, heapCellType, type) \
-    ALWAYS_INLINE GCClient::IsoSubspace& name() { return mutator.name; }
+    ALWAYS_INLINE Mutator::IsoSubspace& name() { return mutator.name; }
 
     FOR_EACH_JSC_ISO_SUBSPACE(DEFINE_ISO_SUBSPACE_ACCESSOR)
 #undef DEFINE_ISO_SUBSPACE_ACCESSOR
 
 #define DEFINE_DYNAMIC_ISO_SUBSPACE_ACCESSOR_IMPL(name, heapCellType, type) \
     template<SubspaceAccess mode> \
-    ALWAYS_INLINE GCClient::IsoSubspace* name() { return mutator.name<mode>(); }
+    ALWAYS_INLINE Mutator::IsoSubspace* name() { return mutator.name<mode>(); }
 
 #define DEFINE_DYNAMIC_ISO_SUBSPACE_ACCESSOR(name) \
     DEFINE_DYNAMIC_ISO_SUBSPACE_ACCESSOR_IMPL(name, unused, unused2)
 
     FOR_EACH_JSC_DYNAMIC_ISO_SUBSPACE(DEFINE_DYNAMIC_ISO_SUBSPACE_ACCESSOR_IMPL)
 
-    ALWAYS_INLINE GCClient::IsoSubspace& codeBlockSpace() { return mutator.codeBlockSpace; }
+    ALWAYS_INLINE Mutator::IsoSubspace& codeBlockSpace() { return mutator.codeBlockSpace; }
 
     DEFINE_DYNAMIC_ISO_SUBSPACE_ACCESSOR(evalExecutableSpace)
     DEFINE_DYNAMIC_ISO_SUBSPACE_ACCESSOR(moduleProgramExecutableSpace)
@@ -498,9 +498,9 @@ public:
 #undef DEFINE_DYNAMIC_ISO_SUBSPACE_ACCESSOR_IMPL
 #undef DEFINE_DYNAMIC_ISO_SUBSPACE_GETTER
 
-    ALWAYS_INLINE GCClient::IsoSubspace& functionExecutableSpace() { return mutator.functionExecutableSpace; }
-    ALWAYS_INLINE GCClient::IsoSubspace& programExecutableSpace() { return mutator.programExecutableSpace; }
-    ALWAYS_INLINE GCClient::IsoSubspace& unlinkedFunctionExecutableSpace() { return mutator.unlinkedFunctionExecutableSpace; }
+    ALWAYS_INLINE Mutator::IsoSubspace& functionExecutableSpace() { return mutator.functionExecutableSpace; }
+    ALWAYS_INLINE Mutator::IsoSubspace& programExecutableSpace() { return mutator.programExecutableSpace; }
+    ALWAYS_INLINE Mutator::IsoSubspace& unlinkedFunctionExecutableSpace() { return mutator.unlinkedFunctionExecutableSpace; }
 
     VMType vmType;
     bool m_mightBeExecutingTaintedCode { false };

@@ -41,7 +41,7 @@ void JSDOMBuiltinConstructorBase::visitChildrenImpl(JSC::JSCell* cell, Visitor& 
 
 DEFINE_VISIT_CHILDREN(JSDOMBuiltinConstructorBase);
 
-JSC::GCClient::IsoSubspace* JSDOMBuiltinConstructorBase::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSDOMBuiltinConstructorBase::subspaceForImpl(JSC::VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->domBuiltinConstructorSpace();
 }

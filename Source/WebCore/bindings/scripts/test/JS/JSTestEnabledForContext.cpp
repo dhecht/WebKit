@@ -69,7 +69,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestEnabledForContextPrototype, Base);
         return &vm.plainObjectSpace();
@@ -200,7 +200,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestEnabledForContext_TestSubObjEnabledForContextCons
     return IDLAttribute<JSTestEnabledForContext>::get<jsTestEnabledForContext_TestSubObjEnabledForContextConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSTestEnabledForContext::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestEnabledForContext::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestEnabledForContext, UseCustomHeapCellType::No>(vm, "JSTestEnabledForContext"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestEnabledForContext.get(); },

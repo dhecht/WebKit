@@ -119,14 +119,10 @@ void IsoSubspace::destroyLowerTierPreciseFreeList()
     });
 }
 
-namespace GCClient {
-
-IsoSubspace::IsoSubspace(JSC::IsoSubspace& server)
-    : m_localAllocator(&server.m_directory)
+Mutator::IsoSubspace::IsoSubspace(JSC::IsoSubspace& server)
+    : m_localAllocator(server.directory())
 {
 }
-
-} // namespace GCClient
 
 } // namespace JSC
 

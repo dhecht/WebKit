@@ -218,7 +218,7 @@ public:
     ~Structure();
     
     template<typename CellType, SubspaceAccess>
-    inline static GCClient::IsoSubspace* subspaceFor(VM&); // Defined in StructureInlines.h
+    inline static Mutator::IsoSubspace* subspaceFor(VM&); // Defined in StructureInlines.h
 
     JS_EXPORT_PRIVATE static bool isValidPrototype(JSValue);
 

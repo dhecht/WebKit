@@ -228,7 +228,7 @@ Structure* JSObservableArray::createStructure(VM& vm, JSGlobalObject* globalObje
     return Structure::create(vm, globalObject, prototype, TypeInfo(DerivedArrayType, StructureFlags), info(), NonArray);
 }
 
-JSC::GCClient::IsoSubspace* JSObservableArray::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSObservableArray::subspaceForImpl(JSC::VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->observableArraySpace();
 }

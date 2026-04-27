@@ -67,7 +67,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestNamedDeleterNoIdentifierPrototype, Base);
         return &vm.plainObjectSpace();
@@ -338,7 +338,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestNamedDeleterNoIdentifierConstructor, (JSGlobalObj
     return JSValue::encode(JSTestNamedDeleterNoIdentifier::getConstructor(vm, prototype->realm()));
 }
 
-JSC::GCClient::IsoSubspace* JSTestNamedDeleterNoIdentifier::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestNamedDeleterNoIdentifier::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestNamedDeleterNoIdentifier, UseCustomHeapCellType::No>(vm, "JSTestNamedDeleterNoIdentifier"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestNamedDeleterNoIdentifier.get(); },

@@ -102,7 +102,7 @@ void JSTestNamespaceConst::destroy(JSC::JSCell* cell)
     thisObject->JSTestNamespaceConst::~JSTestNamespaceConst();
 }
 
-JSC::GCClient::IsoSubspace* JSTestNamespaceConst::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestNamespaceConst::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestNamespaceConst, UseCustomHeapCellType::No>(vm, "JSTestNamespaceConst"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestNamespaceConst.get(); },

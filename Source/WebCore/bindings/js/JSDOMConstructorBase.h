@@ -36,7 +36,7 @@ public:
     static constexpr JSC::DestructionMode needsDestruction = JSC::DoesNotNeedDestruction;
 
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         static_assert(sizeof(CellType) == sizeof(JSDOMConstructorBase));
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(CellType, JSDOMConstructorBase);
@@ -44,7 +44,7 @@ public:
         return subspaceForImpl(vm);
     }
 
-    static JSC::GCClient::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
+    static JSC::Mutator::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
 
     JSDOMGlobalObject* realm() const { return uncheckedDowncast<JSDOMGlobalObject>(Base::realm()); }
     ScriptExecutionContext* scriptExecutionContext() const { return realm()->scriptExecutionContext(); }

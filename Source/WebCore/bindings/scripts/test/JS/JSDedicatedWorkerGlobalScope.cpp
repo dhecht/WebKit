@@ -184,7 +184,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsDedicatedWorkerGlobalScope_ExposedStarConstructor, (J
     return IDLAttribute<JSDedicatedWorkerGlobalScope>::get<jsDedicatedWorkerGlobalScope_ExposedStarConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSDedicatedWorkerGlobalScope::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSDedicatedWorkerGlobalScope::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSDedicatedWorkerGlobalScope, UseCustomHeapCellType::Yes>(vm, "JSDedicatedWorkerGlobalScope"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForDedicatedWorkerGlobalScope.get(); },

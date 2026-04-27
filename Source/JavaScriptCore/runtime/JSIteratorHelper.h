@@ -40,7 +40,7 @@ public:
     static_assert(numberOfInternalFields == 2);
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return vm.iteratorHelperSpace<mode>();
     }

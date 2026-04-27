@@ -48,7 +48,7 @@ JSC_DEFINE_HOST_FUNCTION(callThrowTypeErrorForJSDOMConstructorNotConstructable, 
     return JSC::JSValue::encode(JSC::jsNull());
 }
 
-JSC::GCClient::IsoSubspace* JSDOMConstructorBase::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSDOMConstructorBase::subspaceForImpl(JSC::VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->domConstructorSpace();
 }

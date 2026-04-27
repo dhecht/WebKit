@@ -31,7 +31,7 @@ private:
 public:
     using Base = ErrorPrototypeBase;
     template<typename CellType, SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(NativeErrorPrototype, Base);
         return &vm.plainObjectSpace();

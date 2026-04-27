@@ -28,7 +28,7 @@ public:
     using Base = JSDOMConstructorBase;
 
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         static_assert(sizeof(CellType) == sizeof(JSDOMBuiltinConstructorBase));
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(CellType, JSDOMBuiltinConstructorBase);
@@ -48,7 +48,7 @@ protected:
     void setInitializeFunction(JSC::VM&, JSC::JSFunction&);
 
 private:
-    static JSC::GCClient::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
+    static JSC::Mutator::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
 
     JSC::WriteBarrier<JSC::JSFunction> m_initializeFunction;
 };

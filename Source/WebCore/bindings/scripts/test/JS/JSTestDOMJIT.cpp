@@ -482,7 +482,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestDOMJITPrototype, Base);
         return &vm.plainObjectSpace();
@@ -1262,7 +1262,7 @@ JSC_DEFINE_JIT_OPERATION(jsTestDOMJITPrototypeFunction_getElementsByNameWithoutT
     OPERATION_RETURN(throwScope, JSValue::encode(toJS<IDLInterface<NodeList>>(*lexicalGlobalObject, *castedThis->realm(), throwScope, impl.getElementsByName(WTF::move(elementName)))));
 }
 
-JSC::GCClient::IsoSubspace* JSTestDOMJIT::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestDOMJIT::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestDOMJIT, UseCustomHeapCellType::No>(vm, "JSTestDOMJIT"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestDOMJIT.get(); },

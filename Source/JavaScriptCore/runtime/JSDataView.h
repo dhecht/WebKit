@@ -40,7 +40,7 @@ public:
     static constexpr TypedArrayContentType contentType = TypedArrayContentType::None;
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return vm.dataViewSpace<mode>();
     }

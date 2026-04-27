@@ -286,7 +286,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestNamespaceObjectConstructorFunction_namespaceOpera
 
 #endif
 
-JSC::GCClient::IsoSubspace* JSTestNamespaceObject::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestNamespaceObject::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestNamespaceObject, UseCustomHeapCellType::No>(vm, "JSTestNamespaceObject"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestNamespaceObject.get(); },

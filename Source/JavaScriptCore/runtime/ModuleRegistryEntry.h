@@ -58,7 +58,7 @@ public:
     static void destroy(JSCell*);
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return vm.moduleRegistryEntrySpace<mode>();
     }

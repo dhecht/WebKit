@@ -143,7 +143,7 @@ bool JSDOMWindowProperties::defineOwnProperty(JSObject*, JSGlobalObject* lexical
     return typeError(lexicalGlobalObject, scope, shouldThrow, "Defining a property on a WindowProperties object is not allowed."_s);
 }
 
-JSC::GCClient::IsoSubspace* JSDOMWindowProperties::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSDOMWindowProperties::subspaceForImpl(JSC::VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->domWindowPropertiesSpace();
 }

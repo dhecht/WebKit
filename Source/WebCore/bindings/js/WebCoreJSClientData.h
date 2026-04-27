@@ -151,19 +151,19 @@ public:
     WebCoreBuiltinNames& builtinNames() LIFETIME_BOUND { return m_builtinNames; }
     JSBuiltinFunctions& builtinFunctions() LIFETIME_BOUND { return m_builtinFunctions; }
 
-    JSC::GCClient::IsoSubspace& domBuiltinConstructorSpace() LIFETIME_BOUND { return m_domBuiltinConstructorSpace; }
-    JSC::GCClient::IsoSubspace& domConstructorSpace() LIFETIME_BOUND { return m_domConstructorSpace; }
-    JSC::GCClient::IsoSubspace& domNamespaceObjectSpace() LIFETIME_BOUND { return m_domNamespaceObjectSpace; }
-    JSC::GCClient::IsoSubspace& domWindowPropertiesSpace() LIFETIME_BOUND { return m_domWindowPropertiesSpace; }
-    JSC::GCClient::IsoSubspace& runtimeArraySpace() LIFETIME_BOUND { return m_runtimeArraySpace; }
+    JSC::Mutator::IsoSubspace& domBuiltinConstructorSpace() LIFETIME_BOUND { return m_domBuiltinConstructorSpace; }
+    JSC::Mutator::IsoSubspace& domConstructorSpace() LIFETIME_BOUND { return m_domConstructorSpace; }
+    JSC::Mutator::IsoSubspace& domNamespaceObjectSpace() LIFETIME_BOUND { return m_domNamespaceObjectSpace; }
+    JSC::Mutator::IsoSubspace& domWindowPropertiesSpace() LIFETIME_BOUND { return m_domWindowPropertiesSpace; }
+    JSC::Mutator::IsoSubspace& runtimeArraySpace() LIFETIME_BOUND { return m_runtimeArraySpace; }
 #if PLATFORM(COCOA)
-    JSC::GCClient::IsoSubspace& objcFallbackObjectImpSpace() LIFETIME_BOUND { return m_objcFallbackObjectImpSpace; }
+    JSC::Mutator::IsoSubspace& objcFallbackObjectImpSpace() LIFETIME_BOUND { return m_objcFallbackObjectImpSpace; }
 #endif
-    JSC::GCClient::IsoSubspace& observableArraySpace() LIFETIME_BOUND { return m_observableArraySpace; }
-    JSC::GCClient::IsoSubspace& runtimeMethodSpace() LIFETIME_BOUND { return m_runtimeMethodSpace; }
-    JSC::GCClient::IsoSubspace& runtimeObjectSpace() LIFETIME_BOUND { return m_runtimeObjectSpace; }
-    JSC::GCClient::IsoSubspace& windowProxySpace() LIFETIME_BOUND { return m_windowProxySpace; }
-    JSC::GCClient::IsoSubspace& idbSerializationSpace() LIFETIME_BOUND { return m_idbSerializationSpace; }
+    JSC::Mutator::IsoSubspace& observableArraySpace() LIFETIME_BOUND { return m_observableArraySpace; }
+    JSC::Mutator::IsoSubspace& runtimeMethodSpace() LIFETIME_BOUND { return m_runtimeMethodSpace; }
+    JSC::Mutator::IsoSubspace& runtimeObjectSpace() LIFETIME_BOUND { return m_runtimeObjectSpace; }
+    JSC::Mutator::IsoSubspace& windowProxySpace() LIFETIME_BOUND { return m_windowProxySpace; }
+    JSC::Mutator::IsoSubspace& idbSerializationSpace() LIFETIME_BOUND { return m_idbSerializationSpace; }
 
     ExtendedDOMClientIsoSubspaces& clientSubspaces() LIFETIME_BOUND { return m_clientSubspaces; }
 
@@ -179,19 +179,19 @@ private:
     WebCoreBuiltinNames m_builtinNames;
 
     JSHeapData* m_heapData;
-    JSC::GCClient::IsoSubspace m_domBuiltinConstructorSpace;
-    JSC::GCClient::IsoSubspace m_domConstructorSpace;
-    JSC::GCClient::IsoSubspace m_domNamespaceObjectSpace;
-    JSC::GCClient::IsoSubspace m_domWindowPropertiesSpace;
-    JSC::GCClient::IsoSubspace m_runtimeArraySpace;
+    JSC::Mutator::IsoSubspace m_domBuiltinConstructorSpace;
+    JSC::Mutator::IsoSubspace m_domConstructorSpace;
+    JSC::Mutator::IsoSubspace m_domNamespaceObjectSpace;
+    JSC::Mutator::IsoSubspace m_domWindowPropertiesSpace;
+    JSC::Mutator::IsoSubspace m_runtimeArraySpace;
 #if PLATFORM(COCOA)
-    JSC::GCClient::IsoSubspace m_objcFallbackObjectImpSpace;
+    JSC::Mutator::IsoSubspace m_objcFallbackObjectImpSpace;
 #endif
-    JSC::GCClient::IsoSubspace m_observableArraySpace;
-    JSC::GCClient::IsoSubspace m_runtimeMethodSpace;
-    JSC::GCClient::IsoSubspace m_runtimeObjectSpace;
-    JSC::GCClient::IsoSubspace m_windowProxySpace;
-    JSC::GCClient::IsoSubspace m_idbSerializationSpace;
+    JSC::Mutator::IsoSubspace m_observableArraySpace;
+    JSC::Mutator::IsoSubspace m_runtimeMethodSpace;
+    JSC::Mutator::IsoSubspace m_runtimeObjectSpace;
+    JSC::Mutator::IsoSubspace m_windowProxySpace;
+    JSC::Mutator::IsoSubspace m_idbSerializationSpace;
 
     const UniqueRef<ExtendedDOMClientIsoSubspaces> m_clientSubspaces;
 
@@ -213,7 +213,7 @@ namespace WebCore {
 enum class UseCustomHeapCellType : bool { No, Yes };
 
 template<typename T, UseCustomHeapCellType useCustomHeapCellType, typename GetClient, typename SetClient, typename GetServer, typename SetServer>
-ALWAYS_INLINE JSC::GCClient::IsoSubspace* subspaceForImpl(JSC::VM& vm, ASCIILiteral name, GetClient getClient, SetClient setClient, GetServer getServer, SetServer setServer, JSC::HeapCellType& (*getCustomHeapCellType)(JSHeapData&) = nullptr)
+ALWAYS_INLINE JSC::Mutator::IsoSubspace* subspaceForImpl(JSC::VM& vm, ASCIILiteral name, GetClient getClient, SetClient setClient, GetServer getServer, SetServer setServer, JSC::HeapCellType& (*getCustomHeapCellType)(JSHeapData&) = nullptr)
 {
     auto& clientData = *downcast<JSVMClientData>(vm.clientData);
     auto& clientSubspaces = clientData.clientSubspaces();
@@ -250,7 +250,7 @@ IGNORE_WARNINGS_END
 IGNORE_WARNINGS_END
     }
 
-    auto uniqueClientSubspace = makeUnique<JSC::GCClient::IsoSubspace>(*space);
+    auto uniqueClientSubspace = makeUnique<JSC::Mutator::IsoSubspace>(*space);
     auto* clientSpace = uniqueClientSubspace.get();
     setClient(clientSubspaces, WTF::move(uniqueClientSubspace));
     return clientSpace;

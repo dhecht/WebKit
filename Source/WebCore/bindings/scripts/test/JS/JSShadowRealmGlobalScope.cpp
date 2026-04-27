@@ -163,7 +163,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsShadowRealmGlobalScope_ShadowRealmGlobalScopeConstruc
     return IDLAttribute<JSShadowRealmGlobalScope>::get<jsShadowRealmGlobalScope_ShadowRealmGlobalScopeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSShadowRealmGlobalScope::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSShadowRealmGlobalScope::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSShadowRealmGlobalScope, UseCustomHeapCellType::Yes>(vm, "JSShadowRealmGlobalScope"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForShadowRealmGlobalScope.get(); },

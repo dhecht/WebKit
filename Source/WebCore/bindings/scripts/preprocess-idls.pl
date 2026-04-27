@@ -268,10 +268,10 @@ foreach my $idlFileName (sort keys %idlFileNameHash) {
     my $isCallbackInterface = isCallbackInterfaceFromIDL($idlFile);
     if (!$isCallbackInterface) {
         $isoSubspacesHeaderCode .= "    std::unique_ptr<IsoSubspace> m_subspaceFor${interfaceName};\n";
-        $clientISOSubspacesHeaderCode .= "    std::unique_ptr<GCClient::IsoSubspace> m_clientSubspaceFor${interfaceName};\n";
+        $clientISOSubspacesHeaderCode .= "    std::unique_ptr<Mutator::IsoSubspace> m_clientSubspaceFor${interfaceName};\n";
         if (containsIterableInterfaceFromIDL($idlFile)) {
             $isoSubspacesHeaderCode .= "    std::unique_ptr<IsoSubspace> m_subspaceFor${interfaceName}Iterator;\n";
-            $clientISOSubspacesHeaderCode .= "    std::unique_ptr<GCClient::IsoSubspace> m_clientSubspaceFor${interfaceName}Iterator;\n";
+            $clientISOSubspacesHeaderCode .= "    std::unique_ptr<Mutator::IsoSubspace> m_clientSubspaceFor${interfaceName}Iterator;\n";
         }
     }
 

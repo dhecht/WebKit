@@ -83,7 +83,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestMapLikePrototype, Base);
         return &vm.plainObjectSpace();
@@ -377,7 +377,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestMapLikePrototypeFunction_delete, (JSGlobalObject*
     return IDLOperation<JSTestMapLike>::call<jsTestMapLikePrototypeFunction_deleteBody>(*lexicalGlobalObject, *callFrame, "delete");
 }
 
-JSC::GCClient::IsoSubspace* JSTestMapLike::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestMapLike::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestMapLike, UseCustomHeapCellType::No>(vm, "JSTestMapLike"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestMapLike.get(); },

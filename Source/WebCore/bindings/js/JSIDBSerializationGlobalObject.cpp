@@ -58,7 +58,7 @@ void JSIDBSerializationGlobalObject::finishCreation(VM& vm)
     Base::finishCreation(vm);
 }
 
-GCClient::IsoSubspace* JSIDBSerializationGlobalObject::subspaceForImpl(VM& vm)
+Mutator::IsoSubspace* JSIDBSerializationGlobalObject::subspaceForImpl(VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->idbSerializationSpace();
 }

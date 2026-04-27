@@ -65,7 +65,7 @@ public:
     static constexpr uintptr_t rareDataTag = 0x1;
     
     template<typename CellType, SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return &vm.functionSpace();
     }

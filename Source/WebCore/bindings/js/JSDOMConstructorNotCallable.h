@@ -46,7 +46,7 @@ public:
     static JSC::JSValue prototypeForStructure(JSC::VM&, const JSDOMGlobalObject&);
 
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         static_assert(sizeof(CellType) == sizeof(JSDOMConstructorNotCallable));
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(CellType, JSDOMConstructorNotCallable);

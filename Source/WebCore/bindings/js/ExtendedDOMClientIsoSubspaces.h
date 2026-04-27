@@ -32,7 +32,7 @@ namespace WebCore {
 class ExtendedDOMClientIsoSubspaces : public DOMClientIsoSubspaces {
 public:
     ExtendedDOMClientIsoSubspaces() = default;
-    std::unique_ptr<JSC::GCClient::IsoSubspace> m_clientSubspaceForFileSystemDirectoryHandleIterator;
+    std::unique_ptr<JSC::Mutator::IsoSubspace> m_clientSubspaceForFileSystemDirectoryHandleIterator;
 };
 
 } // namespace WebCore

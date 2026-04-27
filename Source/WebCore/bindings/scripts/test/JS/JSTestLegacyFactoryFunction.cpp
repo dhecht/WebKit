@@ -69,7 +69,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestLegacyFactoryFunctionPrototype, Base);
         return &vm.plainObjectSpace();
@@ -240,7 +240,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestLegacyFactoryFunctionConstructor, (JSGlobalObject
     return JSValue::encode(JSTestLegacyFactoryFunction::getConstructor(vm, prototype->realm()));
 }
 
-JSC::GCClient::IsoSubspace* JSTestLegacyFactoryFunction::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestLegacyFactoryFunction::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestLegacyFactoryFunction, UseCustomHeapCellType::No>(vm, "JSTestLegacyFactoryFunction"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestLegacyFactoryFunction.get(); },

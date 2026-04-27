@@ -52,7 +52,7 @@ inline void JSObject::didBecomePrototype(VM& vm)
 }
 
 template<typename CellType, SubspaceAccess>
-inline GCClient::IsoSubspace* Structure::subspaceFor(VM& vm)
+inline Mutator::IsoSubspace* Structure::subspaceFor(VM& vm)
 {
     return &vm.structureSpace();
 }

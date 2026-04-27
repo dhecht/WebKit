@@ -71,7 +71,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestDelegateToSharedSyntheticAttributePrototype, Base);
         return &vm.plainObjectSpace();
@@ -255,7 +255,7 @@ JSC_DEFINE_CUSTOM_SETTER(setJSTestDelegateToSharedSyntheticAttribute_sharedAttri
     return IDLAttribute<JSTestDelegateToSharedSyntheticAttribute>::setPassingPropertyName<setJSTestDelegateToSharedSyntheticAttribute_sharedAttribute2Setter>(*lexicalGlobalObject, thisValue, encodedValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSTestDelegateToSharedSyntheticAttribute::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestDelegateToSharedSyntheticAttribute::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestDelegateToSharedSyntheticAttribute, UseCustomHeapCellType::No>(vm, "JSTestDelegateToSharedSyntheticAttribute"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestDelegateToSharedSyntheticAttribute.get(); },

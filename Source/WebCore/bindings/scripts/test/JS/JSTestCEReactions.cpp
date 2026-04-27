@@ -92,7 +92,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestCEReactionsPrototype, Base);
         return &vm.plainObjectSpace();
@@ -453,7 +453,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestCEReactionsPrototypeFunction_methodWithCEReaction
     return IDLOperation<JSTestCEReactions>::call<jsTestCEReactionsPrototypeFunction_methodWithCEReactionsNotNeededBody>(*lexicalGlobalObject, *callFrame, "methodWithCEReactionsNotNeeded");
 }
 
-JSC::GCClient::IsoSubspace* JSTestCEReactions::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestCEReactions::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestCEReactions, UseCustomHeapCellType::No>(vm, "JSTestCEReactions"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestCEReactions.get(); },

@@ -39,7 +39,7 @@ public:
     using Base = JSNonFinalObject;
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return vm.temporalCalendarSpace<mode>();
     }

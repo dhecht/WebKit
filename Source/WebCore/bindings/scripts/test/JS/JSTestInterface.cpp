@@ -185,7 +185,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestInterfacePrototype, Base);
         return &vm.plainObjectSpace();
@@ -1131,7 +1131,7 @@ public:
     using Base = TestInterfaceIteratorBase;
     DECLARE_INFO;
 
-    template<typename, SubspaceAccess mode> static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    template<typename, SubspaceAccess mode> static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         if constexpr (mode == JSC::SubspaceAccess::Concurrently)
             return nullptr;
@@ -1223,7 +1223,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestInterfacePrototypeFunction_forEach, (JSC::JSGloba
     return IDLOperation<JSTestInterface>::call<jsTestInterfacePrototypeFunction_forEachCaller>(*lexicalGlobalObject, *callFrame, "forEach");
 }
 
-JSC::GCClient::IsoSubspace* JSTestInterface::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestInterface::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestInterface, UseCustomHeapCellType::No>(vm, "JSTestInterface"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestInterface.get(); },

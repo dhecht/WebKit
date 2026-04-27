@@ -47,10 +47,5 @@ private:
     void didBeginSweepingToFreeList(MarkedBlock::Handle*) override;
 };
 
-namespace GCClient {
-// This doesn't do anything interesting right now but we keep the GCClient namespace for consistency/templates.
-using PreciseSubspace = JSC::PreciseSubspace;
-}
-
 } // namespace JSC
 

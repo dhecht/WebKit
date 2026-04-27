@@ -30,7 +30,7 @@ public:
     static constexpr unsigned StructureFlags = Base::StructureFlags | IsImmutablePrototypeExoticObject;
 
     template<typename CellType, SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(ObjectPrototype, Base);
         return &vm.plainObjectSpace();

@@ -3470,8 +3470,6 @@ bool Heap::isWasmCalleePendingDestruction(Wasm::Callee& callee)
 
 #endif
 
-namespace GCClient {
-
 #define INIT_CLIENT_ISO_SUBSPACE_FROM_SPACE_AND_SET(subspace) subspace(heap.subspace##AndSet.space)
 
 #define INIT_CLIENT_ISO_SUBSPACE(name, heapCellType, type) \
@@ -3494,7 +3492,7 @@ Mutator::~Mutator() = default;
 
 
 #define DEFINE_DYNAMIC_ISO_SUBSPACE_MEMBER_SLOW_IMPL(name, heapCellType, type) \
-    IsoSubspace* Mutator::name##Slow() \
+    Mutator::IsoSubspace* Mutator::name##Slow() \
     { \
         ASSERT(!m_##name); \
         Locker locker { heap().m_lock }; \
@@ -3515,7 +3513,5 @@ DEFINE_DYNAMIC_ISO_SUBSPACE_MEMBER_SLOW(moduleProgramExecutableSpace)
 
 #undef DEFINE_DYNAMIC_ISO_SUBSPACE_MEMBER_SLOW_IMPL
 #undef DEFINE_DYNAMIC_ISO_SUBSPACE_MEMBER_SLOW
-
-} // namespace GCClient
 
 } // namespace JSC

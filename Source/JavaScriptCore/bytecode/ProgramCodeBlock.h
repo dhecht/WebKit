@@ -41,7 +41,7 @@ public:
     DECLARE_INFO;
 
     template<typename, SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return &vm.codeBlockSpace();
     }

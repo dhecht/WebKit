@@ -38,7 +38,7 @@ public:
     using Base = JSNonFinalObject;
 
     template<typename CellType, SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(WeakSetPrototype, Base);
         return &vm.plainObjectSpace();

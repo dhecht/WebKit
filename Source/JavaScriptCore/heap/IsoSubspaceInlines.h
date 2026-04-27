@@ -35,14 +35,10 @@ namespace JSC {
 
 class GCDeferralContext;
 
-namespace GCClient {
-
-ALWAYS_INLINE void* IsoSubspace::allocate(VM& vm, size_t cellSize, GCDeferralContext* deferralContext, AllocationFailureMode failureMode)
+ALWAYS_INLINE void* Mutator::IsoSubspace::allocate(VM& vm, size_t cellSize, GCDeferralContext* deferralContext, AllocationFailureMode failureMode)
 {
     return m_localAllocator.allocate(vm.heap, cellSize, deferralContext, failureMode);
 }
-
-} // namespace GCClient
 
 inline void IsoSubspace::clearIsoCellSetBit(PreciseAllocation* preciseAllocation)
 {

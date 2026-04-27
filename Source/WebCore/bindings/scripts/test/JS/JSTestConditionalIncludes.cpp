@@ -130,7 +130,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestConditionalIncludesPrototype, Base);
         return &vm.plainObjectSpace();
@@ -802,7 +802,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestConditionalIncludesPrototypeFunction_partialMixin
 
 #endif
 
-JSC::GCClient::IsoSubspace* JSTestConditionalIncludes::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestConditionalIncludes::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestConditionalIncludes, UseCustomHeapCellType::No>(vm, "JSTestConditionalIncludes"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestConditionalIncludes.get(); },

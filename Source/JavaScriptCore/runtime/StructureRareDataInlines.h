@@ -75,7 +75,7 @@ private:
 };
 
 template<typename CellType, SubspaceAccess>
-inline GCClient::IsoSubspace* StructureRareData::subspaceFor(VM& vm)
+inline Mutator::IsoSubspace* StructureRareData::subspaceFor(VM& vm)
 {
     return &vm.structureRareDataSpace();
 }

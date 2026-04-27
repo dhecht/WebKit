@@ -71,7 +71,7 @@ private:
 #endif // REGEXP_FUNC_TEST_DATA_GEN
 
 template<typename CellType, SubspaceAccess mode>
-inline GCClient::IsoSubspace* RegExp::subspaceFor(VM& vm)
+inline Mutator::IsoSubspace* RegExp::subspaceFor(VM& vm)
 {
     return &vm.regExpSpace();
 }

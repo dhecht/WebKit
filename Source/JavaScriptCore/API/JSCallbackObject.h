@@ -159,7 +159,7 @@ public:
     }
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return subspaceForImpl(vm, mode);
     }
@@ -205,7 +205,7 @@ private:
     void finishCreation(JSGlobalObject*);
     void finishCreation(VM&);
 
-    static GCClient::IsoSubspace* subspaceForImpl(VM&, SubspaceAccess);
+    static Mutator::IsoSubspace* subspaceForImpl(VM&, SubspaceAccess);
     static EncodedJSValue JSC_HOST_CALL_ATTRIBUTES customToPrimitive(JSGlobalObject*, CallFrame*);
 
     static bool getOwnPropertySlot(JSObject*, JSGlobalObject*, PropertyName, PropertySlot&);

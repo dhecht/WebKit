@@ -139,7 +139,7 @@ void JSAPIWrapperObject::visitChildrenImpl(JSCell* cell, Visitor& visitor)
 DEFINE_VISIT_CHILDREN_WITH_MODIFIER(JS_EXPORT_PRIVATE, JSAPIWrapperObject);
 
 template <>
-GCClient::IsoSubspace* JSCallbackObject<JSAPIWrapperObject>::subspaceForImpl(VM& vm, SubspaceAccess mode)
+Mutator::IsoSubspace* JSCallbackObject<JSAPIWrapperObject>::subspaceForImpl(VM& vm, SubspaceAccess mode)
 {
     switch (mode) {
     case SubspaceAccess::OnMainThread:

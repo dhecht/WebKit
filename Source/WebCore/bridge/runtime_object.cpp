@@ -313,7 +313,7 @@ Exception* throwRuntimeObjectInvalidAccessError(JSGlobalObject* lexicalGlobalObj
     return throwException(lexicalGlobalObject, scope, createReferenceError(lexicalGlobalObject, "Trying to access object from destroyed plug-in."_s));
 }
 
-JSC::GCClient::IsoSubspace* RuntimeObject::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* RuntimeObject::subspaceForImpl(JSC::VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->runtimeObjectSpace();
 }

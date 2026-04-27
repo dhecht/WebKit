@@ -65,7 +65,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestClassWithJSBuiltinConstructorPrototype, Base);
         return &vm.plainObjectSpace();
@@ -181,7 +181,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestClassWithJSBuiltinConstructorConstructor, (JSGlob
     return JSValue::encode(JSTestClassWithJSBuiltinConstructor::getConstructor(vm, prototype->realm()));
 }
 
-JSC::GCClient::IsoSubspace* JSTestClassWithJSBuiltinConstructor::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestClassWithJSBuiltinConstructor::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestClassWithJSBuiltinConstructor, UseCustomHeapCellType::No>(vm, "JSTestClassWithJSBuiltinConstructor"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestClassWithJSBuiltinConstructor.get(); },

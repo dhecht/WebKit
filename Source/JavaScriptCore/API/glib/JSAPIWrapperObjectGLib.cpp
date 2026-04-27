@@ -103,7 +103,7 @@ GetValueFunc JSCallbackObject<JSAPIWrapperObject>::getStaticFunctionGetter()
 }
 
 template <>
-GCClient::IsoSubspace* JSCallbackObject<JSAPIWrapperObject>::subspaceForImpl(VM& vm, SubspaceAccess mode)
+Mutator::IsoSubspace* JSCallbackObject<JSAPIWrapperObject>::subspaceForImpl(VM& vm, SubspaceAccess mode)
 {
     switch (mode) {
     case SubspaceAccess::OnMainThread:

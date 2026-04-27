@@ -87,7 +87,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestMapLikeWithOverriddenOperationsPrototype, Base);
         return &vm.plainObjectSpace();
@@ -391,7 +391,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestMapLikeWithOverriddenOperationsPrototypeFunction_
     return IDLOperation<JSTestMapLikeWithOverriddenOperations>::call<jsTestMapLikeWithOverriddenOperationsPrototypeFunction_deleteBody>(*lexicalGlobalObject, *callFrame, "delete");
 }
 
-JSC::GCClient::IsoSubspace* JSTestMapLikeWithOverriddenOperations::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestMapLikeWithOverriddenOperations::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestMapLikeWithOverriddenOperations, UseCustomHeapCellType::No>(vm, "JSTestMapLikeWithOverriddenOperations"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestMapLikeWithOverriddenOperations.get(); },

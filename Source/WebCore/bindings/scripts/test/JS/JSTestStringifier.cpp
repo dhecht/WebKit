@@ -70,7 +70,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestStringifierPrototype, Base);
         return &vm.plainObjectSpace();
@@ -197,7 +197,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestStringifierPrototypeFunction_toString, (JSGlobalO
     return IDLOperation<JSTestStringifier>::call<jsTestStringifierPrototypeFunction_toStringBody>(*lexicalGlobalObject, *callFrame, "toString");
 }
 
-JSC::GCClient::IsoSubspace* JSTestStringifier::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestStringifier::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestStringifier, UseCustomHeapCellType::No>(vm, "JSTestStringifier"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestStringifier.get(); },

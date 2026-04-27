@@ -75,7 +75,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestLegacyOverrideBuiltInsPrototype, Base);
         return &vm.plainObjectSpace();
@@ -372,7 +372,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestLegacyOverrideBuiltInsPrototypeFunction_namedItem
     return IDLOperation<JSTestLegacyOverrideBuiltIns>::call<jsTestLegacyOverrideBuiltInsPrototypeFunction_namedItemBody>(*lexicalGlobalObject, *callFrame, "namedItem");
 }
 
-JSC::GCClient::IsoSubspace* JSTestLegacyOverrideBuiltIns::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestLegacyOverrideBuiltIns::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestLegacyOverrideBuiltIns, UseCustomHeapCellType::No>(vm, "JSTestLegacyOverrideBuiltIns"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestLegacyOverrideBuiltIns.get(); },

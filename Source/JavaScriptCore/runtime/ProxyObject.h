@@ -59,7 +59,7 @@ public:
     static constexpr unsigned numberOfCachedHandlerTrapsOffsets = 5;
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return vm.proxyObjectSpace<mode>();
     }

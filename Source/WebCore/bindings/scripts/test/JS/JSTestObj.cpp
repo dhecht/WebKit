@@ -2818,7 +2818,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestObjPrototype, Base);
         return &vm.plainObjectSpace();
@@ -11807,7 +11807,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestObjPrototypeFunction_toString, (JSGlobalObject* l
     return IDLOperation<JSTestObj>::call<jsTestObjPrototypeFunction_toStringBody>(*lexicalGlobalObject, *callFrame, "toString");
 }
 
-JSC::GCClient::IsoSubspace* JSTestObj::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestObj::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestObj, UseCustomHeapCellType::No>(vm, "JSTestObj"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestObj.get(); },

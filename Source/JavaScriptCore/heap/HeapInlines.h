@@ -233,13 +233,9 @@ void Heap::forEachSlotVisitor(const Func& func)
         func(*visitor);
 }
 
-namespace GCClient {
-
 ALWAYS_INLINE VM& Mutator::vm() const
 {
     return *std::bit_cast<VM*>(std::bit_cast<uintptr_t>(this) - OBJECT_OFFSETOF(VM, mutator));
 }
-
-} // namespace GCClient
 
 } // namespace JSC

@@ -36,7 +36,7 @@ public:
     DECLARE_EXPORT_INFO;
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return vm.setSpace<mode>();
     }

@@ -332,7 +332,7 @@ bool ObjcFallbackObjectImp::toBoolean(JSGlobalObject*) const
     return false;
 }
 
-JSC::GCClient::IsoSubspace* ObjcFallbackObjectImp::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* ObjcFallbackObjectImp::subspaceForImpl(JSC::VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->objcFallbackObjectImpSpace();
 }

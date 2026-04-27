@@ -68,7 +68,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestNamedAndIndexedSetterThrowingExceptionPrototype, Base);
         return &vm.plainObjectSpace();
@@ -409,7 +409,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestNamedAndIndexedSetterThrowingExceptionConstructor
     return JSValue::encode(JSTestNamedAndIndexedSetterThrowingException::getConstructor(vm, prototype->realm()));
 }
 
-JSC::GCClient::IsoSubspace* JSTestNamedAndIndexedSetterThrowingException::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestNamedAndIndexedSetterThrowingException::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestNamedAndIndexedSetterThrowingException, UseCustomHeapCellType::No>(vm, "JSTestNamedAndIndexedSetterThrowingException"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestNamedAndIndexedSetterThrowingException.get(); },

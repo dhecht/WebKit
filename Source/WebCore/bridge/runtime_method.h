@@ -37,7 +37,7 @@ public:
     static constexpr unsigned StructureFlags = Base::StructureFlags | OverridesGetOwnPropertySlot | OverridesGetCallData;
 
     template<typename CellType, JSC::SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         static_assert(sizeof(CellType) == sizeof(RuntimeMethod), "RuntimeMethod subclasses that add fields need to override subspaceFor<>()");
         static_assert(CellType::destroy == JSC::JSCell::destroy);
@@ -73,7 +73,7 @@ protected:
     static bool getOwnPropertySlot(JSObject*, JSGlobalObject*, PropertyName, PropertySlot&);
 
 private:
-    static GCClient::IsoSubspace* NODELETE subspaceForImpl(VM&);
+    static Mutator::IsoSubspace* NODELETE subspaceForImpl(VM&);
 
     Bindings::Method* m_method;
 };

@@ -39,7 +39,7 @@ public:
     static constexpr JSC::DestructionMode needsDestruction = JSC::NeedsDestruction;
 
     template<typename CellType, JSC::SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         static_assert(sizeof(CellType) == sizeof(RuntimeObject), "RuntimeObject subclasses that add fields need to override subspaceFor<>()");
         static_assert(CellType::destroy == RuntimeObject::destroy);
@@ -84,7 +84,7 @@ protected:
     void finishCreation(VM&);
 
 private:
-    static GCClient::IsoSubspace* NODELETE subspaceForImpl(VM&);
+    static Mutator::IsoSubspace* NODELETE subspaceForImpl(VM&);
 
     RefPtr<Instance> m_instance;
 };

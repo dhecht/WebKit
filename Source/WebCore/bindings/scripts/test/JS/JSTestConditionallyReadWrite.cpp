@@ -90,7 +90,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestConditionallyReadWritePrototype, Base);
         return &vm.plainObjectSpace();
@@ -473,7 +473,7 @@ JSC_DEFINE_CUSTOM_SETTER(setJSTestConditionallyReadWrite_enabledConditionallyRea
     return IDLAttribute<JSTestConditionallyReadWrite>::set<setJSTestConditionallyReadWrite_enabledConditionallyReadWriteBySettingAttributePromiseSetter>(*lexicalGlobalObject, thisValue, encodedValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSTestConditionallyReadWrite::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestConditionallyReadWrite::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestConditionallyReadWrite, UseCustomHeapCellType::No>(vm, "JSTestConditionallyReadWrite"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestConditionallyReadWrite.get(); },

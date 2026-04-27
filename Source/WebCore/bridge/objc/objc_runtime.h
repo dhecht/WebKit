@@ -100,7 +100,7 @@ public:
     static constexpr JSC::DestructionMode needsDestruction = JSC::NeedsDestruction;
 
     template<typename CellType, JSC::SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         return subspaceForImpl(vm);
     }
@@ -144,7 +144,7 @@ private:
 
     bool toBoolean(JSGlobalObject*) const; // FIXME: Currently this is broken because none of the superclasses are marked virtual. We need to solve this in the longer term.
 
-    static GCClient::IsoSubspace* NODELETE subspaceForImpl(VM&);
+    static Mutator::IsoSubspace* NODELETE subspaceForImpl(VM&);
 
     RefPtr<ObjcInstance> _instance;
     String m_item;

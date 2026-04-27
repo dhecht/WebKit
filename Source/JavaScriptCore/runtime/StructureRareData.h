@@ -67,7 +67,7 @@ public:
     static constexpr unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
 
     template<typename CellType, SubspaceAccess>
-    inline static GCClient::IsoSubspace* subspaceFor(VM&); // Defined in StructureRareDataInlines.h
+    inline static Mutator::IsoSubspace* subspaceFor(VM&); // Defined in StructureRareDataInlines.h
 
     static StructureRareData* create(VM&, Structure*);
 

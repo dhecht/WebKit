@@ -36,10 +36,6 @@ namespace JSC {
 
 class IsoCellSet;
 
-namespace GCClient {
-class IsoSubspace;
-}
-
 class IsoSubspace final : public Subspace {
     WTF_MAKE_TZONE_ALLOCATED_EXPORT(IsoSubspace, JS_EXPORT_PRIVATE);
 public:
@@ -47,6 +43,7 @@ public:
     JS_EXPORT_PRIVATE ~IsoSubspace() final;
 
     size_t cellSize() { return m_directory.cellSize(); }
+    BlockDirectory* directory() { return &m_directory; }
 
     void sweepLowerTierPreciseCell(PreciseAllocation*);
     void clearIsoCellSetBit(PreciseAllocation*);
@@ -60,8 +57,7 @@ public:
 
 private:
     friend class IsoCellSet;
-    friend class GCClient::IsoSubspace;
-    
+
     void didResizeBits(unsigned newSize) final;
     void didRemoveBlock(unsigned blockIndex) final;
     void didBeginSweepingToFreeList(MarkedBlock::Handle*) final;
@@ -71,34 +67,6 @@ private:
     SentinelLinkedList<PreciseAllocation, BasicRawSentinelNode<PreciseAllocation>> m_lowerTierPreciseFreeList;
     SentinelLinkedList<IsoCellSet, BasicRawSentinelNode<IsoCellSet>> m_cellSets;
 };
-
-
-namespace GCClient {
-
-class IsoSubspace {
-    WTF_MAKE_NONCOPYABLE(IsoSubspace);
-    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(IsoSubspace);
-public:
-    JS_EXPORT_PRIVATE IsoSubspace(JSC::IsoSubspace&);
-    JS_EXPORT_PRIVATE ~IsoSubspace() = default;
-
-    size_t cellSize() { return m_localAllocator.cellSize(); }
-
-    Allocator allocatorFor(size_t, AllocatorForMode);
-
-    void* allocate(VM&, size_t, GCDeferralContext*, AllocationFailureMode);
-
-private:
-    LocalAllocator m_localAllocator;
-};
-
-ALWAYS_INLINE Allocator IsoSubspace::allocatorFor(size_t size, AllocatorForMode)
-{
-    RELEASE_ASSERT(size <= cellSize());
-    return Allocator(&m_localAllocator);
-}
-
-} // namespace GCClient
 
 #define ISO_SUBSPACE_INIT(heap, heapCellType, type) \
     ISO_SUBSPACE_INIT_WITH_NAME(heap, heapCellType, type, #type ""_s)

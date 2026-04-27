@@ -146,7 +146,7 @@ public:
     static const ClassInfo s_info; // This is never accessed directly, since that would break linkage on some compilers.
     static inline const ClassInfo* info();
 
-    template<typename CellType, SubspaceAccess mode> static inline GCClient::IsoSubspace* subspaceFor(VM&);
+    template<typename CellType, SubspaceAccess mode> static inline Mutator::IsoSubspace* subspaceFor(VM&);
     
     ArrayBuffer* existingBuffer();
 

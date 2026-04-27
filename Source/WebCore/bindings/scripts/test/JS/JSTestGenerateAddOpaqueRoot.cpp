@@ -68,7 +68,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestGenerateAddOpaqueRootPrototype, Base);
         return &vm.plainObjectSpace();
@@ -193,7 +193,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestGenerateAddOpaqueRoot_someAttribute, (JSGlobalObj
     return IDLAttribute<JSTestGenerateAddOpaqueRoot>::get<jsTestGenerateAddOpaqueRoot_someAttributeGetter, CastedThisErrorBehavior::Assert>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSTestGenerateAddOpaqueRoot::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestGenerateAddOpaqueRoot::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestGenerateAddOpaqueRoot, UseCustomHeapCellType::No>(vm, "JSTestGenerateAddOpaqueRoot"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestGenerateAddOpaqueRoot.get(); },

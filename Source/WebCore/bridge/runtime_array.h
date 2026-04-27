@@ -40,7 +40,7 @@ public:
     static constexpr JSC::DestructionMode needsDestruction = JSC::NeedsDestruction;
 
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         return subspaceForImpl(vm);
     }
@@ -89,7 +89,7 @@ private:
     RuntimeArray(VM&, Structure*);
     void finishCreation(VM&, Bindings::Array*);
 
-    static JSC::GCClient::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
+    static JSC::Mutator::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
 
     BindingsArray* m_array;
 };

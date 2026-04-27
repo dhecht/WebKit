@@ -82,7 +82,7 @@ public:
     static void destroy(JSCell*);
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::PreciseSubspace* subspaceFor(VM& vm)
+    static Mutator::PreciseSubspace* subspaceFor(VM& vm)
     {
         return vm.webAssemblyInstanceSpace<mode>();
     }

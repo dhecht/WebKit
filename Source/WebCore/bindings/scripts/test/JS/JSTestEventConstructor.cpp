@@ -181,7 +181,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestEventConstructorPrototype, Base);
         return &vm.plainObjectSpace();
@@ -363,7 +363,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsTestEventConstructor_attr3, (JSGlobalObject* lexicalG
 
 #endif
 
-JSC::GCClient::IsoSubspace* JSTestEventConstructor::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestEventConstructor::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestEventConstructor, UseCustomHeapCellType::No>(vm, "JSTestEventConstructor"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestEventConstructor.get(); },

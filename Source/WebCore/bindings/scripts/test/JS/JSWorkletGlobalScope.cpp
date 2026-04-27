@@ -180,7 +180,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsWorkletGlobalScope_WorkletGlobalScopeConstructor, (JS
     return IDLAttribute<JSWorkletGlobalScope>::get<jsWorkletGlobalScope_WorkletGlobalScopeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSWorkletGlobalScope::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSWorkletGlobalScope::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSWorkletGlobalScope, UseCustomHeapCellType::Yes>(vm, "JSWorkletGlobalScope"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForWorkletGlobalScope.get(); },

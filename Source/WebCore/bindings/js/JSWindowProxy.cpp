@@ -178,7 +178,7 @@ WindowProxy* JSWindowProxy::toWrapped(VM&, JSValue value)
     return nullptr;
 }
 
-JSC::GCClient::IsoSubspace* JSWindowProxy::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSWindowProxy::subspaceForImpl(JSC::VM& vm)
 {
     return &downcast<JSVMClientData>(vm.clientData)->windowProxySpace();
 }

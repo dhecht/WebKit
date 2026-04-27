@@ -36,13 +36,13 @@ public:
     static JSIDBSerializationGlobalObject* create(JSC::VM&, JSC::Structure*, Ref<DOMWrapperWorld>&&);
 
     template<typename, JSC::SubspaceAccess mode>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         if constexpr (mode == JSC::SubspaceAccess::Concurrently)
             return nullptr;
         return subspaceForImpl(vm);
     }
-    static JSC::GCClient::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
+    static JSC::Mutator::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
 
     DECLARE_INFO;
     static JSC::Structure* createStructure(JSC::VM&, JSC::JSValue prototype);

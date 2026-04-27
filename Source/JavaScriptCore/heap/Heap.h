@@ -115,9 +115,7 @@ namespace Wasm {
 class Callee;
 }
 
-namespace GCClient {
 class Mutator;
-}
 
 #define FOR_EACH_JSC_COMMON_ISO_SUBSPACE(v) \
     v(arraySpace, cellHeapCellType, JSArray) \
@@ -673,7 +671,7 @@ private:
     class HeapThread;
     friend class HeapThread;
 
-    friend class GCClient::Mutator;
+    friend class Mutator;
 
     static constexpr size_t minExtraMemory = 256;
     
@@ -1249,18 +1247,39 @@ public:
     CString m_signpostMessage;
 };
 
-namespace GCClient {
-
 class Mutator {
     WTF_MAKE_NONCOPYABLE(Mutator);
 public:
+    class IsoSubspace {
+        WTF_MAKE_NONCOPYABLE(IsoSubspace);
+        WTF_DEPRECATED_MAKE_FAST_ALLOCATED(IsoSubspace);
+    public:
+        JS_EXPORT_PRIVATE IsoSubspace(JSC::IsoSubspace&);
+        JS_EXPORT_PRIVATE ~IsoSubspace() = default;
+
+        size_t cellSize() { return m_localAllocator.cellSize(); }
+
+        Allocator allocatorFor(size_t size, AllocatorForMode)
+        {
+            RELEASE_ASSERT(size <= cellSize());
+            return Allocator(&m_localAllocator);
+        }
+
+        void* allocate(VM&, size_t, GCDeferralContext*, AllocationFailureMode);
+
+    private:
+        LocalAllocator m_localAllocator;
+    };
+
+    using PreciseSubspace = JSC::PreciseSubspace;
+
     Mutator(JSC::Heap&);
     ~Mutator();
 
     inline VM& vm() const;
     JSC::Heap& heap() { return m_heap; }
 
-    // FIXME GlobalGC: need a GCClient::Mutator::lastChanceToFinalize() and in there,
+    // FIXME GlobalGC: need a Mutator::lastChanceToFinalize() and in there,
     // relinquish memory from the IsoSubspace LocalAllocators back to the server.
     // Currently, this is being handled by BlockDirectory::stopAllocatingForGood().
 
@@ -1300,10 +1319,8 @@ private:
     IsoSubspace programExecutableSpace;
     IsoSubspace unlinkedFunctionExecutableSpace;
 
-    friend class JSC::VM;
+    friend class VM;
 };
-
-} // namespace GCClient
 
 } // namespace JSC
 

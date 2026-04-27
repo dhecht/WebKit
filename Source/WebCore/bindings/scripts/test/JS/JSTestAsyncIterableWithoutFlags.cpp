@@ -73,7 +73,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestAsyncIterableWithoutFlagsPrototype, Base);
         return &vm.plainObjectSpace();
@@ -198,7 +198,7 @@ public:
     using Base = TestAsyncIterableWithoutFlagsIteratorBase;
     DECLARE_INFO;
 
-    template<typename, SubspaceAccess mode> static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    template<typename, SubspaceAccess mode> static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         if constexpr (mode == JSC::SubspaceAccess::Concurrently)
             return nullptr;
@@ -259,7 +259,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestAsyncIterableWithoutFlagsPrototypeFunction_values
 JSC_ANNOTATE_HOST_FUNCTION(TestAsyncIterableWithoutFlagsIteratorBaseOnPromiseSettled, TestAsyncIterableWithoutFlagsIteratorBase::onPromiseSettled);
 JSC_ANNOTATE_HOST_FUNCTION(TestAsyncIterableWithoutFlagsIteratorBaseOnPromiseFulfilled, TestAsyncIterableWithoutFlagsIteratorBase::onPromiseFulFilled);
 JSC_ANNOTATE_HOST_FUNCTION(TestAsyncIterableWithoutFlagsIteratorBaseOnPromiseRejected, TestAsyncIterableWithoutFlagsIteratorBase::onPromiseRejected);
-JSC::GCClient::IsoSubspace* JSTestAsyncIterableWithoutFlags::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestAsyncIterableWithoutFlags::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestAsyncIterableWithoutFlags, UseCustomHeapCellType::No>(vm, "JSTestAsyncIterableWithoutFlags"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestAsyncIterableWithoutFlags.get(); },

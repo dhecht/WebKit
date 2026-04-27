@@ -74,7 +74,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSExposedStarPrototype, Base);
         return &vm.plainObjectSpace();
@@ -243,7 +243,7 @@ JSC_DEFINE_HOST_FUNCTION(jsExposedStarPrototypeFunction_operationJustForWorkerCo
     return IDLOperation<JSExposedStar>::call<jsExposedStarPrototypeFunction_operationJustForWorkerContextsBody>(*lexicalGlobalObject, *callFrame, "operationJustForWorkerContexts");
 }
 
-JSC::GCClient::IsoSubspace* JSExposedStar::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSExposedStar::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSExposedStar, UseCustomHeapCellType::No>(vm, "JSExposedStar"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForExposedStar.get(); },

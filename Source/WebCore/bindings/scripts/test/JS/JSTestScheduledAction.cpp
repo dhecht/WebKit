@@ -73,7 +73,7 @@ public:
 
     DECLARE_INFO;
     template<typename CellType, JSC::SubspaceAccess>
-    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(JSTestScheduledActionPrototype, Base);
         return &vm.plainObjectSpace();
@@ -206,7 +206,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestScheduledActionPrototypeFunction_method, (JSGloba
     return IDLOperation<JSTestScheduledAction>::call<jsTestScheduledActionPrototypeFunction_methodBody>(*lexicalGlobalObject, *callFrame, "method");
 }
 
-JSC::GCClient::IsoSubspace* JSTestScheduledAction::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestScheduledAction::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestScheduledAction, UseCustomHeapCellType::No>(vm, "JSTestScheduledAction"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestScheduledAction.get(); },

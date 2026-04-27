@@ -396,7 +396,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsDOMWindow_TestPromiseRejectionEventConstructor, (JSGl
     return IDLAttribute<JSDOMWindow>::get<jsDOMWindow_TestPromiseRejectionEventConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSDOMWindow::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSDOMWindow::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSDOMWindow, UseCustomHeapCellType::Yes>(vm, "JSDOMWindow"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForDOMWindow.get(); },

@@ -3423,13 +3423,13 @@ sub GenerateHeader
         }
     }
 
-    push(@headerContent, "    template<typename, JSC::SubspaceAccess mode> static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)\n");
+    push(@headerContent, "    template<typename, JSC::SubspaceAccess mode> static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)\n");
     push(@headerContent, "    {\n");
     push(@headerContent, "        if constexpr (mode == JSC::SubspaceAccess::Concurrently)\n");
     push(@headerContent, "            return nullptr;\n");
     push(@headerContent, "        return subspaceForImpl(vm);\n");
     push(@headerContent, "    }\n");
-    push(@headerContent, "    static JSC::GCClient::IsoSubspace* subspaceForImpl(JSC::VM& vm);\n");
+    push(@headerContent, "    static JSC::Mutator::IsoSubspace* subspaceForImpl(JSC::VM& vm);\n");
 
     # visit function
     if ($needsVisitChildren) {
@@ -5406,7 +5406,7 @@ sub GenerateImplementation
     AddToImplIncludes("<JavaScriptCore/JSDestructibleObjectHeapCellType.h>");
     AddToImplIncludes("<JavaScriptCore/SlotVisitorMacros.h>");
     AddToImplIncludes("<JavaScriptCore/SubspaceInlines.h>");
-    push(@implContent, "JSC::GCClient::IsoSubspace* ${className}::subspaceForImpl(JSC::VM& vm)\n");
+    push(@implContent, "JSC::Mutator::IsoSubspace* ${className}::subspaceForImpl(JSC::VM& vm)\n");
     push(@implContent, "{\n");
 
     my $isGlobal = IsDOMGlobalObject($interface);
@@ -7620,7 +7620,7 @@ public:
     using Base = ${iteratorName}Base;
     DECLARE_INFO;
 
-    template<typename, SubspaceAccess mode> static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
+    template<typename, SubspaceAccess mode> static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)
     {
         if constexpr (mode == JSC::SubspaceAccess::Concurrently)
             return nullptr;
@@ -8545,7 +8545,7 @@ sub GeneratePrototypeDeclaration
     push(@$outputArray, "    DECLARE_INFO;\n");
 
     push(@$outputArray, "    template<typename CellType, JSC::SubspaceAccess>\n");
-    push(@$outputArray, "    static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)\n");
+    push(@$outputArray, "    static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm)\n");
     push(@$outputArray, "    {\n");
     push(@$outputArray, "        STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(${prototypeClassName}, Base);\n");
     push(@$outputArray, "        return &vm.plainObjectSpace();\n");

@@ -120,7 +120,7 @@ Structure* JSCallbackObject<JSGlobalObject>::createStructure(VM& vm, JSGlobalObj
 }
 
 template <>
-GCClient::IsoSubspace* JSCallbackObject<JSNonFinalObject>::subspaceForImpl(VM& vm, SubspaceAccess mode)
+Mutator::IsoSubspace* JSCallbackObject<JSNonFinalObject>::subspaceForImpl(VM& vm, SubspaceAccess mode)
 {
     switch (mode) {
     case SubspaceAccess::OnMainThread:
@@ -133,7 +133,7 @@ GCClient::IsoSubspace* JSCallbackObject<JSNonFinalObject>::subspaceForImpl(VM& v
 }
 
 template <>
-GCClient::IsoSubspace* JSCallbackObject<JSGlobalObject>::subspaceForImpl(VM& vm, SubspaceAccess mode)
+Mutator::IsoSubspace* JSCallbackObject<JSGlobalObject>::subspaceForImpl(VM& vm, SubspaceAccess mode)
 {
     switch (mode) {
     case SubspaceAccess::OnMainThread:

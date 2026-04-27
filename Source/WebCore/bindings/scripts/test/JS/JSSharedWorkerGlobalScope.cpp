@@ -185,7 +185,7 @@ JSC_DEFINE_CUSTOM_GETTER(jsSharedWorkerGlobalScope_SharedWorkerGlobalScopeConstr
     return IDLAttribute<JSSharedWorkerGlobalScope>::get<jsSharedWorkerGlobalScope_SharedWorkerGlobalScopeConstructorGetter>(*lexicalGlobalObject, thisValue, attributeName);
 }
 
-JSC::GCClient::IsoSubspace* JSSharedWorkerGlobalScope::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSSharedWorkerGlobalScope::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSSharedWorkerGlobalScope, UseCustomHeapCellType::Yes>(vm, "JSSharedWorkerGlobalScope"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForSharedWorkerGlobalScope.get(); },

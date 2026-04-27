@@ -47,7 +47,7 @@ public:
     static constexpr JSC::DestructionMode needsDestruction = JSC::NeedsDestruction;
     static void destroy(JSCell*);
 
-    template<typename CellType, JSC::SubspaceAccess> static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm) { return subspaceForImpl(vm); }
+    template<typename CellType, JSC::SubspaceAccess> static JSC::Mutator::IsoSubspace* subspaceFor(JSC::VM& vm) { return subspaceForImpl(vm); }
 
     static JSWindowProxy& create(JSC::VM&, DOMWindow&, DOMWrapperWorld&);
 
@@ -74,7 +74,7 @@ private:
     JSWindowProxy(JSC::VM&, JSC::Structure&, DOMWrapperWorld&);
     ~JSWindowProxy();
     void finishCreation(JSC::VM&, DOMWindow&);
-    static JSC::GCClient::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
+    static JSC::Mutator::IsoSubspace* NODELETE subspaceForImpl(JSC::VM&);
 
 #if ENABLE(WINDOW_PROXY_PROPERTY_ACCESS_NOTIFICATION)
     static bool getOwnPropertySlot(JSC::JSObject*, JSC::JSGlobalObject*, JSC::PropertyName, JSC::PropertySlot&);

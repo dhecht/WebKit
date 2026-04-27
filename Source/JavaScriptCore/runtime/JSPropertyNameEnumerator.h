@@ -53,7 +53,7 @@ public:
     static constexpr uint8_t enumerationModeMask = (GenericMode << 1) - 1;
 
     template<typename CellType, SubspaceAccess mode>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
+    static Mutator::IsoSubspace* subspaceFor(VM& vm)
     {
         return &vm.propertyNameEnumeratorSpace();
     }

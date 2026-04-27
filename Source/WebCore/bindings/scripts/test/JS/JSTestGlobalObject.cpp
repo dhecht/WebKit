@@ -1937,7 +1937,7 @@ JSC_DEFINE_HOST_FUNCTION(jsTestGlobalObjectInstanceFunction_testFeatureGetSecret
 
 #endif
 
-JSC::GCClient::IsoSubspace* JSTestGlobalObject::subspaceForImpl(JSC::VM& vm)
+JSC::Mutator::IsoSubspace* JSTestGlobalObject::subspaceForImpl(JSC::VM& vm)
 {
     return WebCore::subspaceForImpl<JSTestGlobalObject, UseCustomHeapCellType::Yes>(vm, "JSTestGlobalObject"_s,
         [] (auto& spaces) { return spaces.m_clientSubspaceForTestGlobalObject.get(); },
