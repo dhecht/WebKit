@@ -120,9 +120,16 @@ public:
     Ref<CodeOriginPool> codeOrigins;
     
     FixedVector<Identifier> m_dfgIdentifiers;
+
+    // These are weak in the ValueStrength sense: the Executable to CodeBlock edge is strong only
+    // if all of m_weakReferences and m_weakStructureReferences are live. m_transitions is used to mark a
+    // transition's new structure while its old one is live, so that test does not fail
+    // needlessly. Once marked, the CodeBlock strongly holds all of these (as well as the StrongValues),
+    // since they are baked into the code.
     FixedVector<WeakReferenceTransition> m_transitions;
     FixedVector<WriteBarrier<JSCell>> m_weakReferences;
     FixedVector<StructureID> m_weakStructureReferences;
+
     FixedVector<CatchEntrypointData> m_catchEntrypoints;
     FixedVector<CodeBlockJettisoningWatchpoint> m_watchpoints;
     FixedVector<AdaptiveStructureWatchpoint> m_adaptiveStructureWatchpoints;
